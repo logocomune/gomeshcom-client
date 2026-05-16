@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"src_type\":\"lora\",\"type\":\"tele\",\"src\":\"I5EKX-11,IW5AKT-10,IZ5PFI-1\",\"batt\":0,\"temp1\":0,\"temp2\":0,\"hum\":0,\"qfe\":0,\"qnh\":0,\"gas\":0,\"co2\":0}")

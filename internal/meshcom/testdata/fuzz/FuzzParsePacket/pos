@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"src_type\":\"node\",\"type\":\"pos\",\"src\":\"OE1ABC-1\",\"msg\":\"\",\"lat\":48,\"lat_dir\":\"N\",\"long\":16,\"long_dir\":\"E\",\"aprs_symbol\":\"#\",\"aprs_symbol_group\":\"/\",\"hw_id\":\"MAC\",\"msg_id\":\"ABC\",\"alt\":123,\"batt\":85,\"firmware\":\"4.35\",\"fw_sub\":\"p\",\"rssi\":-90,\"snr\":8}")

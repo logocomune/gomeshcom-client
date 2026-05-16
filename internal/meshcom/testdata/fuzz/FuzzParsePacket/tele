@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"src_type\":\"node\",\"type\":\"tele\",\"src\":\"OE1ABC-1\",\"temp1\":9.99,\"temp2\":8.88,\"hum\":50,\"qfe\":999.9,\"qnh\":1001.1,\"gas\":9.9,\"co2\":400}")

@@ -1,0 +1,40 @@
+# Git and CI
+.git/
+.github/
+
+# Editor and AI tooling
+.cursor/
+.kiro/
+.claude/
+.code-review-graph/
+
+# Go build artifacts
+bin/
+gomeshcomd
+dist/
+
+# Runtime data
+data/
+
+# Documentation and scripts (not needed in image)
+docs/
+build.sh
+*.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.code-review-graph/**
+
+# Frontend build cache (rebuilt inside Docker)
+web/node_modules/
+web/.svelte-kit/
+
+# Compiled frontend (rebuilt inside Docker)
+internal/webui/dist/
+
+# Unrelated subdirectories
+orizzonte/
+MeshCom-Firmware/
+
+# Secrets
+.env*

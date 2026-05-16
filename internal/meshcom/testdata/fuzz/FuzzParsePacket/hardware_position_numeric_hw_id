@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"src_type\":\"lora\",\"type\":\"pos\",\"src\":\"I5EKX-11,IW5AKT-10,IZ5PFI-1\",\"msg\":\"\",\"lat\":43.5076,\"lat_dir\":\"N\",\"long\":10.3476,\"long_dir\":\"E\",\"aprs_symbol\":\"&\",\"aprs_symbol_group\":\"/\",\"hw_id\":4,\"msg_id\":\"AB39600F\",\"alt\":367,\"batt\":0,\"firmware\":35,\"fw_sub\":\"p\",\"rssi\":-108,\"snr\":1}")

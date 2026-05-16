@@ -1,0 +1,117 @@
+# goMeshCom
+
+Web client for the [MeshCom](https://icssw.org/en/meshcom/) mesh radio network.
+Listens for UDP packets from a local MeshCom node and provides a browser UI for real-time monitoring, chat, and node tracking.
+
+![goMeshCom web interface](images/screenshot01.jpg)
+
+## Quick Start
+
+**Prerequisites:** a MeshCom node reachable on your local network (default UDP port 1799).
+
+### Binary
+
+```bash
+./gomeshcomd --my-call="XX0YY-1"
+```
+
+Open `http://localhost:8080`.
+
+The node address is **auto-detected** from the first incoming UDP packet — no further configuration needed for typical setups.
+
+### Docker
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -p 1799:1799/udp \
+  -v gomeshcom-data:/data \
+  -e GOMESHCOM_MY_CALL=XX0YY-1 \
+  -e GOMESHCOM_HTTP_ADDR=0.0.0.0:8080 \
+  ghcr.io/logocomune/gomeshcom:latest
+```
+
+Open `http://<host-ip>:8080`.
+
+If the node does not broadcast automatically, or you want to pin the address, set it explicitly — this disables auto-detection:
+
+```bash
+-e GOMESHCOM_NODE_ADDR=192.168.1.100:1799
+```
+
+### Optional Web UI Authentication
+
+For shared LAN deployments, protect the UI and API with a username and password:
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -p 1799:1799/udp \
+  -v gomeshcom-data:/data \
+  -e GOMESHCOM_MY_CALL=XX0YY-1 \
+  -e GOMESHCOM_HTTP_ADDR=0.0.0.0:8080 \
+  -e GOMESHCOM_AUTH_USERNAME=meshcom \
+  -e GOMESHCOM_AUTH_PASSWORD=change-me \
+  ghcr.io/logocomune/gomeshcom:latest
+```
+
+When authentication is enabled:
+
+- unauthenticated API and SSE requests return `401 Unauthorized`
+- the browser UI opens a sign-in modal
+- successful login creates an HTTP-only session cookie
+
+Keep the browser on the same origin as the Go server (for example `http://192.168.1.50:8080`) so REST and SSE can reuse the same session cookie.
+
+## Features
+
+- Real-time packet stream via Server-Sent Events
+- Chat per conversation (broadcast, channels, direct messages)
+- Node map with OpenLayers — color-coded by freshness, clustering for dense areas
+- Outgoing messages with duplicate suppression
+- Multi-arch Docker image (`linux/amd64`, `linux/arm64`)
+
+## Configuration
+
+All options via environment variable or CLI flag (prefix `GOMESHCOM_`).
+
+| Variable | Default | Description |
+|---|---|---|
+| `GOMESHCOM_MY_CALL` | `XX0XX-1` | **Required.** Your station callsign (e.g. `IU5PMP-1`) |
+| `GOMESHCOM_NODE_ADDR` | *(empty)* | Node UDP address. When empty, learned from the first incoming UDP packet. When set, used as-is — auto-detect is disabled. |
+| `GOMESHCOM_HTTP_ADDR` | `127.0.0.1:8080` | HTTP listen address |
+| `GOMESHCOM_UDP_LISTEN_ADDR` | `0.0.0.0:1799` | UDP listen address |
+| `GOMESHCOM_DATA_DIR` | `./data` | Persistent data directory |
+| `GOMESHCOM_SEND_DELAY` | `40s` | Minimum delay between outgoing messages |
+| `GOMESHCOM_MAX_MESSAGE_LENGTH` | `149` | Maximum outgoing message length (UTF-8 chars) |
+| `GOMESHCOM_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
+| `GOMESHCOM_RECEIVE_LOG_ENABLED` | `true` | Write received UDP packets to JSONL |
+| `GOMESHCOM_RECEIVE_LOG_RETENTION_DAYS` | `365` | Daily log files to keep |
+| `GOMESHCOM_RECEIVE_LOG_REPLAY_WINDOW` | `1h` | Packets replayed on SSE reconnect |
+| `GOMESHCOM_CHAT_LOG_HISTORY_WINDOW` | `24h` | Default chat history window |
+| `GOMESHCOM_CHAT_LOG_MAX_HISTORY_WINDOW` | `720h` | Maximum chat history via API |
+| `GOMESHCOM_SEND_DEDUP_TTL` | `2s` | Duplicate suppression window (`0` disables) |
+| `GOMESHCOM_AUTH_USERNAME` | *(empty)* | Optional HTTP auth username. Must be set together with `GOMESHCOM_AUTH_PASSWORD`. |
+| `GOMESHCOM_AUTH_PASSWORD` | *(empty)* | Optional HTTP auth password. Must be set together with `GOMESHCOM_AUTH_USERNAME`. |
+| `GOMESHCOM_AUTH_SESSION_TTL` | `24h` | Session lifetime after successful login |
+| `GOMESHCOM_AUTH_COOKIE_NAME` | `meshcom_session` | Session cookie name |
+
+## Build from Source
+
+```bash
+# Requires Go 1.26+ and Node.js 22+
+./build.sh
+# Output: bin/
+```
+
+## Disclaimer
+
+> **Provided "as is", without warranty of any kind.**
+>
+> Use of this software for radio communications is subject to the regulations of your national telecommunications authority. The user is solely responsible for compliance with applicable laws and licensing requirements.
+>
+> Not affiliated with the MeshCom project or its developers.
+
+## License
+
+See [LICENSE](LICENSE) for details.

@@ -1,0 +1,75 @@
+# code-review-graph
+.code-review-graph/
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/
+.cursor/
+.kiro/
+*.swp
+*.swo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Logs and runtime output
+*.log
+logs/
+tmp/
+temp/
+
+# Runtime data — ignore everything except skeleton markers
+data/*
+!data/*/
+data/*/*
+!data/*/.gitkeep
+.code-review-graph/**
+
+# Go build artifacts
+bin/
+/gomeshcomd
+*.test
+*.out
+coverage/
+coverage.html
+coverage.txt
+*.prof
+
+# GoReleaser output
+dist/
+
+# Frontend dependencies, caches, and build output
+**/node_modules/
+**/.svelte-kit/
+**/build/
+**/.output/
+**/.vite/
+**/.vite-temp/
+**/test-results/
+**/playwright-report/
+
+# Compiled frontend embedded in binary
+internal/webui/dist/
+
+# Package manager caches
+.npm/
+.pnpm-store/
+.yarn/
+
+
+.code-review-graphignore
+.code-review-graphignore/**
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.mcp.json
+.opencode.json
+.cursorrules
+.windsurfrules
+data/

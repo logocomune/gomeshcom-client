@@ -1,0 +1,14 @@
+FROM gcr.io/distroless/static-debian12
+
+COPY gomeshcomd /gomeshcomd
+
+VOLUME ["/data"]
+
+ENV GOMESHCOM_HTTP_ADDR=0.0.0.0:8080
+ENV GOMESHCOM_DATA_DIR=/data
+ENV GOMESHCOM_RECEIVE_LOG_PATH=/data/raw
+
+EXPOSE 8080
+EXPOSE 1799/udp
+
+ENTRYPOINT ["/gomeshcomd"]

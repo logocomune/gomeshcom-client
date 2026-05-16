@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"src_type\":\"lora\",\"type\":\"msg\",\"src\":\"OE1XAR-32,IZ5PFI-12\",\"dst\":\"*\",\"msg\":\"{CET}2026-05-14 19:14:19\",\"msg_id\":\"6A01DD09\",\"firmware\":0,\"fw_sub\":\"#\",\"rssi\":-108,\"snr\":0}")

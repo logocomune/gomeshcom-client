@@ -1,0 +1,556 @@
+openapi: 3.0.3
+info:
+  title: gomeshcomd API
+  version: 0.3.0
+  description: |
+    HTTP and Server-Sent Events API exposed by gomeshcomd.
+    Static frontend routes are served by the same HTTP listener but are not
+    part of this API contract.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Default local server
+tags:
+  - name: Health
+    description: Service health
+  - name: Messages
+    description: Outgoing MeshCom messages
+  - name: Positions
+    description: Persisted MeshCom node positions
+  - name: Events
+    description: Server-Sent Events stream
+  - name: Chat
+    description: Disk-backed chat history
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Return service health
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                ok:
+                  value:
+                    status: ok
+  /api/messages:
+    post:
+      tags: [Messages]
+      summary: Send an outgoing text message over UDP
+      description: |
+        Validates the request, suppresses immediate duplicates via the send
+        cache, then sends the message through the configured UDP bridge.
+      operationId: createMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMessageRequest"
+            examples:
+              broadcast:
+                value:
+                  dst: "*"
+                  msg: hello
+      responses:
+        "202":
+          description: Message accepted for UDP send.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutgoingText"
+        "400":
+          description: Invalid JSON or invalid message fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidJson:
+                  value:
+                    error: invalid json
+                emptyMessage:
+                  value:
+                    error: message is required
+        "429":
+          description: Duplicate message suppressed by send cache.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: Seconds before retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateResponse"
+        "502":
+          description: UDP send failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: UDP bridge is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/positions:
+    get:
+      tags: [Positions]
+      summary: Return persisted node positions
+      operationId: listPositions
+      responses:
+        "200":
+          description: Map keyed by source callsign.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/PositionRecord"
+              examples:
+                oneNode:
+                  value:
+                    QQ1ABC-1:
+                      lat: 48.1
+                      lng: 16.3
+                      alt: 123
+                      hw_id: "42"
+                      firstseen: "2026-05-15T10:00:00Z"
+                      lastseen: "2026-05-15T10:05:00Z"
+                      lastdirectseen: "2026-05-15T10:05:00Z"
+                      rssi: -90
+                      snr: 8
+                      via:
+                        - QQ5AKT-10
+                        - QQ5PFI-1
+  /api/events:
+    get:
+      tags: [Events]
+      summary: Stream live and replayed events
+      description: |
+        Opens a Server-Sent Events stream.
+
+        The stream starts with a `heartbeat` event, then emits
+        `station.identity`, optionally `positions.snapshot`, then recent
+        replayed `packet.received` events from the raw receive log, followed by
+        live events. A `heartbeat` event is sent every 15 seconds.
+      operationId: streamEvents
+      responses:
+        "200":
+          description: Server-Sent Events stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                startup:
+                  value: |
+                    event: heartbeat
+                    data: {}
+
+                    event: station.identity
+                    data: {"callsign":"QQ0XX-1"}
+
+                    event: positions.snapshot
+                    data: {}
+        "500":
+          description: Streaming unsupported by the response writer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/chat/list:
+    get:
+      tags: [Chat]
+      summary: List discovered chat conversations
+      operationId: listConversations
+      responses:
+        "200":
+          description: Conversation list sorted by last seen descending.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+        "500":
+          description: Chat log directory could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/chat/{conversation}:
+    get:
+      tags: [Chat]
+      summary: Return chat history for one conversation
+      operationId: getConversation
+      parameters:
+        - name: conversation
+          in: path
+          required: true
+          description: Conversation ID. Accepted forms are `P_broadcast`, `P_<channel>`, and `DM_<CALLSIGN>`.
+          schema:
+            type: string
+            pattern: "^(P_broadcast|P_\\d+|DM_[A-Z0-9_-]+)$"
+          examples:
+            broadcast:
+              value: P_broadcast
+            channel:
+              value: P_262
+            direct:
+              value: DM_QQ1ABC-7
+        - name: hours
+          in: query
+          required: false
+          description: History window in hours. Defaults to server config and is capped by server config.
+          schema:
+            type: number
+            format: double
+            exclusiveMinimum: true
+            minimum: 0
+      responses:
+        "200":
+          description: Chat records sorted ascending by receive time.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatRecord"
+        "400":
+          description: Invalid conversation ID or hours parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Chat history could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Chat]
+      summary: Delete chat history for one conversation
+      operationId: deleteConversation
+      parameters:
+        - name: conversation
+          in: path
+          required: true
+          description: Conversation ID.
+          schema:
+            type: string
+            pattern: "^(P_broadcast|P_\\d+|DM_[A-Z0-9_-]+)$"
+      responses:
+        "204":
+          description: Conversation deleted successfully.
+        "400":
+          description: Invalid conversation ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Chatlog is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Conversation could not be deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: invalid json
+    DuplicateResponse:
+      type: object
+      required: [error, retry_after_ms]
+      properties:
+        error:
+          type: string
+          example: duplicate
+        retry_after_ms:
+          type: integer
+          example: 2000
+    CreateMessageRequest:
+      type: object
+      required: [dst, msg]
+      properties:
+        dst:
+          type: string
+          description: Destination callsign or group target. `*` means broadcast.
+          example: "*"
+        msg:
+          type: string
+          description: UTF-8 message text. Maximum length follows server config.
+          example: hello
+    OutgoingText:
+      type: object
+      required: [type, dst, msg]
+      properties:
+        type:
+          $ref: "#/components/schemas/PacketType"
+        dst:
+          type: string
+          example: "*"
+        msg:
+          type: string
+          example: hello
+    Conversation:
+      type: object
+      required: [id, kind, label, last_seen, size]
+      properties:
+        id:
+          type: string
+          example: DM_QQ1ABC-7
+        kind:
+          type: string
+          enum: [broadcast, channel, dm]
+          example: dm
+        label:
+          type: string
+          example: QQ1ABC-7
+        last_seen:
+          type: string
+          format: date-time
+        size:
+          type: integer
+          format: int64
+          example: 4096
+    ChatRecord:
+      type: object
+      required: [received_at, msg]
+      properties:
+        received_at:
+          type: string
+          format: date-time
+        src:
+          type: string
+          example: QQ1ABC-1
+        src_type:
+          type: string
+          enum: [lora, udp, node]
+        dst:
+          type: string
+          example: "*"
+        msg_id:
+          type: string
+          example: 5DFC7187
+        msg:
+          type: string
+          example: hello
+        rssi:
+          type: integer
+          example: -95
+        snr:
+          type: integer
+          example: 12
+    TextMessage:
+      type: object
+      required: [type, msg]
+      properties:
+        type:
+          $ref: "#/components/schemas/PacketType"
+        src:
+          type: string
+          example: QQ1ABC-1
+        dst:
+          type: string
+          example: "*"
+        msg:
+          type: string
+          example: hello
+        msg_id:
+          type: string
+          example: 5DFC7187
+        src_type:
+          type: string
+          enum: [lora, udp, node]
+          example: lora
+        firmware:
+          oneOf:
+            - type: string
+            - type: number
+          example: "4.35"
+        fw_sub:
+          oneOf:
+            - type: string
+            - type: number
+          example: p
+        rssi:
+          type: integer
+          example: -95
+        snr:
+          type: integer
+          example: 12
+    PositionRecord:
+      type: object
+      required: [lat, lng, alt, firstseen, lastseen, rssi, snr, via]
+      properties:
+        lat:
+          type: number
+          format: double
+          example: 48.1
+        lng:
+          type: number
+          format: double
+          example: 16.3
+        alt:
+          type: integer
+          example: 123
+        hw_id:
+          type: string
+          example: "42"
+        firstseen:
+          type: string
+          format: date-time
+        lastseen:
+          type: string
+          format: date-time
+        lastdirectseen:
+          type: string
+          format: date-time
+        rssi:
+          type: integer
+          example: -90
+        snr:
+          type: integer
+          example: 8
+        via:
+          type: array
+          items:
+            type: string
+          example: [QQ5AKT-10, QQ5PFI-1]
+    PacketReceivedEvent:
+      type: object
+      required: [remote_addr, packet]
+      properties:
+        remote_addr:
+          type: string
+          example: 192.168.0.2:1799
+        packet:
+          oneOf:
+            - $ref: "#/components/schemas/TextMessage"
+            - $ref: "#/components/schemas/PositionPacket"
+            - $ref: "#/components/schemas/TelemetryPacket"
+    StationIdentityEvent:
+      type: object
+      required: [callsign]
+      properties:
+        callsign:
+          type: string
+          example: QQ0XX-1
+    PositionsSnapshotEvent:
+      type: object
+      additionalProperties:
+        $ref: "#/components/schemas/PositionRecord"
+    PositionPacket:
+      type: object
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/PacketType"
+        src:
+          type: string
+        msg:
+          type: string
+        msg_id:
+          type: string
+        src_type:
+          type: string
+          enum: [lora, udp, node]
+        lat:
+          type: number
+          format: double
+        lat_dir:
+          type: string
+          enum: [N, S]
+        long:
+          type: number
+          format: double
+        long_dir:
+          type: string
+          enum: [E, W]
+        aprs_symbol:
+          type: string
+        aprs_symbol_group:
+          type: string
+        hw_id:
+          oneOf:
+            - type: string
+            - type: number
+        alt:
+          type: integer
+        batt:
+          type: integer
+        firmware:
+          oneOf:
+            - type: string
+            - type: number
+        fw_sub:
+          oneOf:
+            - type: string
+            - type: number
+        rssi:
+          type: integer
+        snr:
+          type: integer
+    TelemetryPacket:
+      type: object
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/PacketType"
+        src:
+          type: string
+        src_type:
+          type: string
+          enum: [lora, udp, node]
+        temp1:
+          type: number
+          format: double
+        temp2:
+          type: number
+          format: double
+        hum:
+          type: number
+          format: double
+        batt:
+          type: integer
+        qfe:
+          type: number
+          format: double
+        qnh:
+          type: number
+          format: double
+        gas:
+          type: number
+          format: double
+        co2:
+          type: number
+          format: double
+    PacketType:
+      type: string
+      enum: [msg, pos, tele]

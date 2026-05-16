@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"src_type\":\"node\",\"type\":\"msg\",\"src\":\"OE1ABC-1\",\"dst\":\"*\",\"msg\":\"hello\",\"msg_id\":\"ABC\",\"firmware\":\"4.35\",\"fw_sub\":\"p\",\"rssi\":-90,\"snr\":8}")
