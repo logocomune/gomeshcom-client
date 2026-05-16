@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [0.4.1] - 2026-05-16
+
+### Fixed
+
+- `crypto.randomUUID` not available in non-secure contexts (plain HTTP): SSE event ID generation now falls back to a `Date.now` + `Math.random` based ID when the Web Crypto API is unavailable.
+
+---
+
 ## [0.4.0] - 2026-05-16
 
 ### Added

@@ -47,10 +47,17 @@ export function connectEvents(handlers: {
 		}
 	}
 
+	function generateId(): string {
+		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+			return crypto.randomUUID();
+		}
+		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+	}
+
 	function push(type: string, data: unknown) {
 		resetHeartbeat();
 		handlers.onEvent({
-			id: crypto.randomUUID(),
+			id: generateId(),
 			type,
 			receivedAt: new Date().toISOString(),
 			data
