@@ -140,8 +140,19 @@
 				return;
 			}
 			const clustered = feature.get('features') as any[] | undefined;
-			if (!clustered || clustered.length === 0) return;
-			if (clustered.length === 1) {
+			if (clustered === undefined) {
+				const position = feature.get('position') as MapPosition | undefined;
+				if (!position) {
+					tooltip.setPosition(undefined);
+					tooltipElement.classList.add('hidden');
+					return;
+				}
+				tooltipElement.innerHTML = buildTooltipHtml(position);
+			} else if (clustered.length === 0) {
+				tooltip.setPosition(undefined);
+				tooltipElement.classList.add('hidden');
+				return;
+			} else if (clustered.length === 1) {
 				const position = clustered[0].get('position') as MapPosition;
 				tooltipElement.innerHTML = buildTooltipHtml(position);
 			} else {
@@ -157,8 +168,16 @@
 
 		map.on('click', (event: any) => {
 			const feature = map.forEachFeatureAtPixel(event.pixel, (candidate: any) => candidate);
-			const clustered = feature?.get('features') as any[] | undefined;
-			selectedPosition = clustered?.length === 1 ? (clustered[0].get('position') ?? null) : null;
+			if (!feature) {
+				selectedPosition = null;
+				return;
+			}
+			const clustered = feature.get('features') as any[] | undefined;
+			if (clustered === undefined) {
+				selectedPosition = (feature.get('position') as MapPosition) ?? null;
+			} else {
+				selectedPosition = clustered.length === 1 ? (clustered[0].get('position') ?? null) : null;
+			}
 		});
 
 		map.on('moveend', saveMapState);

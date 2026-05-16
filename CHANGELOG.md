@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [0.4.2] - 2026-05-16
+
+### Fixed
+
+- **Map — tooltip missing on standalone nodes**: hovering over a single node (not part of a cluster bubble) showed no tooltip. The `pointermove` handler only handled cluster features (which carry a `features[]` array); raw marker features (with a direct `position` property) were silently ignored. Both the hover tooltip and the click-to-select panel are now fixed to handle both feature types.
+
+---
+
 ## [0.4.1] - 2026-05-16
 
 ### Fixed
