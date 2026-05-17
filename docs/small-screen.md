@@ -124,6 +124,8 @@ Nessuna modifica visibile. Tutti gli stili desktop sono invariati:
 - JSON button visibile
 - Status pill + packet counter visibili
 
+The `Channels` sidebar now has a collapse button. When enabled, the left column shrinks into a narrow rail and the message list gets more horizontal space. State persists in `localStorage`.
+
 ### Verifica
 
 ```bash

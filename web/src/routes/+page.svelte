@@ -43,10 +43,17 @@
 	import type { MapPosition } from '$lib/map/types';
 	import { partitionChannels, groupTooltip, resolveGroup } from '$lib/api/groups';
 	import {
+		chatSidebarGridColumns,
+		loadChatChannelsCollapsed,
+		saveChatChannelsCollapsed
+	} from '$lib/ui/chat-layout';
+	import {
 		mdiAccountOutline,
 		mdiAlertCircleOutline,
 		mdiArrowRight,
 		mdiBroadcast,
+		mdiChevronLeft,
+		mdiChevronRight,
 		mdiNotificationClearAll,
 		mdiTrashCanOutline,
 		mdiCheckCircleOutline,
@@ -103,6 +110,7 @@
 	let authPassword = $state('');
 	let authError = $state<string | null>(null);
 	let authSubmitting = $state(false);
+	let channelsCollapsed = $state(false);
 
 	$effect(() => {
 		const _deps = [chatTarget, displayChatRecords];
@@ -130,11 +138,13 @@
 		const h = parseFloat(localStorage.getItem(STORAGE_STREAM_HEIGHT) ?? '');
 		if (!isNaN(w) && w >= 20 && w <= 80) chatWidthPct = w;
 		if (!isNaN(h) && h >= 160) streamHeightPx = h;
+		channelsCollapsed = loadChatChannelsCollapsed(localStorage);
 	}
 
 	function saveLayout() {
 		localStorage.setItem(STORAGE_CHAT_WIDTH, String(chatWidthPct));
 		localStorage.setItem(STORAGE_STREAM_HEIGHT, String(streamHeightPx));
+		saveChatChannelsCollapsed(localStorage, channelsCollapsed);
 	}
 
 	function startHorizontalDrag(e: PointerEvent) {
@@ -174,6 +184,11 @@
 		}
 		window.addEventListener('pointermove', onMove);
 		window.addEventListener('pointerup', onUp);
+	}
+
+	function toggleChannelsSidebar() {
+		channelsCollapsed = !channelsCollapsed;
+		saveLayout();
 	}
 	let isDesktop = $state(true);
 	$effect(() => watchDesktop((v) => (isDesktop = v)));
@@ -771,22 +786,40 @@
 					>
 				</div>
 
-				<div class="grid min-h-0 flex-1 grid-cols-[10rem_1fr]">
+				<div
+					class="grid min-h-0 flex-1"
+					style={isDesktop ? `grid-template-columns: ${chatSidebarGridColumns(channelsCollapsed)}` : ''}
+				>
 					<!-- Destinations sidebar -->
 					<aside class="flex min-h-0 flex-col border-r border-gray-700/60 bg-[#1c2230]">
 						<div
-							class="border-b border-gray-700/60 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+							class="flex items-center border-b border-gray-700/60 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500 {channelsCollapsed
+								? 'justify-center px-1'
+								: 'justify-between px-3'}"
 						>
-							Channels
+							<span class={channelsCollapsed ? 'sr-only' : ''}>Channels</span>
+							<button
+								type="button"
+								class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+								aria-label={channelsCollapsed ? 'Expand channels' : 'Collapse channels'}
+								title={channelsCollapsed ? 'Expand channels' : 'Collapse channels'}
+								onclick={toggleChannelsSidebar}
+							>
+								<MdiIcon path={channelsCollapsed ? mdiChevronRight : mdiChevronLeft} size={14} />
+							</button>
 						</div>
 						<div class="min-h-0 flex-1 overflow-auto p-1.5">
 							<!-- Broadcast (always shown) -->
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs {chatTarget.kind ===
+								class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
+									? 'justify-center gap-0'
+									: 'gap-2'} {chatTarget.kind ===
 									'channel' && chatTarget.value === 'Broadcast'
 									? 'bg-blue-500/15 text-blue-200'
 									: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
+								aria-label="Broadcast channel"
+								title="Broadcast channel"
 								onclick={() => selectChannel('Broadcast')}
 							>
 								<MdiIcon path={mdiBroadcast} size={14} />
@@ -796,7 +829,7 @@
 										aria-label="unread"
 									></span>
 								{/if}
-								<span class="truncate {unreadIds.has('P_broadcast') ? 'font-semibold' : ''}"
+								<span class={channelsCollapsed ? 'sr-only' : `truncate ${unreadIds.has('P_broadcast') ? 'font-semibold' : ''}`}
 									>Broadcast</span
 								>
 							</button>
@@ -809,10 +842,13 @@
 										<button
 											type="button"
 											title={groupTooltip(group)}
-											class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs {chatTarget.kind ===
+											class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
+												? 'justify-center gap-0'
+												: 'gap-2'} {chatTarget.kind ===
 												'channel' && chatTarget.value === channel
 												? 'bg-blue-500/15 text-blue-200'
 												: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
+											aria-label={group.note}
 											onclick={() => selectChannel(channel)}
 										>
 											<span class="shrink-0 text-sm leading-none">{group.flag}</span>
@@ -822,7 +858,7 @@
 													aria-label="unread"
 												></span>
 											{/if}
-											<span class="truncate {unreadIds.has(knownCid) ? 'font-semibold' : ''}"
+											<span class={channelsCollapsed ? 'sr-only' : `truncate ${unreadIds.has(knownCid) ? 'font-semibold' : ''}`}
 												>{group.note}</span
 											>
 										</button>
@@ -837,10 +873,14 @@
 										{@const unknownCid = conversationIdFor({ kind: 'channel', value: channel })}
 										<button
 											type="button"
-											class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs {chatTarget.kind ===
+											class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
+												? 'justify-center gap-0'
+												: 'gap-2'} {chatTarget.kind ===
 												'channel' && chatTarget.value === channel
 												? 'bg-blue-500/15 text-blue-200'
 												: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
+											aria-label={channel}
+											title={channel}
 											onclick={() => selectChannel(channel)}
 										>
 											<MdiIcon path={mdiPound} size={14} />
@@ -850,7 +890,7 @@
 													aria-label="unread"
 												></span>
 											{/if}
-											<span class="truncate {unreadIds.has(unknownCid) ? 'font-semibold' : ''}"
+											<span class={channelsCollapsed ? 'sr-only' : `truncate ${unreadIds.has(unknownCid) ? 'font-semibold' : ''}`}
 												>{channel}</span
 											>
 										</button>
@@ -873,10 +913,14 @@
 											{@const dmCid = conversationIdFor({ kind: 'contact', value: contact })}
 											<button
 												type="button"
-												class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs {chatTarget.kind ===
+												class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
+													? 'justify-center gap-0'
+													: 'gap-2'} {chatTarget.kind ===
 													'contact' && chatTarget.value === contact
 													? 'bg-blue-500/15 text-blue-200'
 													: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
+												aria-label={contact}
+												title={contact}
 												onclick={() => selectContact(contact)}
 											>
 												<MdiIcon path={mdiAccountOutline} size={14} />
@@ -886,7 +930,7 @@
 														aria-label="unread"
 													></span>
 												{/if}
-												<span class="truncate {unreadIds.has(dmCid) ? 'font-semibold' : ''}"
+												<span class={channelsCollapsed ? 'sr-only' : `truncate ${unreadIds.has(dmCid) ? 'font-semibold' : ''}`}
 													>{contact}</span
 												>
 											</button>
