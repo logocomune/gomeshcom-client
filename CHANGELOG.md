@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Responsive mobile layout**: web UI now adapts to narrow viewports (< 768px). On phones, Chat, Map, and UDP stream panels stack vertically instead of sitting side-by-side. Drag handles are hidden on mobile (irrelevant on touch). Status pill and packet counter collapse to a minimal status dot in the header. Chat typography shrinks slightly. UDP stream rows hide secondary fields (relays, temp/hum/pressure, alt, hardware name) and the JSON button column; tapping a row opens the JSON modal directly.
+- `small-screen.md` — analysis document detailing all mobile layout changes and how to verify them.
+- `src/lib/responsive.ts` — `watchDesktop` utility extracted from the page for reuse and testability.
+- `src/lib/responsive.test.ts` — 7 unit tests covering initial callback, change events, cleanup, and SSR fallback.
+- `src/routes/small-screen.e2e.ts` — 14 Playwright e2e tests verifying responsive behaviour at mobile (390px) and desktop (1280px) viewports: element visibility, panel stacking order, ~80 vh heights, and no panel overlap.
+
+---
+
 ## [0.4.2] - 2026-05-16
 
 ### Added

@@ -35,6 +35,7 @@
 	import logo from '$lib/assets/gomeshcom-logo.png';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import ConnectionOverlay from '$lib/components/ConnectionOverlay.svelte';
+	import { watchDesktop } from '$lib/responsive';
 	import MeshMapPanel from '$lib/map/MeshMapPanel.svelte';
 	import type { ConnectionState, StreamEvent, Conversation, ChatRecord } from '$lib/api/types';
 	import type { MapPosition } from '$lib/map/types';
@@ -171,6 +172,9 @@
 		window.addEventListener('pointermove', onMove);
 		window.addEventListener('pointerup', onUp);
 	}
+	let isDesktop = $state(true);
+	$effect(() => watchDesktop((v) => (isDesktop = v)));
+
 	let mapPositions = $derived(applyLiveFreshness(storedPositions, events));
 
 	let readTimestamps = $state<Record<string, string>>({});
@@ -692,9 +696,11 @@
 			<div class="flex items-center gap-2">
 				<img src={logo} alt="" class="h-7 w-7 rounded-md" />
 				<span class="font-mono text-sm font-bold tracking-wide text-blue-300">goMeshCom</span>
+				<!-- mobile-only status dot, no text -->
+				<span data-testid="status-dot" class="md:hidden h-2 w-2 rounded-full {statusClass[connection]}"></span>
 			</div>
-			<div class="h-4 w-px bg-gray-600"></div>
-			<div class="flex items-center gap-2 text-xs">
+			<div class="hidden md:block h-4 w-px bg-gray-600"></div>
+			<div data-testid="status-pill" class="hidden md:flex items-center gap-2 text-xs">
 				<span class="h-2.5 w-2.5 rounded-full {statusClass[connection]}"></span>
 				<span class="font-medium text-gray-300">{statusText[connection]}</span>
 			</div>
@@ -705,7 +711,7 @@
 			>
 				{stationCallsign || 'NO-CALL'}
 			</div>
-			<div class="font-mono text-xs text-gray-400">{events.length} packets</div>
+			<div data-testid="packet-counter" class="hidden md:block font-mono text-xs text-gray-400">{events.length} packets</div>
 			<!-- menu -->
 			<div class="relative">
 				<button
@@ -742,13 +748,14 @@
 	</header>
 
 	<!-- Content wrapper -->
-	<div class="flex min-h-0 flex-1 flex-col gap-2 p-2">
+	<div class="flex min-h-0 flex-1 flex-col gap-2 p-2 overflow-y-auto md:overflow-hidden">
 		<!-- Top row: Chat + Map -->
-		<div class="flex min-h-0 flex-1 gap-0" data-panel-row>
+		<div class="flex flex-col md:flex-row shrink-0 md:flex-1 md:min-h-0 gap-2" data-panel-row>
 			<!-- Chat panel -->
 			<div
-				class="flex min-h-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm"
-				style="flex: 0 0 {chatWidthPct}%; min-width: 0"
+				data-testid="chat-panel"
+				class="flex h-[80vh] md:h-auto md:min-h-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm"
+				style={isDesktop ? `flex: 0 0 ${chatWidthPct}%; min-width: 0` : ''}
 			>
 				<div
 					class="flex h-9 shrink-0 items-center justify-between border-b border-gray-700/60 px-3"
@@ -960,9 +967,9 @@
 											? new Date(bestAck.receivedAt).getTime() - new Date(rec.received_at).getTime()
 											: -1}
 										<div
-											class="rounded border border-gray-700/60 bg-[#1c2230] p-3 transition-colors hover:border-gray-600/60"
+											class="rounded border border-gray-700/60 bg-[#1c2230] p-2 md:p-3 transition-colors hover:border-gray-600/60"
 										>
-											<div class="flex items-center justify-between gap-3">
+											<div class="flex items-center justify-between gap-2 md:gap-3">
 												<div class="flex min-w-0 items-center gap-2">
 													<span
 														class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-blue-500/70 bg-blue-500/25 text-blue-200"
@@ -971,7 +978,7 @@
 														<MdiIcon path={chatMdiIcon(rec)} size={16} />
 													</span>
 													<div class="min-w-0">
-														<div class="truncate text-sm font-semibold text-white">
+														<div class="truncate text-xs md:text-sm font-semibold text-white">
 															{srcPath.origin}
 														</div>
 														<div class="truncate text-[10px] text-gray-500">
@@ -980,7 +987,7 @@
 													</div>
 												</div>
 												<div class="flex items-center gap-1.5">
-													<div class="font-mono text-[11px] text-gray-500">
+													<div class="font-mono text-[10px] md:text-[11px] text-gray-500">
 														{formatTime(rec.received_at)}
 													</div>
 													{#if isSent}
@@ -1025,7 +1032,7 @@
 												</div>
 											</div>
 											<div
-												class="mt-2 rounded border border-gray-700/60 bg-[#111827] px-3 py-2 text-sm leading-relaxed text-gray-100"
+												class="mt-2 rounded border border-gray-700/60 bg-[#111827] px-3 py-2 text-[11px] md:text-sm leading-relaxed text-gray-100"
 											>
 												{cleanMessage(rec.msg) || rec.msg}
 											</div>
@@ -1052,7 +1059,7 @@
 												</div>
 											{/if}
 											<div
-												class="mt-1.5 flex items-center justify-between gap-2 font-mono text-[11px]"
+												class="mt-1.5 flex items-center justify-between gap-2 font-mono text-[10px] md:text-[11px]"
 											>
 												<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-gray-500">
 													{#if srcPath.relays.length > 0}
@@ -1141,7 +1148,7 @@
 				role="separator"
 				aria-orientation="vertical"
 				aria-label="Resize chat and map"
-				class="group relative z-10 mx-1 flex w-2 shrink-0 cursor-col-resize items-center justify-center"
+				class="hidden md:flex group relative z-10 mx-1 w-2 shrink-0 cursor-col-resize items-center justify-center"
 				onpointerdown={startHorizontalDrag}
 			>
 				<div
@@ -1151,8 +1158,9 @@
 
 			<!-- Map panel -->
 			<div
-				class="flex min-h-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#151a24] shadow-sm"
-				style="flex: 1 1 0; min-width: 0"
+				data-testid="map-panel"
+				class="flex h-[80vh] md:h-auto md:min-h-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#151a24] shadow-sm"
+				style={isDesktop ? 'flex: 1 1 0; min-width: 0' : ''}
 			>
 				<div
 					class="flex h-9 shrink-0 items-center justify-between border-b border-gray-700/60 px-3"
@@ -1171,7 +1179,7 @@
 			role="separator"
 			aria-orientation="horizontal"
 			aria-label="Resize UDP stream panel"
-			class="group relative z-10 my-0.5 flex h-2 shrink-0 cursor-row-resize items-center justify-center"
+			class="hidden md:flex group relative z-10 my-0.5 h-2 shrink-0 cursor-row-resize items-center justify-center"
 			onpointerdown={startVerticalDrag}
 		>
 			<div
@@ -1181,8 +1189,9 @@
 
 		<!-- UDP stream panel -->
 		<div
-			class="flex shrink-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm"
-			style="height: {streamHeightPx}px; min-height: 160px"
+			data-testid="udp-panel"
+			class="flex shrink-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm h-[80vh] md:h-auto md:min-h-[160px]"
+			style={isDesktop ? `height: ${streamHeightPx}px` : ''}
 		>
 			<div class="flex h-9 shrink-0 items-center justify-between border-b border-gray-700/60 px-3">
 				<div class="flex items-center gap-2">
@@ -1233,16 +1242,17 @@
 							<div
 								role="button"
 								tabindex="0"
-								class="grid w-full grid-cols-[4.5rem_1fr_2rem] gap-3 px-3 py-2 text-left hover:bg-white/[0.03] {selectedEvent?.id ===
+								class="grid w-full grid-cols-[3rem_1fr] md:grid-cols-[4.5rem_1fr_2rem] gap-2 md:gap-3 px-3 py-2 text-left hover:bg-white/[0.03] {selectedEvent?.id ===
 								event.id
 									? 'bg-white/[0.04]'
 									: ''}"
-								onclick={() => (selectedEvent = event)}
+								onclick={() => (isDesktop ? (selectedEvent = event) : (rawEvent = event))}
 								onkeydown={(keyEvent) => {
-									if (keyEvent.key === 'Enter' || keyEvent.key === ' ') selectedEvent = event;
+									if (keyEvent.key === 'Enter' || keyEvent.key === ' ')
+										isDesktop ? (selectedEvent = event) : (rawEvent = event);
 								}}
 							>
-								<div class="font-mono text-[11px] text-gray-500">
+								<div class="font-mono text-[10px] md:text-[11px] text-gray-500">
 									{formatTime(event.receivedAt)}
 								</div>
 								<div class="min-w-0">
@@ -1260,18 +1270,18 @@
 											>
 												<MdiIcon path={mdiForEvent(event)} size={17} />
 											</span>
-											<span class="shrink-0 text-sm font-bold text-white">{route.origin}</span>
+											<span class="shrink-0 text-xs md:text-sm font-bold text-white">{route.origin}</span>
 											{#if route.relays.length > 0}
-												<span class="shrink-0 text-[11px] text-gray-400"
+												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
 													>(via {route.relays.join(', ')})</span
 												>
 											{/if}
-											<span class="shrink-0 text-gray-500"
+											<span class="hidden md:inline shrink-0 text-gray-500"
 												><MdiIcon path={mdiArrowRight} size={13} /></span
 											>
-											<span class="shrink-0 text-sm text-gray-200">{route.destination}</span>
+											<span class="hidden md:inline shrink-0 text-sm text-gray-200">{route.destination}</span>
 											<span class="mx-0.5 shrink-0 text-gray-400">·</span>
-											<span class="min-w-0 truncate italic text-sm text-white">"{text}"</span>
+											<span class="min-w-0 truncate italic text-xs md:text-sm text-white">"{text}"</span>
 											{#if packet?.rssi != null || packet?.snr != null}
 												<span class="ml-auto flex shrink-0 items-center gap-2 pl-2">
 													{#if packet?.rssi != null}
@@ -1310,9 +1320,9 @@
 											>
 												<MdiIcon path={mdiForEvent(event)} size={17} />
 											</span>
-											<span class="shrink-0 text-sm font-bold text-white">{source.origin}</span>
+											<span class="shrink-0 text-xs md:text-sm font-bold text-white">{source.origin}</span>
 											{#if source.relays.length > 0}
-												<span class="shrink-0 text-[11px] text-gray-400"
+												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
 													>(via {source.relays.join(', ')})</span
 												>
 											{/if}
@@ -1330,7 +1340,7 @@
 												{/if}
 												{#if packet?.temp1 != null}
 													<span
-														class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
+														class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
 													>
 														<span class="text-gray-500"
 															><MdiIcon path={mdiThermometer} size={12} /></span
@@ -1340,7 +1350,7 @@
 												{/if}
 												{#if packet?.hum != null}
 													<span
-														class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
+														class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
 													>
 														<span class="text-gray-500"
 															><MdiIcon path={mdiWaterPercent} size={12} /></span
@@ -1350,7 +1360,7 @@
 												{/if}
 												{#if packet?.qnh != null || packet?.qfe != null}
 													<span
-														class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
+														class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
 													>
 														<span class="text-gray-500"><MdiIcon path={mdiGauge} size={12} /></span>
 														{packet.qnh ?? packet.qfe} hPa
@@ -1396,9 +1406,9 @@
 											>
 												<MdiIcon path={mdiForEvent(event)} size={17} />
 											</span>
-											<span class="shrink-0 text-sm font-bold text-white">{source.origin}</span>
+											<span class="shrink-0 text-xs md:text-sm font-bold text-white">{source.origin}</span>
 											{#if source.relays.length > 0}
-												<span class="shrink-0 text-[11px] text-gray-400"
+												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
 													>(via {source.relays.join(', ')})</span
 												>
 											{/if}
@@ -1415,7 +1425,7 @@
 													</span>
 												{/if}
 												{#if packet?.alt != null}
-													<span class="shrink-0 font-mono text-[11px] text-gray-400"
+													<span class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
 														>{packet.alt} m</span
 													>
 												{/if}
@@ -1431,7 +1441,7 @@
 												{/if}
 												{#if hardware}
 													<span
-														class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
+														class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
 														title="Hardware ID {packet?.hw_id}"
 													>
 														<span class="text-gray-500"><MdiIcon path={mdiChip} size={12} /></span>
@@ -1478,9 +1488,9 @@
 												<MdiIcon path={mdiForEvent(event)} size={17} />
 											</span>
 											{#if packet}
-												<span class="shrink-0 text-sm font-bold text-white">{source.origin}</span>
+												<span class="shrink-0 text-xs md:text-sm font-bold text-white">{source.origin}</span>
 												{#if source.relays.length > 0}
-													<span class="shrink-0 text-[11px] text-gray-400"
+													<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
 														>(via {source.relays.join(', ')})</span
 													>
 												{/if}
@@ -1497,7 +1507,7 @@
 														</span>
 													{/if}
 													{#if packet.alt != null}
-														<span class="shrink-0 font-mono text-[11px] text-gray-400"
+														<span class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
 															>{packet.alt} m</span
 														>
 													{/if}
@@ -1554,7 +1564,7 @@
 								</div>
 								<button
 									type="button"
-									class="flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 bg-[#1c2230] text-gray-400 hover:border-blue-500/50 hover:text-blue-300"
+									class="hidden md:flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 bg-[#1c2230] text-gray-400 hover:border-blue-500/50 hover:text-blue-300"
 									title="Show JSON"
 									aria-label="Show JSON"
 									onclick={(clickEvent) => {
