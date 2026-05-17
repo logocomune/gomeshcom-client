@@ -7,6 +7,11 @@ All notable changes to this project are documented in this file.
 ### Added
 
 - **TX dry-run mode** (`GOMESHCOM_SEND_DISABLE_TX=true`): suppresses all outbound UDP writes. Each message that would have been sent is logged at `WARN` level with its JSON payload. The web UI shows a persistent amber banner and disables the send composer so operators immediately see that TX is disabled. Useful for monitoring-only deployments.
+- **Responsive mobile layout**: web UI now adapts to narrow viewports (< 768px). On phones, Chat, Map, and UDP stream panels stack vertically instead of sitting side-by-side. Drag handles are hidden on mobile (irrelevant on touch). Status pill and packet counter collapse to a minimal status dot in the header. Chat typography shrinks slightly. UDP stream rows hide secondary fields (relays, temp/hum/pressure, alt, hardware name) and the JSON button column; tapping a row opens the JSON modal directly.
+- `docs/small-screen.md` — analysis document detailing all mobile layout changes and how to verify them.
+- `src/lib/responsive.ts` — `watchDesktop` utility extracted from the page for reuse and testability.
+- `src/lib/responsive.test.ts` — 7 unit tests covering initial callback, change events, cleanup, and SSR fallback.
+- `src/routes/small-screen.e2e.ts` — 14 Playwright e2e tests verifying responsive behaviour at mobile (390px) and desktop (1280px) viewports: element visibility, panel stacking order, ~80 vh heights, and no panel overlap.
 - **UDP RX forwarder** (`GOMESHCOM_FORWARD_TARGETS=host:port,...`): mirrors every received UDP datagram byte-for-byte to one or more downstream `gomeshcomd` instances. Enables multi-instance topologies where a single node feeds several processing nodes. Forwarding is best-effort (per-target buffered channel, drop-oldest on overflow) and happens before parsing so even malformed packets are mirrored.
 - **`udpsend` tool** (`cmd/udpsend`): CLI utility to send a single UDP datagram to a `host:port`. Accepts payload as UTF-8 string (`-payload`) or hex string (`-hex`). Useful for manual testing and scripting.
 - **`udprecv` tool** (`cmd/udprecv`): CLI utility to listen on a UDP address and print each received datagram with RFC3339Nano timestamp, source address, and byte count. Output is either quoted string (default) or hex dump (`-hex` flag). Configurable receive buffer via `-buf`.
