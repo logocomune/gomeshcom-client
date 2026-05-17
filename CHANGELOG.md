@@ -2,13 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
----
-
 ## [0.4.2] - 2026-05-16
+
+### Added
+
+- First setup guide for MeshCom LAN deployment, including node IP discovery, ExtUDP destination configuration, firewall requirements for UDP `1799`, restart note, and startup examples.
 
 ### Fixed
 
 - **Map — tooltip missing on standalone nodes**: hovering over a single node (not part of a cluster bubble) showed no tooltip. The `pointermove` handler only handled cluster features (which carry a `features[]` array); raw marker features (with a direct `position` property) were silently ignored. Both the hover tooltip and the click-to-select panel are now fixed to handle both feature types.
+
+### Changed
+
+- README quick start now links to the dedicated first setup guide and keeps the top-level setup overview concise.
+- First setup guide now notes that public-IP deployments are possible but require extra routing and firewall care, and it clarifies when to bind the web UI to `0.0.0.0:8080` or a specific host IP.
+- First setup guide now states that the MeshCom node must be connected to Wi-Fi before reading its IP or applying ExtUDP settings.
 
 ---
 

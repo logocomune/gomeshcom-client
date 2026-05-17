@@ -7,7 +7,11 @@ Listens for UDP packets from a local MeshCom node and provides a browser UI for 
 
 ## Quick Start
 
-**Prerequisites:** a MeshCom node reachable on your local network (default UDP port 1799).
+**Prerequisites:** a MeshCom node reachable from the goMeshCom host (default UDP port 1799).
+
+If this is your first network setup, follow the step-by-step guide first:
+
+- [First Setup](docs/first-setup.md)
 
 ### Binary
 
@@ -18,6 +22,10 @@ Listens for UDP packets from a local MeshCom node and provides a browser UI for 
 Open `http://localhost:8080`.
 
 The node address is **auto-detected** from the first incoming UDP packet — no further configuration needed for typical setups.
+
+For a fresh node, make sure ExtUDP on the device points to the host running `gomeshcomd`, and allow inbound UDP `1799` on that host before starting the service.
+
+If you want to open the web UI from other machines, start `gomeshcomd` on `0.0.0.0:8080` or on the specific IP you want to expose, then allow inbound TCP `8080` in the firewall. Keep the default loopback bind if access should stay local.
 
 ### Docker
 

@@ -1,0 +1,29 @@
+services:
+  gomeshcom:
+    image: ghcr.io/logocomune/gomeshcom:latest
+    container_name: gomeshcom
+    restart: unless-stopped
+    ports:
+      # Map HTTP UI/API port from container to host
+      - "8080:8080"
+      # Map MeshCom UDP port for local node/server communication
+      - "1799:1799/udp"
+    volumes:
+      # Persist chat logs, raw data, and runtime configuration
+      - gomeshcom-data:/data
+    environment:
+      # Your local amateur radio callsign
+      - GOMESHCOM_MY_CALL=XX0YY-1
+      # HTTP server bind address (0.0.0.0 allows access from outside the container)
+      - GOMESHCOM_HTTP_ADDR=0.0.0.0:8080
+      # Directory where application data is stored (maps to the volume above)
+      - GOMESHCOM_DATA_DIR=/data
+      # REMOTE SERVER: Address of the MeshCom node/server to send outgoing traffic to
+      - GOMESHCOM_NODE_ADDR=remote.server.com:1799
+      # LOCAL RECEIVE: UDP address where the container listens for incoming MeshCom packets
+      - GOMESHCOM_UDP_LISTEN_ADDR=0.0.0.0:1799
+      # Set log verbosity (debug, info, warn, error)
+      - GOMESHCOM_LOG_LEVEL=info
+
+volumes:
+  gomeshcom-data:
