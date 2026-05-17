@@ -125,6 +125,7 @@ Nessuna modifica visibile. Tutti gli stili desktop sono invariati:
 - Status pill + packet counter visibili
 
 The `Channels` sidebar now has a collapse button. When enabled, the left column shrinks into a narrow rail and the message list gets more horizontal space. State persists in `localStorage`.
+In the collapsed state, the `New DM` action shortens to `DM +` so the rail stays compact.
 
 ### Verifica
 

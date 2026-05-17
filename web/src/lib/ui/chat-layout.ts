@@ -13,3 +13,7 @@ export function saveChatChannelsCollapsed(storage: LayoutStorage, collapsed: boo
 export function chatSidebarGridColumns(collapsed: boolean): string {
 	return collapsed ? '3rem minmax(0, 1fr)' : '10rem minmax(0, 1fr)';
 }
+
+export function chatSidebarNewDmLabel(collapsed: boolean): string {
+	return collapsed ? 'DM' : 'New DM';
+}

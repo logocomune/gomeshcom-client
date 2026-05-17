@@ -44,6 +44,7 @@
 	import { partitionChannels, groupTooltip, resolveGroup } from '$lib/api/groups';
 	import {
 		chatSidebarGridColumns,
+		chatSidebarNewDmLabel,
 		loadChatChannelsCollapsed,
 		saveChatChannelsCollapsed
 	} from '$lib/ui/chat-layout';
@@ -940,10 +941,12 @@
 								<button
 									type="button"
 									class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-blue-500/40 px-2 py-1.5 text-[11px] font-medium text-blue-400/70 hover:border-blue-400/70 hover:bg-blue-500/10 hover:text-blue-300"
+									aria-label="New direct message"
+									title="New direct message"
 									onclick={openNewDm}
 								>
 									<MdiIcon path={mdiPlus} size={14} />
-									New DM
+									<span>{chatSidebarNewDmLabel(channelsCollapsed)}</span>
 								</button>
 							</div>
 						</div>

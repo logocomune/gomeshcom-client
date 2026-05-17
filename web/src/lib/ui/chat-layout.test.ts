@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { chatSidebarGridColumns, loadChatChannelsCollapsed, saveChatChannelsCollapsed } from './chat-layout';
+import {
+	chatSidebarGridColumns,
+	chatSidebarNewDmLabel,
+	loadChatChannelsCollapsed,
+	saveChatChannelsCollapsed
+} from './chat-layout';
 
 describe('chat layout helpers', () => {
 	let store: Record<string, string> = {};
@@ -38,5 +43,10 @@ describe('chat layout helpers', () => {
 	it('returns narrower columns when collapsed', () => {
 		expect(chatSidebarGridColumns(true)).toBe('3rem minmax(0, 1fr)');
 		expect(chatSidebarGridColumns(false)).toBe('10rem minmax(0, 1fr)');
+	});
+
+	it('shortens new dm label when collapsed', () => {
+		expect(chatSidebarNewDmLabel(true)).toBe('DM');
+		expect(chatSidebarNewDmLabel(false)).toBe('New DM');
 	});
 });
