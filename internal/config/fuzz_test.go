@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net"
 	"os"
 	"testing"
 )
@@ -32,4 +33,40 @@ func splitArgs(s string) []string {
 		return nil
 	}
 	return []string{s} // Simplistic, but enough for basic fuzzing of flags
+}
+
+func FuzzParseForwardTargets(f *testing.F) {
+	seeds := []string{
+		"",
+		"127.0.0.1:9000",
+		"127.0.0.1:9000,127.0.0.1:9001",
+		" 10.0.0.1:1799 , 10.0.0.2:1799 ",
+		"bad:notaport",
+		",,",
+		"127.0.0.1:9000,127.0.0.1:9000",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, csv string) {
+		// Must never panic. Errors are acceptable.
+		targets, err := ParseForwardTargets(csv)
+		if err != nil {
+			return
+		}
+		// All returned targets must be resolvable.
+		for _, target := range targets {
+			if _, resolveErr := net.ResolveUDPAddr("udp", target); resolveErr != nil {
+				t.Fatalf("ParseForwardTargets returned invalid target %q: %v", target, resolveErr)
+			}
+		}
+		// No duplicates.
+		seen := make(map[string]bool, len(targets))
+		for _, target := range targets {
+			if seen[target] {
+				t.Fatalf("ParseForwardTargets returned duplicate target %q", target)
+			}
+			seen[target] = true
+		}
+	})
 }

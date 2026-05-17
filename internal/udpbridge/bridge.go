@@ -15,6 +15,7 @@ import (
 	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
 	"github.com/logocomune/gomeshcom-udp/internal/positions"
 	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
+	"github.com/logocomune/gomeshcom-udp/internal/udpforward"
 )
 
 type Bridge struct {
@@ -25,10 +26,21 @@ type Bridge struct {
 	logger          *receivelog.Logger
 	chatLog         *chatlog.Logger
 	positions       *positions.Store
+	disableTx       bool
+	forwarder       *udpforward.Forwarder
 }
 
-func NewBridge(listenAddr string, nodeAddr string, bus *events.Bus, logger *receivelog.Logger, chatLog *chatlog.Logger, positionStore *positions.Store) *Bridge {
-	return &Bridge{listenAddr: listenAddr, nodeAddr: nodeAddr, bus: bus, logger: logger, chatLog: chatLog, positions: positionStore}
+func NewBridge(listenAddr string, nodeAddr string, bus *events.Bus, logger *receivelog.Logger, chatLog *chatlog.Logger, positionStore *positions.Store, disableTx bool, forwarder *udpforward.Forwarder) *Bridge {
+	return &Bridge{
+		listenAddr: listenAddr,
+		nodeAddr:   nodeAddr,
+		bus:        bus,
+		logger:     logger,
+		chatLog:    chatLog,
+		positions:  positionStore,
+		disableTx:  disableTx,
+		forwarder:  forwarder,
+	}
 }
 
 func (b *Bridge) Listen(ctx context.Context) error {
@@ -59,6 +71,9 @@ func (b *Bridge) Listen(ctx context.Context) error {
 		}
 
 		rawPacket := string(buffer[:n])
+		if b.forwarder != nil {
+			b.forwarder.Forward(buffer[:n])
+		}
 		b.handleDatagram(remoteAddr.String(), buffer[:n], rawPacket)
 	}
 }
@@ -173,6 +188,11 @@ func (b *Bridge) SendText(ctx context.Context, destination string, message strin
 	payload, err := json.Marshal(outgoing)
 	if err != nil {
 		return fmt.Errorf("encode outgoing message: %w", err)
+	}
+
+	if b.disableTx {
+		slog.Warn("udp tx disabled (dry-run)", "destination", destination, "payload", string(payload))
+		return nil
 	}
 
 	nodeAddr, err := b.effectiveNodeAddr()

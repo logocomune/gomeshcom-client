@@ -64,6 +64,8 @@ Swagger/OpenAPI contract: [`docs/openapi.yaml`](openapi.yaml).
 
 `POST /api/messages` validates the request, suppresses immediate duplicates within `GOMESHCOM_SEND_DEDUP_TTL` (default `2s`), and transmits the text to the MeshCom node via UDP. It returns `202` on accept, `429` for duplicate suppression (with `Retry-After: 2`), `502` on UDP send failure, and `503` when no bridge is configured.
 
+When `GOMESHCOM_SEND_DISABLE_TX=true`, `/api/events` includes `txDisabled:true` in the initial `station.identity` event. The web UI shows the dry-run banner and disables the send button, while `/api/messages` still accepts requests and logs the payload instead of sending UDP traffic.
+
 `GET /api/positions` returns the persisted node position map loaded at startup and updated from incoming `pos` packets:
 
 ```json

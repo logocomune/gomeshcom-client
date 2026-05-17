@@ -427,6 +427,83 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestValidateForwardTargets(t *testing.T) {
+	base := func() Config {
+		return Config{
+			HTTPAddr:         "127.0.0.1:8080",
+			UDPListenAddr:    "0.0.0.0:1799",
+			MyCall:           "QQ1ABC-1",
+			DataDir:          "./data",
+			MaxMessageLength: 149,
+			ChatLog: ChatLog{
+				Path:             "./data/chat",
+				HistoryWindow:    24 * 60 * 60 * 1e9,
+				MaxHistoryWindow: 720 * 60 * 60 * 1e9,
+			},
+			LogLevel: "info",
+		}
+	}
+
+	tests := map[string]struct {
+		targets string
+		wantErr bool
+	}{
+		"empty string is valid (disabled)": {targets: "", wantErr: false},
+		"single valid target":              {targets: "127.0.0.1:9999", wantErr: false},
+		"two valid targets":                {targets: "127.0.0.1:9001,127.0.0.1:9002", wantErr: false},
+		"whitespace around entries":        {targets: " 127.0.0.1:9001 , 127.0.0.1:9002 ", wantErr: false},
+		"duplicates are collapsed":         {targets: "127.0.0.1:9001,127.0.0.1:9001", wantErr: false},
+		"invalid host:port":                {targets: "not-a-host:notaport", wantErr: true},
+		"missing port":                     {targets: "127.0.0.1", wantErr: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := base()
+			cfg.Forward.Targets = tc.targets
+			err := Validate(cfg)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseForwardTargets(t *testing.T) {
+	tests := map[string]struct {
+		input   string
+		want    []string
+		wantErr bool
+	}{
+		"empty":              {input: "", want: nil},
+		"single":             {input: "127.0.0.1:9000", want: []string{"127.0.0.1:9000"}},
+		"two targets":        {input: "127.0.0.1:9000,127.0.0.1:9001", want: []string{"127.0.0.1:9000", "127.0.0.1:9001"}},
+		"whitespace trimmed": {input: " 127.0.0.1:9000 , 127.0.0.1:9001 ", want: []string{"127.0.0.1:9000", "127.0.0.1:9001"}},
+		"duplicates removed": {input: "127.0.0.1:9000,127.0.0.1:9000", want: []string{"127.0.0.1:9000"}},
+		"empty csv entries":  {input: "127.0.0.1:9000,,127.0.0.1:9001", want: []string{"127.0.0.1:9000", "127.0.0.1:9001"}},
+		"invalid addr":       {input: "bad:notaport", wantErr: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseForwardTargets(tc.input)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ParseForwardTargets() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if !tc.wantErr {
+				if len(got) != len(tc.want) {
+					t.Fatalf("len = %d, want %d; got %v", len(got), len(tc.want), got)
+				}
+				for i, v := range tc.want {
+					if got[i] != v {
+						t.Fatalf("got[%d] = %q, want %q", i, got[i], v)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestNormalizeUppercasesMyCall(t *testing.T) {
 	cfg := normalize(Config{MyCall: "qq5akt-10"})
 

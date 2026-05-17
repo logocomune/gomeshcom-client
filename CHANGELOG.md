@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **TX dry-run mode** (`GOMESHCOM_SEND_DISABLE_TX=true`): suppresses all outbound UDP writes. Each message that would have been sent is logged at `WARN` level with its JSON payload. The web UI shows a persistent amber banner and disables the send composer so operators immediately see that TX is disabled. Useful for monitoring-only deployments.
+- **UDP RX forwarder** (`GOMESHCOM_FORWARD_TARGETS=host:port,...`): mirrors every received UDP datagram byte-for-byte to one or more downstream `gomeshcomd` instances. Enables multi-instance topologies where a single node feeds several processing nodes. Forwarding is best-effort (per-target buffered channel, drop-oldest on overflow) and happens before parsing so even malformed packets are mirrored.
+- **`udpsend` tool** (`cmd/udpsend`): CLI utility to send a single UDP datagram to a `host:port`. Accepts payload as UTF-8 string (`-payload`) or hex string (`-hex`). Useful for manual testing and scripting.
+- **`udprecv` tool** (`cmd/udprecv`): CLI utility to listen on a UDP address and print each received datagram with RFC3339Nano timestamp, source address, and byte count. Output is either quoted string (default) or hex dump (`-hex` flag). Configurable receive buffer via `-buf`.
+
+---
+
 ## [0.4.2] - 2026-05-16
 
 ### Added

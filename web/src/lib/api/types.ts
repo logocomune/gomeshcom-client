@@ -47,6 +47,8 @@ export type StreamEvent = {
 export type StationIdentity = {
 	callsign: string;
 	version?: string;
+	txDisabled?: boolean;
+	forwardTargetCount?: number;
 };
 
 export type PositionRecord = {

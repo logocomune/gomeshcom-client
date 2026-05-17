@@ -23,6 +23,7 @@ import (
 	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
 	"github.com/logocomune/gomeshcom-udp/internal/sendcache"
 	"github.com/logocomune/gomeshcom-udp/internal/udpbridge"
+	"github.com/logocomune/gomeshcom-udp/internal/udpforward"
 )
 
 var (
@@ -71,7 +72,21 @@ func run() error {
 		RetentionDays: cfg.ReceiveLog.RetentionDays,
 	})
 	chatLogger := chatlog.New(cfg.ChatLog.Path, cfg.MyCall)
-	bridge := udpbridge.NewBridge(cfg.UDPListenAddr, cfg.NodeAddr, bus, receiveLogger, chatLogger, positionStore)
+
+	var fwd *udpforward.Forwarder
+	if cfg.Forward.Targets != "" {
+		targets, err := config.ParseForwardTargets(cfg.Forward.Targets)
+		if err != nil {
+			return fmt.Errorf("udp forward targets: %w", err)
+		}
+		fwd, err = udpforward.New(targets)
+		if err != nil {
+			return fmt.Errorf("udp forwarder: %w", err)
+		}
+		defer fwd.Close()
+	}
+
+	bridge := udpbridge.NewBridge(cfg.UDPListenAddr, cfg.NodeAddr, bus, receiveLogger, chatLogger, positionStore, cfg.Send.DisableTx, fwd)
 	go func() {
 		if err := bridge.Listen(ctx); err != nil {
 			slog.Error("udp bridge stopped", "error", err)

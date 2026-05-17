@@ -27,6 +27,7 @@ type Config struct {
 	ReceiveLog       ReceiveLog
 	ChatLog          ChatLog
 	Send             Send
+	Forward          Forward
 	Auth             Auth
 	LogLevel         string `conf:"default:info,help:log level: debug|info|warn|error"`
 }
@@ -45,7 +46,12 @@ type ChatLog struct {
 }
 
 type Send struct {
-	DedupTTL time.Duration `conf:"default:2s,help:LRU TTL window for duplicate outgoing messages (0 disables)"`
+	DedupTTL  time.Duration `conf:"default:2s,help:LRU TTL window for duplicate outgoing messages (0 disables)"`
+	DisableTx bool          `conf:"default:false,help:dry-run mode — log outgoing UDP messages as warnings without transmitting"`
+}
+
+type Forward struct {
+	Targets string `conf:"help:comma-separated host:port list; received UDP datagrams are mirrored unmodified to each target"`
 }
 
 type Auth struct {
@@ -74,6 +80,25 @@ func Load(build string) (Config, string, error) {
 	}
 
 	return cfg, info, nil
+}
+
+// ParseForwardTargets splits the CSV forward-targets string, trims whitespace,
+// deduplicates, and validates each entry as a resolvable UDP address.
+func ParseForwardTargets(csv string) ([]string, error) {
+	seen := make(map[string]bool)
+	var result []string
+	for _, raw := range strings.Split(csv, ",") {
+		t := strings.TrimSpace(raw)
+		if t == "" || seen[t] {
+			continue
+		}
+		if _, err := net.ResolveUDPAddr("udp", t); err != nil {
+			return nil, fmt.Errorf("%q: %w", t, err)
+		}
+		seen[t] = true
+		result = append(result, t)
+	}
+	return result, nil
 }
 
 func normalize(cfg Config) Config {
@@ -140,6 +165,12 @@ func Validate(cfg Config) error {
 
 	if cfg.Send.DedupTTL < 0 {
 		return errors.New("send dedup TTL must not be negative")
+	}
+
+	if cfg.Forward.Targets != "" {
+		if _, err := ParseForwardTargets(cfg.Forward.Targets); err != nil {
+			return fmt.Errorf("forward targets: %w", err)
+		}
 	}
 
 	authEnabled := cfg.Auth.Username != "" || cfg.Auth.Password != ""

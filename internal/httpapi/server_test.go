@@ -512,6 +512,32 @@ func TestStreamEventsSendsStationIdentity(t *testing.T) {
 	}
 }
 
+func TestStreamEventsSendsStationIdentityTxDisabled(t *testing.T) {
+	cfg := testConfig()
+	cfg.MyCall = "QQ1ABC-7"
+	cfg.Send.DisableTx = true
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+
+	body := streamBodyUntil(t, server, "event: station.identity")
+	if !strings.Contains(body, `"txDisabled":true`) {
+		t.Fatalf("station identity missing txDisabled:true: %q", body)
+	}
+}
+
+func TestStreamEventsStationIdentityTxEnabledByDefault(t *testing.T) {
+	cfg := testConfig()
+	cfg.MyCall = "QQ1ABC-7"
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+
+	body := streamBodyUntil(t, server, "event: station.identity")
+	if !strings.Contains(body, `"txDisabled":false`) {
+		t.Fatalf("station identity missing txDisabled:false: %q", body)
+	}
+	if !strings.Contains(body, `"forwardTargetCount":0`) {
+		t.Fatalf("station identity missing forwardTargetCount:0: %q", body)
+	}
+}
+
 func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "raw")
 	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})

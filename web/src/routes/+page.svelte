@@ -16,6 +16,7 @@
 		stripMessagePrefix
 	} from '$lib/api/events';
 	import { base } from '$app/paths';
+	import { stationStore } from '$lib/stores/station';
 	import {
 		fetchConversations,
 		fetchHistory,
@@ -36,6 +37,7 @@
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import ConnectionOverlay from '$lib/components/ConnectionOverlay.svelte';
 	import MeshMapPanel from '$lib/map/MeshMapPanel.svelte';
+	import { getSendComposerState } from '$lib/ui/send';
 	import type { ConnectionState, StreamEvent, Conversation, ChatRecord } from '$lib/api/types';
 	import type { MapPosition } from '$lib/map/types';
 	import { partitionChannels, groupTooltip, resolveGroup } from '$lib/api/groups';
@@ -71,6 +73,7 @@
 	let storedPositions = $state<MapPosition[]>([]);
 	let stationCallsign = $state('');
 	let appVersion = $state('');
+	let txDisabled = $state(false);
 	let chatTarget = $state<{ kind: 'channel' | 'contact'; value: string }>({
 		kind: 'channel',
 		value: 'Broadcast'
@@ -279,6 +282,8 @@
 			onStation: (station) => {
 				stationCallsign = station.callsign;
 				if (station.version) appVersion = station.version;
+				txDisabled = !!station.txDisabled;
+				stationStore.set(station);
 			},
 			onEvent: (event) => {
 				events = prependEvent(events, event);
@@ -529,7 +534,7 @@
 
 	async function handleSend() {
 		const text = draftMessage.trim();
-		if (!text || sending) return;
+		if (!text || sending || txDisabled) return;
 		const dst = destinationFor(chatTarget);
 		sending = true;
 		sendError = null;
@@ -1101,12 +1106,12 @@
 							<div class="flex gap-2">
 								<div class="relative min-w-0 flex-1">
 									<input
-										class="w-full rounded border border-gray-700/60 bg-[#111827] px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-500 focus:border-blue-500/60"
+										class="h-10 w-full rounded border border-gray-700/60 bg-[#111827] px-3 text-sm text-gray-200 outline-none placeholder:text-gray-500 focus:border-blue-500/60"
 										bind:this={messageInputEl}
 										bind:value={draftMessage}
 										placeholder="Type a message…"
 										maxlength={149}
-										disabled={sending}
+										disabled={sending || txDisabled}
 										onkeydown={(e) => {
 											if (e.key === 'Enter' && !e.shiftKey) {
 												e.preventDefault();
@@ -1123,13 +1128,22 @@
 										{draftMessage.length}/149
 									</span>
 								</div>
-								<button
-									class="rounded border border-gray-700/60 bg-blue-600/80 px-3 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-									disabled={sending || !draftMessage.trim()}
-									onclick={handleSend}
-								>
-									{sending ? '…' : 'Send'}
-								</button>
+								<div class="flex flex-col items-center gap-1">
+									<button
+										class="h-10 rounded border border-gray-700/60 bg-blue-600/80 px-4 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+										disabled={
+											!getSendComposerState({ draftMessage, sending, txDisabled }).canSend
+										}
+										onclick={handleSend}
+									>
+										{getSendComposerState({ draftMessage, sending, txDisabled }).label}
+									</button>
+									{#if getSendComposerState({ draftMessage, sending, txDisabled }).hint}
+										<span class="text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+											{getSendComposerState({ draftMessage, sending, txDisabled }).hint}
+										</span>
+									{/if}
+								</div>
 							</div>
 						</div>
 					</section>

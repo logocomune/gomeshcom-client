@@ -24,6 +24,13 @@ import (
 	"github.com/logocomune/gomeshcom-udp/internal/webui"
 )
 
+type stationIdentityEvent struct {
+	Callsign           string `json:"callsign"`
+	Version            string `json:"version,omitempty"`
+	TxDisabled         bool   `json:"txDisabled"`
+	ForwardTargetCount int    `json:"forwardTargetCount"`
+}
+
 // messageSender abstracts udpbridge.Bridge.SendText for testing.
 type messageSender interface {
 	SendText(ctx context.Context, destination, message string, maxLength int) error
@@ -173,7 +180,13 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
-	if err := writeSSE(w, events.Event{Type: "station.identity", Data: map[string]string{"callsign": s.cfg.MyCall, "version": s.version}}); err != nil {
+	forwardTargets, _ := config.ParseForwardTargets(s.cfg.Forward.Targets)
+	if err := writeSSE(w, events.Event{Type: "station.identity", Data: stationIdentityEvent{
+		Callsign:           s.cfg.MyCall,
+		Version:            s.version,
+		TxDisabled:         s.cfg.Send.DisableTx,
+		ForwardTargetCount: len(forwardTargets),
+	}}); err != nil {
 		return
 	}
 	flusher.Flush()

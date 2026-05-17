@@ -2,6 +2,7 @@ package udpbridge
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"github.com/logocomune/gomeshcom-udp/internal/events"
 	"github.com/logocomune/gomeshcom-udp/internal/positions"
 	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
+	"github.com/logocomune/gomeshcom-udp/internal/udpforward"
 )
 
 func TestHandleDatagramLogsValidPacket(t *testing.T) {
@@ -21,7 +23,7 @@ func TestHandleDatagramLogsValidPacket(t *testing.T) {
 	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receivelog.New(receivelog.Config{
 		Enabled: true,
 		Path:    dir,
-	}), nil, nil)
+	}), nil, nil, false, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,7 +52,7 @@ func TestHandleDatagramLogsParseError(t *testing.T) {
 	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receivelog.New(receivelog.Config{
 		Enabled: true,
 		Path:    dir,
-	}), nil, nil)
+	}), nil, nil, false, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -74,7 +76,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 	t.Run("direct packet writes rssi/snr on origin", func(t *testing.T) {
 		bus := events.NewBus()
 		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
-		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store)
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil)
 
 		raw := `{"src_type":"node","type":"pos","src":"QQ1ABC-1","msg":"","lat":48.1,"long":16.3,"alt":123,"rssi":-90,"snr":8}`
 		bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
@@ -94,7 +96,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 	t.Run("indirect packet: origin keeps zero rssi/snr, relay gets freshness", func(t *testing.T) {
 		bus := events.NewBus()
 		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
-		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store)
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil)
 
 		// Pre-populate relay via direct pos.
 		relayRaw := `{"type":"pos","src":"RELAY-1","lat":44.0,"long":11.0,"rssi":-70,"snr":2}`
@@ -127,7 +129,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 	t.Run("msg packet touches freshness of existing node", func(t *testing.T) {
 		bus := events.NewBus()
 		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
-		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store)
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil)
 
 		// Pre-populate origin.
 		posRaw := `{"type":"pos","src":"QQ1ABC-1","lat":48.1,"long":16.3,"rssi":-70,"snr":2}`
@@ -146,7 +148,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 
 func TestListen(t *testing.T) {
 	bus := events.NewBus()
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:0", bus, nil, nil, nil)
+	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:0", bus, nil, nil, nil, false, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -214,7 +216,7 @@ func TestSendText(t *testing.T) {
 	defer conn.Close()
 	nodeAddr := conn.LocalAddr().String()
 
-	bridge := NewBridge("127.0.0.1:0", nodeAddr, events.NewBus(), nil, nil, nil)
+	bridge := NewBridge("127.0.0.1:0", nodeAddr, events.NewBus(), nil, nil, nil, false, nil)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -294,7 +296,7 @@ func TestEffectiveNodeAddr(t *testing.T) {
 
 func TestHandleDatagramLearnsNodeAddr(t *testing.T) {
 	bus := events.NewBus()
-	bridge := NewBridge("127.0.0.1:0", "", bus, nil, nil, nil)
+	bridge := NewBridge("127.0.0.1:0", "", bus, nil, nil, nil, false, nil)
 
 	// No packets yet — should return ErrNodeNotDetected.
 	if _, err := bridge.effectiveNodeAddr(); err == nil {
@@ -316,7 +318,7 @@ func TestHandleDatagramLearnsNodeAddr(t *testing.T) {
 
 func TestHandleDatagramDoesNotLearnWhenNodeAddrExplicit(t *testing.T) {
 	bus := events.NewBus()
-	bridge := NewBridge("127.0.0.1:0", "192.168.0.2:1799", bus, nil, nil, nil)
+	bridge := NewBridge("127.0.0.1:0", "192.168.0.2:1799", bus, nil, nil, nil, false, nil)
 
 	raw := `{"type":"msg","dst":"*","msg":"hello"}`
 	bridge.handleDatagram("10.0.0.99:1799", []byte(raw), raw)
@@ -337,7 +339,7 @@ func TestSendTextAutoDetect(t *testing.T) {
 	nodeAddr := conn.LocalAddr().String()
 
 	// Bridge with empty nodeAddr — must learn before sending.
-	bridge := NewBridge("127.0.0.1:0", "", events.NewBus(), nil, nil, nil)
+	bridge := NewBridge("127.0.0.1:0", "", events.NewBus(), nil, nil, nil, false, nil)
 
 	// Before learning: SendText must return ErrNodeNotDetected.
 	err = bridge.SendText(context.Background(), "*", "hi", 149)
@@ -384,6 +386,122 @@ func readEvent(t *testing.T, subscriber <-chan events.Event) events.Event {
 		t.Fatal("event timeout")
 		return events.Event{}
 	}
+}
+
+func TestSendTextDryRun(t *testing.T) {
+	// Listener simulating a meshcom node — must NOT receive any datagram.
+	node, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer node.Close()
+	nodeAddr := node.LocalAddr().String()
+
+	bridge := NewBridge("127.0.0.1:0", nodeAddr, events.NewBus(), nil, nil, nil, true, nil)
+
+	err = bridge.SendText(context.Background(), "*", "hello dry run", 149)
+	if err != nil {
+		t.Fatalf("SendText with dry-run returned error: %v", err)
+	}
+
+	// Short deadline: any packet arriving means the guard failed.
+	_ = node.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	buf := make([]byte, 512)
+	n, _, readErr := node.ReadFromUDP(buf)
+	if readErr == nil {
+		t.Fatalf("dry-run must not transmit; got %d bytes: %s", n, buf[:n])
+	}
+}
+
+func TestSendTextDryRunNoNodeRequired(t *testing.T) {
+	// Bridge with no node addr and no learned addr — dry-run must still succeed.
+	bridge := NewBridge("127.0.0.1:0", "", events.NewBus(), nil, nil, nil, true, nil)
+
+	err := bridge.SendText(context.Background(), "*", "dry run no node", 149)
+	if err != nil {
+		t.Fatalf("dry-run with no node addr returned error: %v", err)
+	}
+}
+
+func TestListenForwardsRawDatagram(t *testing.T) {
+	// Sink receives forwarded bytes.
+	sink, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sink.Close()
+	sinkAddr := sink.LocalAddr().String()
+
+	fwd, err := udpforward.New([]string{sinkAddr})
+	if err != nil {
+		t.Fatalf("udpforward.New: %v", err)
+	}
+	defer fwd.Close()
+
+	// Pre-allocate the listen port so we know where to send.
+	tmp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listenAddr := tmp.LocalAddr().String()
+	tmp.Close()
+
+	bus := events.NewBus()
+	bridge := NewBridge(listenAddr, "127.0.0.1:0", bus, nil, nil, nil, false, fwd)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- bridge.Listen(ctx) }()
+	time.Sleep(30 * time.Millisecond)
+
+	// Send a deliberately malformed packet so we don't need a valid meshcom parser.
+	payload := []byte(`malformed-but-forwarded-bytes`)
+	sender, err := net.Dial("udp", listenAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sender.Close()
+	if _, err := sender.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = sink.SetReadDeadline(time.Now().Add(time.Second))
+	buf := make([]byte, 512)
+	n, _, err := sink.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("sink did not receive forwarded datagram: %v", err)
+	}
+	if !bytes.Equal(buf[:n], payload) {
+		t.Fatalf("forwarded payload = %q, want %q", buf[:n], payload)
+	}
+}
+
+func FuzzHandleDatagram(f *testing.F) {
+	seeds := []string{
+		`{"type":"msg","dst":"*","msg":"hello"}`,
+		`{"type":"pos","src":"QQ1ABC-1","lat":48.1,"long":16.3}`,
+		`{`,
+		``,
+		`not json`,
+		"\x00\x01\x02",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, raw string) {
+		bus := events.NewBus()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// Subscribe to drain the bus so it never blocks.
+		_ = bus.Subscribe(ctx)
+
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:0", bus, nil, nil, nil, false, nil)
+		// Must never panic.
+		bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
+	})
 }
 
 func todayReceiveLogPath(dir string) string {
