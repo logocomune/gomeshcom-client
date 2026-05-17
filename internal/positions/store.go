@@ -136,9 +136,7 @@ func (s *Store) Update(position meshcom.Position, seenAt time.Time) bool {
 		applyFreshness(&record, freshnessDirect, seenAt, position.RSSI, position.SNR)
 	} else {
 		applyFreshness(&record, freshnessIndirect, seenAt, 0, 0)
-		if len(via) > 0 {
-			s.touchLastHopLocked(via[len(via)-1], position.RSSI, position.SNR, seenAt)
-		}
+		s.touchViaChainLocked(via, position.RSSI, position.SNR, seenAt)
 	}
 
 	if exists && reflect.DeepEqual(current, record) {
@@ -180,9 +178,7 @@ func (s *Store) TouchFromPacket(src string, rssi, snr int, seenAt time.Time) boo
 			s.dirty = true
 			changed = true
 		}
-		if len(via) > 0 {
-			changed = s.touchLastHopLocked(via[len(via)-1], rssi, snr, seenAt) || changed
-		}
+		changed = s.touchViaChainLocked(via, rssi, snr, seenAt) || changed
 	}
 	return changed
 }
@@ -251,6 +247,27 @@ func (s *Store) touchLastHopLocked(callsign string, rssi, snr int, seenAt time.T
 	s.records[callsign] = rec
 	s.dirty = true
 	return true
+}
+
+// touchViaChainLocked applies indirect freshness to every relay in via, then
+// applies direct freshness to last hop. Caller must hold s.mu.
+func (s *Store) touchViaChainLocked(via []string, rssi, snr int, seenAt time.Time) bool {
+	changed := false
+	for i, callsign := range via {
+		rec, exists := s.records[callsign]
+		if !exists {
+			continue
+		}
+		if i == len(via)-1 {
+			applyFreshness(&rec, freshnessDirect, seenAt, rssi, snr)
+		} else {
+			applyFreshness(&rec, freshnessIndirect, seenAt, 0, 0)
+		}
+		s.records[callsign] = rec
+		s.dirty = true
+		changed = true
+	}
+	return changed
 }
 
 func writeFileAtomically(path string, records map[string]Record) error {

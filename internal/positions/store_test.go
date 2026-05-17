@@ -245,6 +245,51 @@ func TestLastHopFreshnessOnPosPacket(t *testing.T) {
 	}
 }
 
+func TestViaChainFreshnessOnPosPacket(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(5 * time.Minute)
+
+	s := New(filepath.Join(dir, "p.json"))
+	s.Update(meshcom.Position{Source: "QQ0REL-1", Latitude: 44.0, Longitude: 11.0}, t0)
+	s.Update(meshcom.Position{Source: "QQ0MID-1", Latitude: 45.0, Longitude: 12.0}, t0)
+
+	s.Update(meshcom.Position{
+		Source:    "QQ0ORG-1,QQ0MID-1,QQ0REL-1",
+		Latitude:  43.0,
+		Longitude: 10.0,
+		RSSI:      -90,
+		SNR:       5,
+	}, t1)
+
+	relay := s.Snapshot()["QQ0REL-1"]
+	if relay.LastSeen != t1 || relay.LastDirectSeen == nil || !relay.LastDirectSeen.Equal(t1) {
+		t.Fatalf("relay freshness = %+v, want lastSeen/lastDirectSeen = %v", relay, t1)
+	}
+	if relay.RSSI != -90 || relay.SNR != 5 {
+		t.Fatalf("relay RSSI/SNR = %d/%d, want -90/5", relay.RSSI, relay.SNR)
+	}
+
+	mid := s.Snapshot()["QQ0MID-1"]
+	if mid.LastSeen != t1 {
+		t.Fatalf("mid LastSeen = %v, want %v", mid.LastSeen, t1)
+	}
+	if mid.LastDirectSeen == nil || !mid.LastDirectSeen.Equal(t0) {
+		t.Fatalf("mid LastDirectSeen = %v, want %v", mid.LastDirectSeen, t0)
+	}
+	if mid.RSSI != 0 || mid.SNR != 0 {
+		t.Fatalf("mid RSSI/SNR = %d/%d, want 0/0", mid.RSSI, mid.SNR)
+	}
+
+	origin := s.Snapshot()["QQ0ORG-1"]
+	if origin.LastSeen != t1 {
+		t.Fatalf("origin LastSeen = %v, want %v", origin.LastSeen, t1)
+	}
+	if origin.LastDirectSeen != nil {
+		t.Fatalf("origin LastDirectSeen = %v, want nil", origin.LastDirectSeen)
+	}
+}
+
 func TestLastHopFreshnessSkippedIfNoRecord(t *testing.T) {
 	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
@@ -334,6 +379,49 @@ func TestTouchFromPacketIndirect(t *testing.T) {
 	// Indirect touch must NOT update rssi/snr on origin.
 	if origin.RSSI != 0 || origin.SNR != 0 {
 		t.Fatalf("origin RSSI/SNR = %d/%d, want 0/0 (indirect)", origin.RSSI, origin.SNR)
+	}
+
+	relay := s.Snapshot()["RELAY-1"]
+	if relay.LastSeen != t1 {
+		t.Fatalf("relay LastSeen = %v, want %v", relay.LastSeen, t1)
+	}
+	if relay.LastDirectSeen == nil || !relay.LastDirectSeen.Equal(t1) {
+		t.Fatalf("relay LastDirectSeen = %v, want %v", relay.LastDirectSeen, t1)
+	}
+	if relay.RSSI != -95 || relay.SNR != 3 {
+		t.Fatalf("relay RSSI/SNR = %d/%d, want -95/3", relay.RSSI, relay.SNR)
+	}
+}
+
+func TestTouchFromPacketIndirectUpdatesAllViaHopsLastSeen(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(3 * time.Minute)
+
+	s := New(filepath.Join(dir, "p.json"))
+	s.Update(meshcom.Position{Source: "ORIGIN-1", Latitude: 43.0, Longitude: 10.0}, t0)
+	s.Update(meshcom.Position{Source: "MID-1", Latitude: 44.0, Longitude: 11.0}, t0)
+	s.Update(meshcom.Position{Source: "RELAY-1", Latitude: 45.0, Longitude: 12.0}, t0)
+
+	changed := s.TouchFromPacket("ORIGIN-1,MID-1,RELAY-1", -95, 3, t1)
+	if !changed {
+		t.Fatal("TouchFromPacket indirect multi-hop: expected changed=true")
+	}
+
+	origin := s.Snapshot()["ORIGIN-1"]
+	if origin.LastSeen != t1 || origin.LastDirectSeen == nil || !origin.LastDirectSeen.Equal(t0) || origin.RSSI != 0 || origin.SNR != 0 {
+		t.Fatalf("origin freshness = %+v", origin)
+	}
+
+	mid := s.Snapshot()["MID-1"]
+	if mid.LastSeen != t1 {
+		t.Fatalf("mid LastSeen = %v, want %v", mid.LastSeen, t1)
+	}
+	if mid.LastDirectSeen == nil || !mid.LastDirectSeen.Equal(t0) {
+		t.Fatalf("mid LastDirectSeen = %v, want %v", mid.LastDirectSeen, t0)
+	}
+	if mid.RSSI != 0 || mid.SNR != 0 {
+		t.Fatalf("mid RSSI/SNR = %d/%d, want 0/0", mid.RSSI, mid.SNR)
 	}
 
 	relay := s.Snapshot()["RELAY-1"]

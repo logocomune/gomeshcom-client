@@ -367,11 +367,16 @@ export function freshnessDeltasFromEvent(event: StreamEvent): FreshnessDelta[] {
 	if (relays.length === 0) {
 		return [{ source: origin, mode: 'direct', rssi, snr, seenAt }];
 	}
-	const lastRelay = relays[relays.length - 1];
-	return [
-		{ source: origin, mode: 'indirect', seenAt },
-		{ source: lastRelay, mode: 'direct', rssi, snr, seenAt }
-	];
+	const deltas: FreshnessDelta[] = [{ source: origin, mode: 'indirect', seenAt }];
+	for (let i = 0; i < relays.length; i++) {
+		const source = relays[i];
+		if (i === relays.length - 1) {
+			deltas.push({ source, mode: 'direct', rssi, snr, seenAt });
+		} else {
+			deltas.push({ source, mode: 'indirect', seenAt });
+		}
+	}
+	return deltas;
 }
 
 // applyLiveFreshness merges stored positions with live SSE events.
@@ -389,11 +394,16 @@ export function applyLiveFreshness(stored: MapPosition[], events: StreamEvent[])
 		const coordPos = positionFromEvent(event);
 		if (coordPos) {
 			const current = bySource.get(coordPos.source);
-			if (!current || coordPos.updatedAt >= current.updatedAt) {
-				const merged: MapPosition = { ...(current ?? coordPos), ...coordPos };
-				// Indirect pos sets lastDirectSeen=undefined — preserve existing if better.
-				if (
-					current?.lastDirectSeen &&
+				if (!current || coordPos.updatedAt >= current.updatedAt) {
+					const merged: MapPosition = {
+						...(current ?? coordPos),
+						...coordPos,
+						rssi: coordPos.rssi ?? current?.rssi,
+						snr: coordPos.snr ?? current?.snr
+					};
+					// Indirect pos sets lastDirectSeen=undefined — preserve existing if better.
+					if (
+						current?.lastDirectSeen &&
 					(!merged.lastDirectSeen || current.lastDirectSeen > merged.lastDirectSeen)
 				) {
 					merged.lastDirectSeen = current.lastDirectSeen;
@@ -418,8 +428,8 @@ export function applyLiveFreshness(stored: MapPosition[], events: StreamEvent[])
 					...rec,
 					lastSeen: delta.seenAt,
 					lastDirectSeen: delta.seenAt,
-					rssi: delta.rssi,
-					snr: delta.snr,
+					rssi: delta.rssi ?? rec.rssi,
+					snr: delta.snr ?? rec.snr,
 					updatedAt: delta.seenAt
 				});
 			} else {
@@ -447,8 +457,8 @@ export function positionFromEvent(event: StreamEvent): MapPosition | null {
 		lon: packet.long,
 		altitude: packet.alt,
 		battery: packet.batt,
-		rssi: packet.rssi,
-		snr: packet.snr,
+		rssi: isDirect ? packet.rssi : undefined,
+		snr: isDirect ? packet.snr : undefined,
 		hwId: packet.hw_id != null ? String(packet.hw_id) : undefined,
 		lastSeen: event.receivedAt,
 		lastDirectSeen: isDirect ? event.receivedAt : undefined,

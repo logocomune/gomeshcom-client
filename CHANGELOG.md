@@ -16,6 +16,11 @@ All notable changes to this project are documented in this file.
 - **`udpsend` tool** (`cmd/udpsend`): CLI utility to send a single UDP datagram to a `host:port`. Accepts payload as UTF-8 string (`-payload`) or hex string (`-hex`). Useful for manual testing and scripting.
 - **`udprecv` tool** (`cmd/udprecv`): CLI utility to listen on a UDP address and print each received datagram with RFC3339Nano timestamp, source address, and byte count. Output is either quoted string (default) or hex dump (`-hex` flag). Configurable receive buffer via `-buf`.
 
+### Fixed
+
+- Direct-node hover and details keep showing `rssi`/`snr` after live `msg`/`pos` updates that omit those fields. Live freshness merges now preserve existing signal values instead of clearing them with `undefined`.
+- Indirect `pos` packets now refresh `lastSeen` on every hop in the `via` chain. Signal values stay attached to direct packets and the last relay hop only.
+
 ---
 
 ## [0.4.2] - 2026-05-16

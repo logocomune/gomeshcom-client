@@ -8,6 +8,7 @@ import {
 	freshnessDeltasFromEvent,
 	messageKind,
 	mergeMapPositions,
+	positionFromEvent,
 	packetBadge,
 	packetIcon,
 	positionsFromRecords,
@@ -130,6 +131,29 @@ describe('event helpers', () => {
 		]);
 	});
 
+	it('pos packet keeps rssi/snr only for direct source', () => {
+		const direct = timedEvent('packet.received', '2026-05-14T19:00:00Z', {
+			packet: { type: 'pos', src: 'QQ5EKX-11', lat: 43.5, long: 10.3, rssi: -88, snr: 4 }
+		});
+		const indirect = timedEvent('packet.received', '2026-05-14T19:00:00Z', {
+			packet: { type: 'pos', src: 'QQ5EKX-11,RELAY', lat: 43.5, long: 10.3, rssi: -88, snr: 4 }
+		});
+
+		expect(positionFromEvent(direct)).toMatchObject({
+			source: 'QQ5EKX-11',
+			lastDirectSeen: '2026-05-14T19:00:00Z',
+			rssi: -88,
+			snr: 4
+		});
+		expect(positionFromEvent(indirect)).toMatchObject({
+			source: 'QQ5EKX-11',
+			lastDirectSeen: undefined,
+			rssi: undefined,
+			snr: undefined,
+			via: ['RELAY']
+		});
+	});
+
 	it('keeps newest map position even when events arrive newest first', () => {
 		expect.assertions(1);
 
@@ -250,14 +274,27 @@ describe('freshnessDeltasFromEvent', () => {
 		expect(deltas[0]).toMatchObject({ source: 'A-1', mode: 'direct', rssi: -80, snr: 5 });
 	});
 
-	it('indirect packet → indirect delta for origin + direct delta for last relay', () => {
+	it('indirect packet → indirect delta for origin and relays + direct delta for last relay', () => {
 		const e = event('packet.received', {
 			packet: { type: 'msg', src: 'A-1,R1,R2', rssi: -90, snr: 3 }
 		});
 		const deltas = freshnessDeltasFromEvent(e);
-		expect(deltas).toHaveLength(2);
+		expect(deltas).toHaveLength(3);
 		expect(deltas[0]).toMatchObject({ source: 'A-1', mode: 'indirect' });
-		expect(deltas[1]).toMatchObject({ source: 'R2', mode: 'direct', rssi: -90, snr: 3 });
+		expect(deltas[1]).toMatchObject({ source: 'R1', mode: 'indirect' });
+		expect(deltas[2]).toMatchObject({ source: 'R2', mode: 'direct', rssi: -90, snr: 3 });
+	});
+
+	it('indirect packet → indirect delta for each relay + direct delta for last relay', () => {
+		const e = event('packet.received', {
+			packet: { type: 'pos', src: 'A-1,R1,R2,R3', rssi: -90, snr: 3 }
+		});
+		const deltas = freshnessDeltasFromEvent(e);
+		expect(deltas).toHaveLength(4);
+		expect(deltas[0]).toMatchObject({ source: 'A-1', mode: 'indirect' });
+		expect(deltas[1]).toMatchObject({ source: 'R1', mode: 'indirect' });
+		expect(deltas[2]).toMatchObject({ source: 'R2', mode: 'indirect' });
+		expect(deltas[3]).toMatchObject({ source: 'R3', mode: 'direct', rssi: -90, snr: 3 });
 	});
 
 	it('works for msg and tele packet types', () => {
@@ -320,6 +357,17 @@ describe('applyLiveFreshness', () => {
 		expect(a.snr).toBe(5);
 	});
 
+	it('direct msg without rssi/snr keeps existing signal values', () => {
+		const s = [stored('A-1', { lastSeen: t0, rssi: -92, snr: 7 })];
+		const events: StreamEvent[] = [packetEvent('A-1', 'msg')];
+		const result = applyLiveFreshness(s, events);
+		const a = result.find((p) => p.source === 'A-1')!;
+		expect(a.lastSeen).toBe(t1);
+		expect(a.lastDirectSeen).toBe(t1);
+		expect(a.rssi).toBe(-92);
+		expect(a.snr).toBe(7);
+	});
+
 	it('indirect msg updates lastSeen of origin, lastDirectSeen/rssi/snr of last relay', () => {
 		const s = [stored('ORIGIN-1'), stored('RELAY-1', { lastDirectSeen: t0 })];
 		const events: StreamEvent[] = [packetEvent('ORIGIN-1,RELAY-1', 'msg', { rssi: -95, snr: 3 })];
@@ -333,6 +381,20 @@ describe('applyLiveFreshness', () => {
 		expect(relay.lastDirectSeen).toBe(t1);
 		expect(relay.rssi).toBe(-95);
 		expect(relay.snr).toBe(3);
+	});
+
+	it('pos packet updates lastSeen for every relay in via chain', () => {
+		const s = [stored('ORIGIN-1'), stored('MID-1'), stored('RELAY-1')];
+		const events: StreamEvent[] = [packetEvent('ORIGIN-1,MID-1,RELAY-1', 'pos', { rssi: -88, snr: 4 })];
+		const result = applyLiveFreshness(s, events);
+
+		expect(result.find((p) => p.source === 'ORIGIN-1')?.lastSeen).toBe(t1);
+		expect(result.find((p) => p.source === 'MID-1')?.lastSeen).toBe(t1);
+		const relay = result.find((p) => p.source === 'RELAY-1')!;
+		expect(relay.lastSeen).toBe(t1);
+		expect(relay.lastDirectSeen).toBe(t1);
+		expect(relay.rssi).toBe(-88);
+		expect(relay.snr).toBe(4);
 	});
 
 	it('skips freshness update for node not in stored (no record)', () => {
@@ -374,10 +436,13 @@ describe('applyLiveFreshness', () => {
 		expect(origin.lat).toBe(48.5);
 		expect(origin.lon).toBe(16.5);
 		expect(origin.lastDirectSeen).toBeUndefined();
+		expect(origin.rssi).toBeUndefined();
+		expect(origin.snr).toBeUndefined();
 
 		const relay = result.find((p) => p.source === 'RELAY-1')!;
 		expect(relay.lastDirectSeen).toBe(t1);
 		expect(relay.rssi).toBe(-88);
+		expect(relay.snr).toBe(4);
 	});
 
 	it('does not regress lastSeen with older event', () => {

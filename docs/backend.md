@@ -66,6 +66,9 @@ Swagger/OpenAPI contract: [`docs/openapi.yaml`](openapi.yaml).
 
 When `GOMESHCOM_SEND_DISABLE_TX=true`, `/api/events` includes `txDisabled:true` in the initial `station.identity` event. The web UI shows the dry-run banner and disables the send button, while `/api/messages` still accepts requests and logs the payload instead of sending UDP traffic.
 
+The web map treats `rssi`/`snr` as direct-node metadata. Direct updates preserve previously known signal values when a live packet omits them; indirect updates still refresh `lastSeen` without replacing signal fields on the origin node.
+For `pos` packets with a relay chain, the live frontend refreshes `lastSeen` on every hop, keeps `rssi`/`snr` only on the last hop, and leaves origin/intermediate relays without signal fields.
+
 `GET /api/positions` returns the persisted node position map loaded at startup and updated from incoming `pos` packets:
 
 ```json
