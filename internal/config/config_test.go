@@ -30,6 +30,32 @@ func TestLoadAllowsEmptyNodeAddr(t *testing.T) {
 	}
 }
 
+func TestLoadRequestLogEnabled(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"gomeshcomd"}
+	t.Cleanup(func() {
+		os.Args = oldArgs
+	})
+
+	t.Setenv("GOMESHCOM_NODE_ADDR", "")
+	t.Setenv("GOMESHCOM_MY_CALL", "QQ1ABC-1")
+	t.Setenv("GOMESHCOM_HTTP_ADDR", "127.0.0.1:8080")
+	t.Setenv("GOMESHCOM_UDP_LISTEN_ADDR", "0.0.0.0:1799")
+	t.Setenv("GOMESHCOM_DATA_DIR", "./data")
+	t.Setenv("GOMESHCOM_MAX_MESSAGE_LENGTH", "149")
+	t.Setenv("GOMESHCOM_LOG_LEVEL", "info")
+	t.Setenv("GOMESHCOM_REQUEST_LOG_ENABLED", "true")
+
+	cfg, _, err := Load("test")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.RequestLog.Enabled {
+		t.Fatal("RequestLog.Enabled = false, want true")
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := map[string]struct {
 		cfg     Config

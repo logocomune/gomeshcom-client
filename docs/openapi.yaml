@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: gomeshcomd API
-  version: 0.3.0
+  version: 0.5.0
   description: |
     HTTP and Server-Sent Events API exposed by gomeshcomd.
     Static frontend routes are served by the same HTTP listener but are not
@@ -43,7 +43,10 @@ paths:
       summary: Send an outgoing text message over UDP
       description: |
         Validates the request, suppresses immediate duplicates via the send
-        cache, then sends the message through the configured UDP bridge.
+        cache, then sends the message through the configured UDP bridge. After
+        accept, the server waits up to 5 seconds for the node echo; if none
+        arrives, it persists a chat record with `delivery_status: failed` and
+        emits `message.failed`.
       operationId: createMessage
       requestBody:
         required: true
@@ -139,7 +142,9 @@ paths:
         The stream starts with a `heartbeat` event, then emits
         `station.identity`, optionally `positions.snapshot`, then recent
         replayed `packet.received` events from the raw receive log, followed by
-        live events. A `heartbeat` event is sent every 15 seconds.
+        live events. A `heartbeat` event is sent every 15 seconds. Failed
+        outbound echo tracking emits `message.failed` with a `ChatRecord`
+        payload.
       operationId: streamEvents
       responses:
         "200":
@@ -208,7 +213,7 @@ paths:
         - name: hours
           in: query
           required: false
-          description: History window in hours. Defaults to server config and is capped by server config.
+          description: History window in hours. Defaults to server config for `P_broadcast`/`P_<channel>` and to 30 days for `DM_<CALLSIGN>`. Capped by server config.
           schema:
             type: number
             format: double
@@ -367,6 +372,14 @@ components:
         snr:
           type: integer
           example: 12
+        direction:
+          type: string
+          enum: [outbound]
+          example: outbound
+        delivery_status:
+          type: string
+          enum: [failed]
+          example: failed
     TextMessage:
       type: object
       required: [type, msg]

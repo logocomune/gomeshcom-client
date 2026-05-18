@@ -26,4 +26,22 @@ describe('About page', () => {
 		await expect.element(page.getByText('My call')).toBeVisible();
 		await expect.element(page.getByText('QQ1ABC-1')).toBeVisible();
 	});
+
+	it('links reference repository', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => {
+				return new Response(JSON.stringify({}), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				});
+			})
+		);
+
+		render(AboutPage);
+
+		await expect
+			.element(page.getByRole('link', { name: 'github.com/logocomune/gomeshcom-udp' }))
+			.toHaveAttribute('href', 'https://github.com/logocomune/gomeshcom-udp');
+	});
 });

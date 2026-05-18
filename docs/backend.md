@@ -6,24 +6,25 @@
 
 Configuration uses `github.com/ardanlabs/conf/v3` with the `GOMESHCOM` prefix. Values can be supplied by environment variables or command-line flags.
 
-| Field | Environment | Flag | Default |
-| --- | --- | --- | --- |
-| HTTP address | `GOMESHCOM_HTTP_ADDR` | `--http-addr` | `127.0.0.1:8080` |
-| UDP listen address | `GOMESHCOM_UDP_LISTEN_ADDR` | `--udp-listen-addr` | `0.0.0.0:1799` |
-| Node UDP address | `GOMESHCOM_NODE_ADDR` | `--node-addr` | *(empty)* |
-| Local callsign | `GOMESHCOM_MY_CALL` | `--my-call` | `QQ0XX-1` |
-| Data directory | `GOMESHCOM_DATA_DIR` | `--data-dir` | `./data` |
-| Max message length | `GOMESHCOM_MAX_MESSAGE_LENGTH` | `--max-message-length` | `149` |
-| Send dedup TTL | `GOMESHCOM_SEND_DEDUP_TTL` | `--send-dedup-ttl` | `2s` |
-| Send delay | `GOMESHCOM_SEND_DELAY` | `--send-delay` | `40s` |
-| Receive log enabled | `GOMESHCOM_RECEIVE_LOG_ENABLED` | `--receive-log-enabled` | `true` |
-| Receive log path | `GOMESHCOM_RECEIVE_LOG_PATH` | `--receive-log-path` | `./data/raw` |
-| Receive log retention days | `GOMESHCOM_RECEIVE_LOG_RETENTION_DAYS` | `--receive-log-retention-days` | `365` |
-| Receive log replay window | `GOMESHCOM_RECEIVE_LOG_REPLAY_WINDOW` | `--receive-log-replay-window` | `1h` |
-| Chat log path | `GOMESHCOM_CHAT_LOG_PATH` | `--chat-log-path` | `./data/chat` |
-| Chat history window | `GOMESHCOM_CHAT_LOG_HISTORY_WINDOW` | `--chat-log-history-window` | `24h` |
-| Chat max history window | `GOMESHCOM_CHAT_LOG_MAX_HISTORY_WINDOW` | `--chat-log-max-history-window` | `720h` |
-| Log level | `GOMESHCOM_LOG_LEVEL` | `--log-level` | `info` |
+| Field                      | Environment                             | Flag                            | Default          |
+| -------------------------- | --------------------------------------- | ------------------------------- | ---------------- |
+| HTTP address               | `GOMESHCOM_HTTP_ADDR`                   | `--http-addr`                   | `127.0.0.1:8080` |
+| UDP listen address         | `GOMESHCOM_UDP_LISTEN_ADDR`             | `--udp-listen-addr`             | `0.0.0.0:1799`   |
+| Node UDP address           | `GOMESHCOM_NODE_ADDR`                   | `--node-addr`                   | _(empty)_        |
+| Local callsign             | `GOMESHCOM_MY_CALL`                     | `--my-call`                     | `QQ0XX-1`        |
+| Data directory             | `GOMESHCOM_DATA_DIR`                    | `--data-dir`                    | `./data`         |
+| Max message length         | `GOMESHCOM_MAX_MESSAGE_LENGTH`          | `--max-message-length`          | `149`            |
+| Send dedup TTL             | `GOMESHCOM_SEND_DEDUP_TTL`              | `--send-dedup-ttl`              | `2s`             |
+| Send delay                 | `GOMESHCOM_SEND_DELAY`                  | `--send-delay`                  | `40s`            |
+| Receive log enabled        | `GOMESHCOM_RECEIVE_LOG_ENABLED`         | `--receive-log-enabled`         | `true`           |
+| Receive log path           | `GOMESHCOM_RECEIVE_LOG_PATH`            | `--receive-log-path`            | `./data/raw`     |
+| Receive log retention days | `GOMESHCOM_RECEIVE_LOG_RETENTION_DAYS`  | `--receive-log-retention-days`  | `365`            |
+| Receive log replay window  | `GOMESHCOM_RECEIVE_LOG_REPLAY_WINDOW`   | `--receive-log-replay-window`   | `1h`             |
+| Chat log path              | `GOMESHCOM_CHAT_LOG_PATH`               | `--chat-log-path`               | `./data/chat`    |
+| Chat history window        | `GOMESHCOM_CHAT_LOG_HISTORY_WINDOW`     | `--chat-log-history-window`     | `24h`            |
+| Chat max history window    | `GOMESHCOM_CHAT_LOG_MAX_HISTORY_WINDOW` | `--chat-log-max-history-window` | `720h`           |
+| HTTP request log           | `GOMESHCOM_REQUEST_LOG_ENABLED`         | `--request-log-enabled`         | `false`          |
+| Log level                  | `GOMESHCOM_LOG_LEVEL`                   | `--log-level`                   | `info`           |
 
 Startup banner shows `NODE     autodetect` in the header row.
 
@@ -51,6 +52,9 @@ Swagger/OpenAPI contract: [`docs/openapi.yaml`](openapi.yaml).
 - `GET /api/chat/{conversation}?hours=N`
 - `DELETE /api/chat/{conversation}`
 
+Chat history defaults are conversation-aware. `P_broadcast` and `P_<channel>` use `GOMESHCOM_CHAT_LOG_HISTORY_WINDOW` (default `24h`). `DM_<CALLSIGN>` uses a 30-day default window. The optional `hours` query parameter overrides both defaults and is still capped by `GOMESHCOM_CHAT_LOG_MAX_HISTORY_WINDOW` (default `720h`, 30 days).
+The web UI stores the last selected chat conversation in `localStorage` and restores it after restart. If the stored conversation is no longer returned by `/api/chat/list`, the UI falls back to Broadcast.
+
 `DELETE /api/chat/{conversation}` deletes the chat history file for the specified conversation. Returns `204` on success.
 
 `POST /api/messages` accepts:
@@ -64,10 +68,15 @@ Swagger/OpenAPI contract: [`docs/openapi.yaml`](openapi.yaml).
 
 `POST /api/messages` validates the request, suppresses immediate duplicates within `GOMESHCOM_SEND_DEDUP_TTL` (default `2s`), and transmits the text to the MeshCom node via UDP. It returns `202` on accept, `429` for duplicate suppression (with `Retry-After: 2`), `502` on UDP send failure, and `503` when no bridge is configured.
 
+After a message is accepted and written to UDP, the backend tracks it for 5 seconds. If the same message is not observed returning from the node as a UDP `msg` packet during that window, the backend writes a persistent chat record with `direction:"outbound"` and `delivery_status:"failed"`, then emits a `message.failed` SSE event. Node echo matching accepts the plain text, a numeric node sequence suffix such as `{571}`, and truncated numeric suffixes such as `{571`. The web UI renders failed status as a red `X`; public and channel sends show a green cloud once the local node echo is observed.
+
 When `GOMESHCOM_SEND_DISABLE_TX=true`, `/api/events` includes `txDisabled:true` in the initial `station.identity` event. The web UI shows the dry-run banner and disables the send button, while `/api/messages` still accepts requests and logs the payload instead of sending UDP traffic.
+
+When `GOMESHCOM_REQUEST_LOG_ENABLED=true`, every HTTP request emits one structured `slog` record after the response completes. The record includes method, endpoint path, status code, caller IP, RFC3339 timestamp, and duration. Caller IP prefers `CF-Connecting-IP`, then `X-Real-IP`, then `X-Rela-IP`, then the socket remote address.
 
 The web map treats `rssi`/`snr` as direct-node metadata. Direct updates preserve previously known signal values when a live packet omits them; indirect updates still refresh `lastSeen` without replacing signal fields on the origin node.
 For `pos` packets with a relay chain, the live frontend refreshes `lastSeen` on every hop, keeps `rssi`/`snr` only on the last hop, and leaves origin/intermediate relays without signal fields.
+Map marker hover tooltips show station freshness plus `firstSeen` and `lastSeen`; marker clicks do not open a detail card. The local `MyCall` marker hover shows only callsign and device name.
 
 `GET /api/positions` returns the persisted node position map loaded at startup and updated from incoming `pos` packets:
 
@@ -148,13 +157,15 @@ Incoming datagrams are appended to one file per UTC day, for example `data/raw/r
 
 Incoming `msg` packets are appended to per-conversation JSONL files under `GOMESHCOM_CHAT_LOG_PATH` (default `./data/chat`). DM messages are filtered: only messages where `src` or `dst` matches `GOMESHCOM_MY_CALL` are stored.
 
+Outbound messages that do not echo back from the local node within the send tracking window are stored in the same per-conversation files with `delivery_status:"failed"`. The `src` field is the callsign configured when the send happened, so failed history remains stable even if `GOMESHCOM_MY_CALL` changes later.
+
 Conversation file naming:
 
-| Destination | File |
-| --- | --- |
-| `*` or empty | `P_broadcast.jsonl` |
-| Numeric (channel) | `P_<number>.jsonl` |
-| Callsign (DM) | `DM_<CALLSIGN>.jsonl` |
+| Destination       | File                  |
+| ----------------- | --------------------- |
+| `*` or empty      | `P_broadcast.jsonl`   |
+| Numeric (channel) | `P_<number>.jsonl`    |
+| Callsign (DM)     | `DM_<CALLSIGN>.jsonl` |
 
 ## Packet Parsing
 

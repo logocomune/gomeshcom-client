@@ -30,14 +30,16 @@ type Logger struct {
 }
 
 type Record struct {
-	ReceivedAt time.Time `json:"received_at"`
-	Src        string    `json:"src,omitempty"`
-	SrcType    string    `json:"src_type,omitempty"`
-	Dst        string    `json:"dst,omitempty"`
-	MsgID      string    `json:"msg_id,omitempty"`
-	Msg        string    `json:"msg"`
-	RSSI       int       `json:"rssi,omitempty"`
-	SNR        int       `json:"snr,omitempty"`
+	ReceivedAt     time.Time `json:"received_at"`
+	Src            string    `json:"src,omitempty"`
+	SrcType        string    `json:"src_type,omitempty"`
+	Dst            string    `json:"dst,omitempty"`
+	MsgID          string    `json:"msg_id,omitempty"`
+	Msg            string    `json:"msg"`
+	RSSI           int       `json:"rssi,omitempty"`
+	SNR            int       `json:"snr,omitempty"`
+	Direction      string    `json:"direction,omitempty"`
+	DeliveryStatus string    `json:"delivery_status,omitempty"`
 }
 
 func New(baseDir string, myCall string) *Logger {
@@ -61,6 +63,28 @@ func (l *Logger) Append(msg meshcom.TextMessage, receivedAt time.Time) error {
 		SNR:        msg.SNR,
 	}
 
+	return l.appendRecord(name, rec)
+}
+
+func (l *Logger) AppendFailed(source, destination, message string, receivedAt time.Time) (Record, error) {
+	rec := Record{
+		ReceivedAt:     receivedAt.UTC(),
+		Src:            source,
+		Dst:            destination,
+		Msg:            message,
+		Direction:      "outbound",
+		DeliveryStatus: "failed",
+	}
+
+	name := filenameForMsg(source, destination, source)
+	if name == "" {
+		return rec, nil
+	}
+
+	return rec, l.appendRecord(name, rec)
+}
+
+func (l *Logger) appendRecord(name string, rec Record) error {
 	line, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("marshal chat log record: %w", err)

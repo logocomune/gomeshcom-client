@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/logocomune/gomeshcom-udp/internal/config"
 	"github.com/logocomune/gomeshcom-udp/internal/events"
 	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
+	"github.com/logocomune/gomeshcom-udp/internal/outbox"
 	"github.com/logocomune/gomeshcom-udp/internal/positions"
 	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
 	"github.com/logocomune/gomeshcom-udp/internal/sendcache"
@@ -43,6 +45,83 @@ func TestHealth(t *testing.T) {
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestRequestLogEnabledLogsStructuredRequest(t *testing.T) {
+	var logBuffer bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
+
+	cfg := testConfig()
+	cfg.RequestLog.Enabled = true
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	request.RemoteAddr = "198.51.100.12:4321"
+	request.Header.Set("CF-Connecting-IP", "203.0.113.10")
+	request.Header.Set("X-Real-IP", "198.51.100.99")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	logLine := logBuffer.String()
+	for _, want := range []string{
+		`msg="http request"`,
+		"method=GET",
+		"endpoint=/api/health",
+		"status=200",
+		"caller_ip=203.0.113.10",
+		"started_at=",
+		"duration=",
+		"duration_ms=",
+	} {
+		if !strings.Contains(logLine, want) {
+			t.Fatalf("request log = %q, want %q", logLine, want)
+		}
+	}
+}
+
+func TestRequestLogDisabledDoesNotLogRequest(t *testing.T) {
+	var logBuffer bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if logBuffer.Len() != 0 {
+		t.Fatalf("request log = %q, want empty", logBuffer.String())
+	}
+}
+
+func TestRequestLogUsesRealIPWhenCloudflareHeaderMissing(t *testing.T) {
+	var logBuffer bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
+
+	cfg := testConfig()
+	cfg.RequestLog.Enabled = true
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	request.Header.Set("X-Real-IP", "198.51.100.99")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if !strings.Contains(logBuffer.String(), "caller_ip=198.51.100.99") {
+		t.Fatalf("request log = %q, want X-Real-IP", logBuffer.String())
 	}
 }
 
@@ -98,6 +177,86 @@ func TestCreateMessage(t *testing.T) {
 				t.Fatalf("bridge calls = %d, want %d", bridge.calls.Load(), test.wantCalls)
 			}
 		})
+	}
+}
+
+func TestCreateMessagePersistsFailedWhenEchoMissing(t *testing.T) {
+	cfg := testConfig()
+	dir := t.TempDir()
+	cfg.ChatLog.Path = dir
+	bus := events.NewBus()
+	log := chatlog.New(dir, cfg.MyCall)
+	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil)
+	server.outbox = outbox.New(10*time.Millisecond, server.handleOutgoingTimeout)
+
+	body := []byte(`{"dst":"QQ1ABC-1","msg":"hello"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/messages", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d (body: %s)", response.Code, http.StatusAccepted, response.Body.String())
+	}
+
+	var records []chatlog.Record
+	deadline := time.After(time.Second)
+	for len(records) == 0 {
+		var err error
+		records, err = log.ReadSince("DM_QQ1ABC-1", time.Time{})
+		if err != nil {
+			t.Fatalf("ReadSince: %v", err)
+		}
+		select {
+		case <-deadline:
+			t.Fatal("failed record not persisted")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if records[0].DeliveryStatus != "failed" {
+		t.Fatalf("DeliveryStatus = %q, want failed", records[0].DeliveryStatus)
+	}
+	if records[0].Direction != "outbound" {
+		t.Fatalf("Direction = %q, want outbound", records[0].Direction)
+	}
+}
+
+func TestCreateMessageDoesNotFailWhenEchoArrives(t *testing.T) {
+	cfg := testConfig()
+	dir := t.TempDir()
+	cfg.ChatLog.Path = dir
+	bus := events.NewBus()
+	log := chatlog.New(dir, cfg.MyCall)
+	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil)
+	server.outbox = outbox.New(30*time.Millisecond, server.handleOutgoingTimeout)
+
+	body := []byte(`{"dst":"QQ1ABC-1","msg":"hello"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/messages", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d (body: %s)", response.Code, http.StatusAccepted, response.Body.String())
+	}
+
+	bus.Publish(events.Event{
+		Type: "packet.received",
+		Data: map[string]any{
+			"packet": meshcom.TextMessage{
+				Source:      cfg.MyCall,
+				Destination: "QQ1ABC-1",
+				Message:     "hello{5712",
+			},
+		},
+	})
+
+	time.Sleep(60 * time.Millisecond)
+	records, err := log.ReadSince("DM_QQ1ABC-1", time.Time{})
+	if err != nil {
+		t.Fatalf("ReadSince: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("records = %+v, want none", records)
 	}
 }
 
@@ -432,6 +591,48 @@ func TestGetConversationWithHours(t *testing.T) {
 	json.Unmarshal(rec2.Body.Bytes(), &body2)
 	if len(body2) != 2 {
 		t.Errorf("custom window count = %d, want 2", len(body2))
+	}
+}
+
+func TestGetConversationUsesThirtyDaysForDMDefault(t *testing.T) {
+	dir := t.TempDir()
+	log := chatlog.New(dir, "QQ0QQ-1")
+
+	now := time.Now().UTC()
+	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "dm recent"}, now.Add(-29*24*time.Hour))
+	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "dm old"}, now.Add(-31*24*time.Hour))
+	log.Append(meshcom.TextMessage{Destination: "*", Message: "broadcast old"}, now.Add(-2*time.Hour))
+
+	cfg := testConfig()
+	cfg.ChatLog.HistoryWindow = time.Hour
+	cfg.ChatLog.MaxHistoryWindow = 30 * 24 * time.Hour
+
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil)
+
+	dmRequest := httptest.NewRequest(http.MethodGet, "/api/chat/DM_QQ1ABC-1", nil)
+	dmRequest.SetPathValue("conversation", "DM_QQ1ABC-1")
+	dmResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(dmResponse, dmRequest)
+
+	var dmBody []chatlog.Record
+	if err := json.Unmarshal(dmResponse.Body.Bytes(), &dmBody); err != nil {
+		t.Fatalf("decode dm records: %v", err)
+	}
+	if len(dmBody) != 1 || dmBody[0].Msg != "dm recent" {
+		t.Fatalf("dm records = %+v", dmBody)
+	}
+
+	broadcastRequest := httptest.NewRequest(http.MethodGet, "/api/chat/P_broadcast", nil)
+	broadcastRequest.SetPathValue("conversation", "P_broadcast")
+	broadcastResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(broadcastResponse, broadcastRequest)
+
+	var broadcastBody []chatlog.Record
+	if err := json.Unmarshal(broadcastResponse.Body.Bytes(), &broadcastBody); err != nil {
+		t.Fatalf("decode broadcast records: %v", err)
+	}
+	if len(broadcastBody) != 0 {
+		t.Fatalf("broadcast records = %+v, want empty", broadcastBody)
 	}
 }
 

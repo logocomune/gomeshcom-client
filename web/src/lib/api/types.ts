@@ -88,4 +88,6 @@ export type ChatRecord = {
 	rssi?: number;
 	snr?: number;
 	source?: ChatRecordSource;
+	direction?: 'outbound' | string;
+	delivery_status?: 'pending' | 'failed' | string;
 };

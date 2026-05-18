@@ -15,8 +15,14 @@
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import { getMaidenheadLayer } from './maidenhead-layer';
 	import type { MapPosition } from './types';
-	import { nodeFreshness, FRESHNESS_FILL, FRESHNESS_ZINDEX, MYCALL_FILL, MYCALL_ZINDEX } from './node-state';
-	import { hardwareHumanName } from '$lib/api/hardware';
+	import {
+		nodeFreshness,
+		FRESHNESS_FILL,
+		FRESHNESS_ZINDEX,
+		MYCALL_FILL,
+		MYCALL_ZINDEX
+	} from './node-state';
+	import { buildOwnMarkerTooltipHtml, buildTooltipHtml, escHtml } from './map-tooltip';
 
 	const STORAGE_CENTER = 'meshcom:map:center';
 	const STORAGE_ZOOM = 'meshcom:map:zoom';
@@ -37,7 +43,6 @@
 	let showMaidenhead = $state(false);
 	let showLabels = $state(true);
 	let showClustering = $state(true);
-	let selectedPosition = $state<MapPosition | null>(null);
 	let now = $state(Date.now());
 	let tickerHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -147,14 +152,14 @@
 					tooltipElement.classList.add('hidden');
 					return;
 				}
-				tooltipElement.innerHTML = buildTooltipHtml(position);
+				tooltipElement.innerHTML = buildMarkerTooltipHtml(position);
 			} else if (clustered.length === 0) {
 				tooltip.setPosition(undefined);
 				tooltipElement.classList.add('hidden');
 				return;
 			} else if (clustered.length === 1) {
 				const position = clustered[0].get('position') as MapPosition;
-				tooltipElement.innerHTML = buildTooltipHtml(position);
+				tooltipElement.innerHTML = buildMarkerTooltipHtml(position);
 			} else {
 				const names = clustered
 					.map((f: any) => escHtml((f.get('position') as MapPosition)?.source ?? ''))
@@ -164,20 +169,6 @@
 			}
 			tooltipElement.classList.remove('hidden');
 			tooltip.setPosition(event.coordinate);
-		});
-
-		map.on('click', (event: any) => {
-			const feature = map.forEachFeatureAtPixel(event.pixel, (candidate: any) => candidate);
-			if (!feature) {
-				selectedPosition = null;
-				return;
-			}
-			const clustered = feature.get('features') as any[] | undefined;
-			if (clustered === undefined) {
-				selectedPosition = (feature.get('position') as MapPosition) ?? null;
-			} else {
-				selectedPosition = clustered.length === 1 ? (clustered[0].get('position') ?? null) : null;
-			}
 		});
 
 		map.on('moveend', saveMapState);
@@ -316,53 +307,11 @@
 		saveMapState();
 	}
 
-	function timeAgo(dateStr: string | undefined): string {
-		if (!dateStr) return 'sconosciuto';
-		const diffSec = Math.max(0, Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000));
-		if (diffSec < 60) return `${diffSec}s fa`;
-		const diffMin = Math.floor(diffSec / 60);
-		if (diffMin < 60) {
-			const s = diffSec % 60;
-			return s > 0 ? `${diffMin}m ${s}s fa` : `${diffMin}m fa`;
+	function buildMarkerTooltipHtml(position: MapPosition): string {
+		if (myCall !== '' && position.source.toUpperCase() === myCall.toUpperCase()) {
+			return buildOwnMarkerTooltipHtml(position);
 		}
-		const diffHour = Math.floor(diffMin / 60);
-		if (diffHour < 24) {
-			const m = diffMin % 60;
-			return m > 0 ? `${diffHour}h ${m}m fa` : `${diffHour}h fa`;
-		}
-		const diffDay = Math.floor(diffHour / 24);
-		const h = diffHour % 24;
-		return h > 0 ? `${diffDay}d ${h}h fa` : `${diffDay}d fa`;
-	}
-
-	function escHtml(s: string): string {
-		return s
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;')
-			.replace(/"/g, '&quot;');
-	}
-
-	function buildTooltipHtml(position: MapPosition): string {
-		const freshness = nodeFreshness(position, Date.now());
-		const lines: string[] = [
-			`<strong>${escHtml(position.source)}</strong>`,
-			`${escHtml(freshness)} · ${escHtml(timeAgo(position.lastSeen ?? position.updatedAt))}`
-		];
-		const hw = hardwareHumanName(position.hwId);
-		if (hw) lines.push(escHtml(hw));
-		if (position.via && position.via.length > 0) {
-			lines.push(`via ${escHtml(position.via.join(', '))}`);
-		}
-		if (freshness === 'direct') {
-			const signalParts: string[] = [];
-			if (position.rssi != null) signalParts.push(`📶 ${position.rssi} dBm`);
-			if (position.snr != null) signalParts.push(`SNR ${position.snr}`);
-			if (signalParts.length > 0) lines.push(signalParts.join(' · '));
-		}
-		if (position.altitude != null) lines.push(`↑ ${position.altitude} m`);
-		if (position.battery != null) lines.push(`🔋 ${position.battery}%`);
-		return lines.join('<br>');
+		return buildTooltipHtml(position);
 	}
 </script>
 
@@ -439,30 +388,4 @@
 		bind:this={tooltipElement}
 		class="pointer-events-none absolute z-[2000] hidden min-w-[160px] whitespace-nowrap rounded border border-gray-700 bg-gray-950 px-3 py-2 text-[11px] leading-5 text-white shadow-md"
 	></div>
-
-	{#if selectedPosition}
-		<div
-			class="absolute right-2 top-12 z-[1000] w-64 rounded border border-gray-700 bg-[#1e2330]/95 p-3 shadow-xl"
-		>
-			<div class="flex items-center justify-between">
-				<div class="truncate text-sm font-semibold text-white">{selectedPosition.source}</div>
-				<button class="text-gray-400 hover:text-gray-100" onclick={() => (selectedPosition = null)}
-					>×</button
-				>
-			</div>
-			<div class="mt-2 space-y-1 font-mono text-[11px] text-gray-300">
-				<div>{selectedPosition.lat.toFixed(5)}, {selectedPosition.lon.toFixed(5)}</div>
-				{#if selectedPosition.lastSeen}<div>
-						last seen {new Date(selectedPosition.lastSeen).toLocaleString('it-IT')}
-					</div>{/if}
-				{#if selectedPosition.firstSeen}<div>
-						first seen {new Date(selectedPosition.firstSeen).toLocaleString('it-IT')}
-					</div>{/if}
-				{#if selectedPosition.altitude != null}<div>alt {selectedPosition.altitude} m</div>{/if}
-				{#if selectedPosition.battery != null}<div>batt {selectedPosition.battery}%</div>{/if}
-				{#if selectedPosition.rssi != null}<div>rssi {selectedPosition.rssi} dBm</div>{/if}
-				{#if selectedPosition.snr != null}<div>snr {selectedPosition.snr}</div>{/if}
-			</div>
-		</div>
-	{/if}
 </div>

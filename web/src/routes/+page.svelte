@@ -21,6 +21,7 @@
 		fetchConversations,
 		fetchHistory,
 		conversationIdFor,
+		conversationIdForRecord,
 		chatRecordKey,
 		sendMessage,
 		destinationFor,
@@ -29,7 +30,9 @@
 		saveReadTimestamp,
 		isUnread,
 		deleteConversation,
-		clearReadTimestamp
+		clearReadTimestamp,
+		loadLastChatTarget,
+		saveLastChatTarget
 	} from '$lib/api/chat';
 	import { buildAckIndex } from '$lib/api/acks';
 	import { hardwareHumanName } from '$lib/api/hardware';
@@ -40,10 +43,12 @@
 	import MeshMapPanel from '$lib/map/MeshMapPanel.svelte';
 	import { getSendComposerState } from '$lib/ui/send';
 	import type { ConnectionState, StreamEvent, Conversation, ChatRecord } from '$lib/api/types';
+	import type { ChatTarget } from '$lib/api/chat';
 	import type { MapPosition } from '$lib/map/types';
 	import { partitionChannels, groupTooltip, resolveGroup } from '$lib/api/groups';
 	import {
 		chatSidebarGridColumns,
+		chatSidebarGridStyle,
 		chatSidebarNewDmLabel,
 		loadChatChannelsCollapsed,
 		saveChatChannelsCollapsed
@@ -83,7 +88,7 @@
 	let stationCallsign = $state('');
 	let appVersion = $state('');
 	let txDisabled = $state(false);
-	let chatTarget = $state<{ kind: 'channel' | 'contact'; value: string }>({
+	let chatTarget = $state<ChatTarget>({
 		kind: 'channel',
 		value: 'Broadcast'
 	});
@@ -92,11 +97,12 @@
 	let sendError = $state<string | null>(null);
 	let sendEchoTimer: ReturnType<typeof setTimeout> | null = null;
 	let streamFilter = $state('');
+	let chatFilter = $state('');
 	let chatScrollEl = $state<HTMLDivElement | null>(null);
 	let messageInputEl = $state<HTMLInputElement | null>(null);
 	let conversations = $state<Conversation[]>([]);
 	let chatHistory = $state<Record<string, ChatRecord[]>>({});
-	let historyHours = $state(24);
+	let historyHours = $state(168);
 	let rawChatRecord = $state<ChatRecord | null>(null);
 	let newDmOpen = $state(false);
 	let menuOpen = $state(false);
@@ -215,7 +221,8 @@
 	let displayChatRecords = $derived(
 		(chatHistory[currentConvId] ?? []).filter((rec) => {
 			const kind = messageKind(rec.msg).kind;
-			return kind !== 'ack' && kind !== 'reject';
+			if (kind === 'ack' || kind === 'reject') return false;
+			return chatRecordMatchesFilter(rec, chatFilter);
 		})
 	);
 
@@ -317,12 +324,19 @@
 						clearSendEcho();
 					}
 				}
+				if (event.type === 'message.failed') {
+					appendChatRecord(event.data as ChatRecord);
+					clearSendEcho();
+				}
 			}
 		});
 	}
 
 	async function reloadProtectedData() {
 		conversations = await fetchConversations();
+		chatTarget = loadLastChatTarget(conversations);
+		saveLastChatTarget(chatTarget);
+		markRead(conversationIdFor(chatTarget));
 		const updates: Record<string, string> = {};
 		for (const c of conversations) {
 			if (!readTimestamps[c.id] && c.last_seen) {
@@ -452,11 +466,13 @@
 
 	function selectChannel(channel: string) {
 		chatTarget = { kind: 'channel', value: channel };
+		saveLastChatTarget(chatTarget);
 		markRead(conversationIdFor({ kind: 'channel', value: channel }));
 	}
 
 	function selectContact(contact: string) {
 		chatTarget = { kind: 'contact', value: contact };
+		saveLastChatTarget(chatTarget);
 		markRead(conversationIdFor({ kind: 'contact', value: contact }));
 	}
 
@@ -493,6 +509,7 @@
 			} else {
 				conversations = conversations.filter((c) => c.id !== id);
 				chatTarget = { kind: 'channel', value: 'Broadcast' };
+				saveLastChatTarget(chatTarget);
 			}
 			deleteConfirmOpen = false;
 		} catch (e) {
@@ -536,12 +553,29 @@
 	}
 
 	function chatIconTooltip(rec: ChatRecord): string {
+		if (rec.delivery_status === 'pending') return 'Pending';
+		if (rec.delivery_status === 'failed') return 'Failed';
 		const kind = messageKind(rec.msg).kind;
 		if (kind === 'ack') return 'ACK — message acknowledged';
 		if (kind === 'reject') return 'REJ — message rejected';
 		if (kind === 'time') return 'Network time sync';
 		if (kind === 'config') return 'Config update';
 		return 'Text message';
+	}
+
+	function chatRecordMatchesFilter(rec: ChatRecord, filter: string): boolean {
+		const term = filter.trim().toLowerCase();
+		if (term === '') return true;
+		const kind = messageKind(rec.msg);
+		const haystack: string[] = [
+			rec.src ?? '',
+			rec.dst ?? '',
+			rec.msg ?? '',
+			cleanMessage(rec.msg),
+			kind.kind,
+			kind.label
+		];
+		return haystack.some((value) => value.toLowerCase().includes(term));
 	}
 
 	function clearSendEcho() {
@@ -556,14 +590,17 @@
 		const text = draftMessage.trim();
 		if (!text || sending || txDisabled) return;
 		const dst = destinationFor(chatTarget);
+		const pendingRecord = createPendingChatRecord(dst, text);
 		sending = true;
 		sendError = null;
+		appendChatRecord(pendingRecord);
 		try {
 			await sendMessage(dst, text);
 			draftMessage = '';
 			// Keep spinner until echo from node or 5s timeout.
 			sendEchoTimer = setTimeout(clearSendEcho, 5000);
 		} catch (e) {
+			removeChatRecord(pendingRecord);
 			if (e instanceof UnauthorizedError) return;
 			if (e instanceof SendError && e.status === 429) {
 				sendError = 'Duplicate ignored (sent <2s ago)';
@@ -572,6 +609,18 @@
 			}
 			sending = false;
 		}
+	}
+
+	function createPendingChatRecord(dst: string, msg: string): ChatRecord {
+		return {
+			received_at: new Date().toISOString(),
+			src: stationCallsign || 'Me',
+			dst: dst || undefined,
+			msg,
+			direction: 'outbound',
+			delivery_status: 'pending',
+			source: 'event-live'
+		};
 	}
 
 	function appendLiveChatRecord(
@@ -609,14 +658,8 @@
 			source: 'event-live'
 		};
 
-		const existing = chatHistory[convId] ?? [];
-		const key = chatRecordKey(rec);
-		if (!existing.some((r) => chatRecordKey(r) === key)) {
-			chatHistory = {
-				...chatHistory,
-				[convId]: [...existing, rec].sort((a, b) => a.received_at.localeCompare(b.received_at))
-			};
-		}
+		removeMatchingPendingRecord(convId, rec);
+		appendChatRecordToConversation(convId, rec);
 
 		const idx = conversations.findIndex((c) => c.id === convId);
 		if (idx === -1) {
@@ -647,6 +690,76 @@
 			saveReadTimestamp(convId, receivedAt);
 			readTimestamps = { ...readTimestamps, [convId]: receivedAt };
 		}
+	}
+
+	function appendChatRecord(rec: ChatRecord) {
+		const convId = conversationIdForRecord(rec, stationCallsign);
+		if (!convId) return;
+		if (rec.delivery_status === 'failed') {
+			removeMatchingPendingRecord(convId, rec);
+		}
+		appendChatRecordToConversation(convId, { ...rec, source: 'event-live' });
+
+		const idx = conversations.findIndex((c) => c.id === convId);
+		if (idx === -1) {
+			conversations = [
+				{
+					id: convId,
+					kind: convId === 'P_broadcast' ? 'broadcast' : convId.startsWith('P_') ? 'channel' : 'dm',
+					label: convId === 'P_broadcast' ? 'Broadcast' : convId.replace(/^(P_|DM_)/, ''),
+					last_seen: rec.received_at,
+					size: 0
+				},
+				...conversations
+			];
+		} else {
+			const copy = conversations.slice();
+			copy[idx] = { ...copy[idx], last_seen: rec.received_at };
+			conversations = copy.sort((a, b) => b.last_seen.localeCompare(a.last_seen));
+		}
+
+		if (convId === currentConvId) {
+			saveReadTimestamp(convId, rec.received_at);
+			readTimestamps = { ...readTimestamps, [convId]: rec.received_at };
+		}
+	}
+
+	function removeChatRecord(rec: ChatRecord) {
+		const convId = conversationIdForRecord(rec, stationCallsign);
+		if (!convId) return;
+		const existing = chatHistory[convId] ?? [];
+		const key = chatRecordKey(rec);
+		chatHistory = {
+			...chatHistory,
+			[convId]: existing.filter((item) => chatRecordKey(item) !== key)
+		};
+	}
+
+	function appendChatRecordToConversation(convId: string, rec: ChatRecord) {
+		const existing = chatHistory[convId] ?? [];
+		const key = chatRecordKey(rec);
+		if (existing.some((r) => chatRecordKey(r) === key)) return;
+		chatHistory = {
+			...chatHistory,
+			[convId]: [...existing, rec].sort((a, b) => a.received_at.localeCompare(b.received_at))
+		};
+	}
+
+	function removeMatchingPendingRecord(convId: string, rec: ChatRecord) {
+		const existing = chatHistory[convId] ?? [];
+		const recDst = rec.dst ?? '';
+		const recMsg = stripNodeSequence(rec.msg);
+		const next = existing.filter((item) => {
+			if (item.delivery_status !== 'pending') return true;
+			if ((item.dst ?? '') !== recDst) return true;
+			return item.msg !== recMsg;
+		});
+		if (next.length === existing.length) return;
+		chatHistory = { ...chatHistory, [convId]: next };
+	}
+
+	function stripNodeSequence(msg: string): string {
+		return msg.replace(/\{\d+\}$/, '');
 	}
 </script>
 
@@ -718,7 +831,10 @@
 				<img src={logo} alt="" class="h-7 w-7 rounded-md" />
 				<span class="font-mono text-sm font-bold tracking-wide text-blue-300">goMeshCom</span>
 				<!-- mobile-only status dot, no text -->
-				<span data-testid="status-dot" class="md:hidden h-2 w-2 rounded-full {statusClass[connection]}"></span>
+				<span
+					data-testid="status-dot"
+					class="md:hidden h-2 w-2 rounded-full {statusClass[connection]}"
+				></span>
 			</div>
 			<div class="hidden md:block h-4 w-px bg-gray-600"></div>
 			<div data-testid="status-pill" class="hidden md:flex items-center gap-2 text-xs">
@@ -732,7 +848,9 @@
 			>
 				{stationCallsign || 'NO-CALL'}
 			</div>
-			<div data-testid="packet-counter" class="hidden md:block font-mono text-xs text-gray-400">{events.length} packets</div>
+			<div data-testid="packet-counter" class="hidden md:block font-mono text-xs text-gray-400">
+				{events.length} packets
+			</div>
 			<!-- menu -->
 			<div class="relative">
 				<button
@@ -787,10 +905,7 @@
 					>
 				</div>
 
-				<div
-					class="grid min-h-0 flex-1"
-					style={isDesktop ? `grid-template-columns: ${chatSidebarGridColumns(channelsCollapsed)}` : ''}
-				>
+				<div class="grid min-h-0 flex-1" style={chatSidebarGridStyle(channelsCollapsed, isDesktop)}>
 					<!-- Destinations sidebar -->
 					<aside class="flex min-h-0 flex-col border-r border-gray-700/60 bg-[#1c2230]">
 						<div
@@ -815,8 +930,7 @@
 								type="button"
 								class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
 									? 'justify-center gap-0'
-									: 'gap-2'} {chatTarget.kind ===
-									'channel' && chatTarget.value === 'Broadcast'
+									: 'gap-2'} {chatTarget.kind === 'channel' && chatTarget.value === 'Broadcast'
 									? 'bg-blue-500/15 text-blue-200'
 									: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
 								aria-label="Broadcast channel"
@@ -830,7 +944,10 @@
 										aria-label="unread"
 									></span>
 								{/if}
-								<span class={channelsCollapsed ? 'sr-only' : `truncate ${unreadIds.has('P_broadcast') ? 'font-semibold' : ''}`}
+								<span
+									class={channelsCollapsed
+										? 'sr-only'
+										: `truncate ${unreadIds.has('P_broadcast') ? 'font-semibold' : ''}`}
 									>Broadcast</span
 								>
 							</button>
@@ -845,8 +962,7 @@
 											title={groupTooltip(group)}
 											class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
 												? 'justify-center gap-0'
-												: 'gap-2'} {chatTarget.kind ===
-												'channel' && chatTarget.value === channel
+												: 'gap-2'} {chatTarget.kind === 'channel' && chatTarget.value === channel
 												? 'bg-blue-500/15 text-blue-200'
 												: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
 											aria-label={group.note}
@@ -859,7 +975,10 @@
 													aria-label="unread"
 												></span>
 											{/if}
-											<span class={channelsCollapsed ? 'sr-only' : `truncate ${unreadIds.has(knownCid) ? 'font-semibold' : ''}`}
+											<span
+												class={channelsCollapsed
+													? 'sr-only'
+													: `truncate ${unreadIds.has(knownCid) ? 'font-semibold' : ''}`}
 												>{group.note}</span
 											>
 										</button>
@@ -876,8 +995,7 @@
 											type="button"
 											class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
 												? 'justify-center gap-0'
-												: 'gap-2'} {chatTarget.kind ===
-												'channel' && chatTarget.value === channel
+												: 'gap-2'} {chatTarget.kind === 'channel' && chatTarget.value === channel
 												? 'bg-blue-500/15 text-blue-200'
 												: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
 											aria-label={channel}
@@ -891,7 +1009,10 @@
 													aria-label="unread"
 												></span>
 											{/if}
-											<span class={channelsCollapsed ? 'sr-only' : `truncate ${unreadIds.has(unknownCid) ? 'font-semibold' : ''}`}
+											<span
+												class={channelsCollapsed
+													? 'sr-only'
+													: `truncate ${unreadIds.has(unknownCid) ? 'font-semibold' : ''}`}
 												>{channel}</span
 											>
 										</button>
@@ -916,8 +1037,7 @@
 												type="button"
 												class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
 													? 'justify-center gap-0'
-													: 'gap-2'} {chatTarget.kind ===
-													'contact' && chatTarget.value === contact
+													: 'gap-2'} {chatTarget.kind === 'contact' && chatTarget.value === contact
 													? 'bg-blue-500/15 text-blue-200'
 													: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
 												aria-label={contact}
@@ -931,7 +1051,10 @@
 														aria-label="unread"
 													></span>
 												{/if}
-												<span class={channelsCollapsed ? 'sr-only' : `truncate ${unreadIds.has(dmCid) ? 'font-semibold' : ''}`}
+												<span
+													class={channelsCollapsed
+														? 'sr-only'
+														: `truncate ${unreadIds.has(dmCid) ? 'font-semibold' : ''}`}
 													>{contact}</span
 												>
 											</button>
@@ -985,6 +1108,15 @@
 									</div>
 								{/if}
 							</div>
+							<label class="ml-2 min-w-0 shrink">
+								<span class="sr-only">Filter messages</span>
+								<input
+									type="search"
+									class="h-7 w-28 rounded border border-gray-700/60 bg-[#111827] px-2 text-xs text-gray-200 outline-none placeholder:text-gray-500 focus:border-blue-500/60 md:w-44"
+									bind:value={chatFilter}
+									placeholder="Filter"
+								/>
+							</label>
 							<button
 								type="button"
 								class="ml-2 flex h-7 w-7 shrink-0 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
@@ -1002,7 +1134,7 @@
 						<div bind:this={chatScrollEl} class="min-h-0 flex-1 overflow-auto p-2">
 							{#if displayChatRecords.length === 0}
 								<div class="flex h-full items-center justify-center text-sm text-gray-500">
-									No messages in this chat
+									{chatFilter.trim() === '' ? 'No messages in this chat' : 'No matching messages'}
 								</div>
 							{:else}
 								<div class="space-y-2">
@@ -1042,7 +1174,15 @@
 													<div class="font-mono text-[10px] md:text-[11px] text-gray-500">
 														{formatTime(rec.received_at)}
 													</div>
-													{#if isSent}
+													{#if rec.delivery_status === 'pending'}
+														<span
+															class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-400/30 border-t-blue-300"
+															style="width: 0.875rem; height: 0.875rem; border: 2px solid rgba(96, 165, 250, 0.3); border-top-color: rgb(147, 197, 253);"
+															title="Pending"
+														></span>
+													{:else if rec.delivery_status === 'failed'}
+														<span class="text-[13px] font-bold text-red-400" title="Failed">✗</span>
+													{:else if isSent}
 														{#if chatTarget.kind === 'contact'}
 															{#if seqId && rejEntries.length > 0}
 																<span class="text-[13px] font-bold text-red-400" title="Rejected"
@@ -1076,8 +1216,12 @@
 															{/if}
 														{:else if seqId && gatewayAck}
 															<span
-																class="text-[13px] text-blue-400"
+																class="text-[13px] text-green-400"
 																title="Delivered via gateway ({gatewayAck.source})">☁️</span
+															>
+														{:else}
+															<span class="text-[13px] text-green-400" title="Node echo observed"
+																>☁️</span
 															>
 														{/if}
 													{/if}
@@ -1185,9 +1329,7 @@
 								<div class="flex flex-col items-center gap-1">
 									<button
 										class="h-10 rounded border border-gray-700/60 bg-blue-600/80 px-4 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-										disabled={
-											!getSendComposerState({ draftMessage, sending, txDisabled }).canSend
-										}
+										disabled={!getSendComposerState({ draftMessage, sending, txDisabled }).canSend}
 										onclick={handleSend}
 									>
 										{getSendComposerState({ draftMessage, sending, txDisabled }).label}
@@ -1331,7 +1473,9 @@
 											>
 												<MdiIcon path={mdiForEvent(event)} size={17} />
 											</span>
-											<span class="shrink-0 text-xs md:text-sm font-bold text-white">{route.origin}</span>
+											<span class="shrink-0 text-xs md:text-sm font-bold text-white"
+												>{route.origin}</span
+											>
 											{#if route.relays.length > 0}
 												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
 													>(via {route.relays.join(', ')})</span
@@ -1340,9 +1484,13 @@
 											<span class="hidden md:inline shrink-0 text-gray-500"
 												><MdiIcon path={mdiArrowRight} size={13} /></span
 											>
-											<span class="hidden md:inline shrink-0 text-sm text-gray-200">{route.destination}</span>
+											<span class="hidden md:inline shrink-0 text-sm text-gray-200"
+												>{route.destination}</span
+											>
 											<span class="mx-0.5 shrink-0 text-gray-400">·</span>
-											<span class="min-w-0 truncate italic text-xs md:text-sm text-white">"{text}"</span>
+											<span class="min-w-0 truncate italic text-xs md:text-sm text-white"
+												>"{text}"</span
+											>
 											{#if packet?.rssi != null || packet?.snr != null}
 												<span class="ml-auto flex shrink-0 items-center gap-2 pl-2">
 													{#if packet?.rssi != null}
@@ -1381,7 +1529,9 @@
 											>
 												<MdiIcon path={mdiForEvent(event)} size={17} />
 											</span>
-											<span class="shrink-0 text-xs md:text-sm font-bold text-white">{source.origin}</span>
+											<span class="shrink-0 text-xs md:text-sm font-bold text-white"
+												>{source.origin}</span
+											>
 											{#if source.relays.length > 0}
 												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
 													>(via {source.relays.join(', ')})</span
@@ -1467,7 +1617,9 @@
 											>
 												<MdiIcon path={mdiForEvent(event)} size={17} />
 											</span>
-											<span class="shrink-0 text-xs md:text-sm font-bold text-white">{source.origin}</span>
+											<span class="shrink-0 text-xs md:text-sm font-bold text-white"
+												>{source.origin}</span
+											>
 											{#if source.relays.length > 0}
 												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
 													>(via {source.relays.join(', ')})</span
@@ -1486,7 +1638,8 @@
 													</span>
 												{/if}
 												{#if packet?.alt != null}
-													<span class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
+													<span
+														class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
 														>{packet.alt} m</span
 													>
 												{/if}
@@ -1549,7 +1702,9 @@
 												<MdiIcon path={mdiForEvent(event)} size={17} />
 											</span>
 											{#if packet}
-												<span class="shrink-0 text-xs md:text-sm font-bold text-white">{source.origin}</span>
+												<span class="shrink-0 text-xs md:text-sm font-bold text-white"
+													>{source.origin}</span
+												>
 												{#if source.relays.length > 0}
 													<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
 														>(via {source.relays.join(', ')})</span
@@ -1568,7 +1723,8 @@
 														</span>
 													{/if}
 													{#if packet.alt != null}
-														<span class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
+														<span
+															class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
 															>{packet.alt} m</span
 														>
 													{/if}

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	chatSidebarGridColumns,
+	chatSidebarGridStyle,
 	chatSidebarNewDmLabel,
 	loadChatChannelsCollapsed,
 	saveChatChannelsCollapsed
@@ -43,6 +44,14 @@ describe('chat layout helpers', () => {
 	it('returns narrower columns when collapsed', () => {
 		expect(chatSidebarGridColumns(true)).toBe('3rem minmax(0, 1fr)');
 		expect(chatSidebarGridColumns(false)).toBe('10rem minmax(0, 1fr)');
+	});
+
+	it('keeps collapsed sidebar columns on mobile', () => {
+		expect(chatSidebarGridStyle(true, false)).toBe('grid-template-columns: 3rem minmax(0, 1fr)');
+	});
+
+	it('keeps expanded mobile layout stacked', () => {
+		expect(chatSidebarGridStyle(false, false)).toBe('');
 	});
 
 	it('shortens new dm label when collapsed', () => {

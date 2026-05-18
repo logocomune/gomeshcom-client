@@ -47,6 +47,14 @@ If the node does not broadcast automatically, or you want to pin the address, se
 -e GOMESHCOM_NODE_ADDR=192.168.1.100:1799
 ```
 
+To mirror every received UDP packet to other consumers, set one or more forwarding targets:
+
+```bash
+-e GOMESHCOM_FORWARD_TARGETS=192.168.1.60:1799,192.168.1.61:1799
+```
+
+Use this when one MeshCom node should feed multiple tools or additional `gomeshcomd` instances. The forwarder copies incoming UDP datagrams byte-for-byte before parsing them, so downstream services receive the same payloads that this instance received.
+
 ### Optional Web UI Authentication
 
 For shared LAN deployments, protect the UI and API with a username and password:
@@ -77,6 +85,7 @@ Keep the browser on the same origin as the Go server (for example `http://192.16
 - Chat per conversation (broadcast, channels, direct messages)
 - Node map with OpenLayers — color-coded by freshness, clustering for dense areas
 - Outgoing messages with duplicate suppression
+- UDP RX forwarding to one or more downstream listeners
 - Multi-arch Docker image (`linux/amd64`, `linux/arm64`)
 
 ## Configuration
@@ -89,6 +98,7 @@ All options via environment variable or CLI flag (prefix `GOMESHCOM_`).
 | `GOMESHCOM_NODE_ADDR` | *(empty)* | Node UDP address. When empty, learned from the first incoming UDP packet. When set, used as-is — auto-detect is disabled. |
 | `GOMESHCOM_HTTP_ADDR` | `127.0.0.1:8080` | HTTP listen address |
 | `GOMESHCOM_UDP_LISTEN_ADDR` | `0.0.0.0:1799` | UDP listen address |
+| `GOMESHCOM_FORWARD_TARGETS` | *(empty)* | Comma-separated `host:port` list that receives a byte-for-byte copy of every incoming UDP datagram |
 | `GOMESHCOM_DATA_DIR` | `./data` | Persistent data directory |
 | `GOMESHCOM_SEND_DELAY` | `40s` | Minimum delay between outgoing messages |
 | `GOMESHCOM_MAX_MESSAGE_LENGTH` | `149` | Maximum outgoing message length (UTF-8 chars) |

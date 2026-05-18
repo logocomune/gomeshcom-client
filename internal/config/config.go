@@ -29,6 +29,7 @@ type Config struct {
 	Send             Send
 	Forward          Forward
 	Auth             Auth
+	RequestLog       RequestLog
 	LogLevel         string `conf:"default:info,help:log level: debug|info|warn|error"`
 }
 
@@ -59,6 +60,10 @@ type Auth struct {
 	Password   string        `conf:"help:optional HTTP auth password"`
 	SessionTTL time.Duration `conf:"default:24h,help:HTTP auth session TTL"`
 	CookieName string        `conf:"default:meshcom_session,help:HTTP auth session cookie name"`
+}
+
+type RequestLog struct {
+	Enabled bool `conf:"default:false,help:enable structured HTTP request logging"`
 }
 
 func Load(build string) (Config, string, error) {

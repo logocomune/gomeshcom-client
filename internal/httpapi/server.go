@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/logocomune/gomeshcom-udp/internal/config"
 	"github.com/logocomune/gomeshcom-udp/internal/events"
 	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
+	"github.com/logocomune/gomeshcom-udp/internal/outbox"
 	"github.com/logocomune/gomeshcom-udp/internal/positions"
 	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
 	"github.com/logocomune/gomeshcom-udp/internal/sendcache"
@@ -45,8 +47,11 @@ type Server struct {
 	chatLog    *chatlog.Logger
 	bridge     messageSender
 	sendCache  *sendcache.Cache
+	outbox     *outbox.Outbox
 	sessions   *sessionStore
 }
+
+const outgoingEchoTimeout = 5 * time.Second
 
 func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore *positions.Store, receiveLog *receivelog.Logger, chatLog *chatlog.Logger, bridge messageSender, sc *sendcache.Cache) *Server {
 	server := &Server{
@@ -59,6 +64,8 @@ func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore
 		bridge:     bridge,
 		sendCache:  sc,
 	}
+	server.outbox = outbox.New(outgoingEchoTimeout, server.handleOutgoingTimeout)
+	server.watchOutgoingEchoes()
 	if authEnabled(cfg) {
 		server.sessions = newSessionStore()
 	}
@@ -78,7 +85,70 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.getConversation), s))
 	mux.Handle("DELETE /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.deleteConversation), s))
 	mux.Handle("/", spaHandler(webui.FS()))
+	if s.cfg.RequestLog.Enabled {
+		return requestLogMiddleware(mux)
+	}
 	return mux
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (r *statusRecorder) WriteHeader(statusCode int) {
+	r.statusCode = statusCode
+	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+type flushStatusRecorder struct {
+	*statusRecorder
+}
+
+func (r *flushStatusRecorder) Flush() {
+	r.ResponseWriter.(http.Flusher).Flush()
+}
+
+func requestLogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedAt := time.Now().UTC()
+		recorder := &statusRecorder{
+			ResponseWriter: w,
+			statusCode:     http.StatusOK,
+		}
+		responseWriter := http.ResponseWriter(recorder)
+		if _, ok := w.(http.Flusher); ok {
+			responseWriter = &flushStatusRecorder{statusRecorder: recorder}
+		}
+
+		next.ServeHTTP(responseWriter, r)
+
+		duration := time.Since(startedAt)
+		slog.Info("http request",
+			"method", r.Method,
+			"endpoint", r.URL.Path,
+			"status", recorder.statusCode,
+			"caller_ip", callerIP(r),
+			"started_at", startedAt.Format(time.RFC3339Nano),
+			"duration", duration.String(),
+			"duration_ms", float64(duration.Microseconds())/1000,
+		)
+	})
+}
+
+func callerIP(r *http.Request) string {
+	for _, header := range []string{"CF-Connecting-IP", "X-Real-IP", "X-Rela-IP"} {
+		value := strings.TrimSpace(r.Header.Get(header))
+		if value != "" {
+			return value
+		}
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func spaHandler(fsys fs.FS) http.Handler {
@@ -156,8 +226,63 @@ func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("message sent", "dst", outgoing.Destination, "msg", outgoing.Message)
+	if s.outbox != nil && !s.cfg.Send.DisableTx {
+		s.outbox.Register(s.cfg.MyCall, outgoing.Destination, outgoing.Message, time.Now().UTC())
+	}
 
 	writeJSON(w, http.StatusAccepted, outgoing)
+}
+
+func (s *Server) watchOutgoingEchoes() {
+	if s.bus == nil {
+		return
+	}
+	subscriber := s.bus.Subscribe(context.Background())
+	go func() {
+		for event := range subscriber {
+			if event.Type != "packet.received" {
+				continue
+			}
+			message, ok := textMessageFromEvent(event)
+			if !ok {
+				continue
+			}
+			if s.outbox != nil {
+				s.outbox.Confirm(message.Source, message.Destination, message.Message)
+			}
+		}
+	}()
+}
+
+func textMessageFromEvent(event events.Event) (meshcom.TextMessage, bool) {
+	data, ok := event.Data.(map[string]any)
+	if !ok {
+		return meshcom.TextMessage{}, false
+	}
+	message, ok := data["packet"].(meshcom.TextMessage)
+	return message, ok
+}
+
+func (s *Server) handleOutgoingTimeout(message outbox.PendingMessage) {
+	record := chatlog.Record{
+		ReceivedAt:     time.Now().UTC(),
+		Src:            message.Source,
+		Dst:            message.Destination,
+		Msg:            message.Message,
+		Direction:      "outbound",
+		DeliveryStatus: "failed",
+	}
+	if s.chatLog != nil {
+		var err error
+		record, err = s.chatLog.AppendFailed(message.Source, message.Destination, message.Message, record.ReceivedAt)
+		if err != nil {
+			slog.Error("failed outgoing chat log write failed", "error", err)
+			return
+		}
+	}
+	if s.bus != nil {
+		s.bus.Publish(events.Event{Type: "message.failed", Data: record})
+	}
 }
 
 func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +368,7 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defaultHours := s.cfg.ChatLog.HistoryWindow.Hours()
+	defaultHours := s.defaultChatHistoryHours(id)
 	maxHours := s.cfg.ChatLog.MaxHistoryWindow.Hours()
 
 	hours := defaultHours
@@ -276,6 +401,13 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, records)
+}
+
+func (s *Server) defaultChatHistoryHours(conversationID string) float64 {
+	if strings.HasPrefix(conversationID, "DM_") {
+		return (30 * 24 * time.Hour).Hours()
+	}
+	return s.cfg.ChatLog.HistoryWindow.Hours()
 }
 
 func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {

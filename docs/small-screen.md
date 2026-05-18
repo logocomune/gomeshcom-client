@@ -126,6 +126,7 @@ Nessuna modifica visibile. Tutti gli stili desktop sono invariati:
 
 The `Channels` sidebar now has a collapse button. When enabled, the left column shrinks into a narrow rail and the message list gets more horizontal space. State persists in `localStorage`.
 In the collapsed state, the `New DM` action shortens to `DM +` so the rail stays compact.
+On mobile, the collapsed sidebar still stays on the left of the message pane instead of stacking above it.
 
 ### Verifica
 

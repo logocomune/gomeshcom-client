@@ -180,8 +180,8 @@ func TestAppendDMFilter(t *testing.T) {
 	}{
 		{msg("QQ1ABC-1", "*", "broadcast"), true, "P_broadcast"},
 		{msg("QQ1ABC-1", "123", "channel"), true, "P_123"},
-		{msg(myCall, "QQ1ABC-1", "outgoing DM"), true, "DM_QQ1ABC-1"},  // interlocutor = dst
-		{msg("QQ1ABC-1", myCall, "incoming DM"), true, "DM_QQ1ABC-1"},  // interlocutor = src
+		{msg(myCall, "QQ1ABC-1", "outgoing DM"), true, "DM_QQ1ABC-1"}, // interlocutor = dst
+		{msg("QQ1ABC-1", myCall, "incoming DM"), true, "DM_QQ1ABC-1"}, // interlocutor = src
 		{msg("QQ1ABC-1", "QQ1XYZ", "unrelated DM"), false, ""},
 	}
 
@@ -202,6 +202,50 @@ func TestAppendDMFilter(t *testing.T) {
 			}
 			if len(recs) == 0 {
 				t.Fatalf("expected record in %q, got none", tc.wantFile)
+			}
+		})
+	}
+}
+
+func TestAppendFailedPersistsOutboundStatus(t *testing.T) {
+	now := time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC)
+
+	tests := map[string]struct {
+		dst        string
+		wantID     string
+		wantStatus string
+	}{
+		"broadcast": {dst: "*", wantID: "P_broadcast", wantStatus: "failed"},
+		"channel":   {dst: "123", wantID: "P_123", wantStatus: "failed"},
+		"dm":        {dst: "QQ1ABC-1", wantID: "DM_QQ1ABC-1", wantStatus: "failed"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			logger := New(t.TempDir(), "DIFFERENT-1")
+			record, err := logger.AppendFailed("QQ0QQ-1", test.dst, "hello", now)
+			if err != nil {
+				t.Fatalf("AppendFailed: %v", err)
+			}
+			if record.Direction != "outbound" {
+				t.Fatalf("Direction = %q, want outbound", record.Direction)
+			}
+			if record.DeliveryStatus != test.wantStatus {
+				t.Fatalf("DeliveryStatus = %q, want %q", record.DeliveryStatus, test.wantStatus)
+			}
+
+			records, err := logger.ReadSince(test.wantID, time.Time{})
+			if err != nil {
+				t.Fatalf("ReadSince(%q): %v", test.wantID, err)
+			}
+			if len(records) != 1 {
+				t.Fatalf("len(records) = %d, want 1", len(records))
+			}
+			if records[0].Src != "QQ0QQ-1" {
+				t.Fatalf("Src = %q, want QQ0QQ-1", records[0].Src)
+			}
+			if records[0].DeliveryStatus != "failed" {
+				t.Fatalf("DeliveryStatus = %q, want failed", records[0].DeliveryStatus)
 			}
 		})
 	}

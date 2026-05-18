@@ -119,6 +119,9 @@ export function connectEvents(handlers: {
 		source.addEventListener('message.created', (event) =>
 			parseEvent('message.created', event as MessageEvent<string>)
 		);
+		source.addEventListener('message.failed', (event) =>
+			parseEvent('message.failed', event as MessageEvent<string>)
+		);
 		source.addEventListener('heartbeat', () => resetHeartbeat());
 		source.onerror = () => {
 			source?.close();

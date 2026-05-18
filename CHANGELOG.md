@@ -4,22 +4,37 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.5.0] - 2026-05-18
+
 ### Added
 
+- **Chat message filter**: the web chat header now includes a filter field beside the delete/clear action so operators can search visible messages by text, source, destination, or message type.
+- **About page reference repository**: the web About page now links the upstream reference repository and shows the `github.com` domain alongside existing GitHub issue reporting.
+- **Persistent failed send status**: outbound chat messages appear immediately in the web chat with a pending spinner. After the accepted message is written to UDP, the backend waits up to 5 seconds for the node echo. If no echo arrives, it persists the message with `delivery_status:"failed"` and emits a `message.failed` event so the web chat shows a red `X` that survives reloads.
 - **TX dry-run mode** (`GOMESHCOM_SEND_DISABLE_TX=true`): suppresses all outbound UDP writes. Each message that would have been sent is logged at `WARN` level with its JSON payload. The web UI shows a persistent amber banner and disables the send composer so operators immediately see that TX is disabled. Useful for monitoring-only deployments.
-- **Responsive mobile layout**: web UI now adapts to narrow viewports (< 768px). On phones, Chat, Map, and UDP stream panels stack vertically instead of sitting side-by-side. Drag handles are hidden on mobile (irrelevant on touch). Status pill and packet counter collapse to a minimal status dot in the header. Chat typography shrinks slightly. UDP stream rows hide secondary fields (relays, temp/hum/pressure, alt, hardware name) and the JSON button column; tapping a row opens the JSON modal directly.
+- **Responsive mobile layout**: the web UI adapts to narrow viewports (< 768px). On phones, Chat, Map, and UDP stream panels stack vertically. Drag handles are hidden on mobile, status indicators collapse to compact variants, chat typography shrinks slightly, and UDP stream rows hide secondary fields.
 - **Chat sidebar collapse**: the chat channels column now has a header button that shrinks it into a narrow left rail so the message pane gets more horizontal space. The collapsed state persists in `localStorage`.
 - **Collapsed `New DM` button**: when the chat sidebar is collapsed, the `New DM` action shortens to `DM +` to save space in the narrow rail.
-- `docs/small-screen.md` — analysis document detailing all mobile layout changes and how to verify them.
-- `src/lib/responsive.ts` — `watchDesktop` utility extracted from the page for reuse and testability.
-- `src/lib/responsive.test.ts` — 7 unit tests covering initial callback, change events, cleanup, and SSR fallback.
-- `src/routes/small-screen.e2e.ts` — 14 Playwright e2e tests verifying responsive behaviour at mobile (390px) and desktop (1280px) viewports: element visibility, panel stacking order, ~80 vh heights, and no panel overlap.
+- **Mobile collapsed chat rail**: when the chat sidebar is collapsed on small screens, the rail stays on the left of the message pane instead of stacking above it.
+- **Configurable HTTP request logging**: `GOMESHCOM_REQUEST_LOG_ENABLED=true` logs structured request records with endpoint, status, caller IP, timestamp, and duration. Caller IP prefers `CF-Connecting-IP`, then `X-Real-IP`.
+- **Remember last chat**: the web UI stores the last selected chat in `localStorage` and restores it on restart. If that conversation no longer exists, it opens Broadcast.
 - **UDP RX forwarder** (`GOMESHCOM_FORWARD_TARGETS=host:port,...`): mirrors every received UDP datagram byte-for-byte to one or more downstream `gomeshcomd` instances. Enables multi-instance topologies where a single node feeds several processing nodes. Forwarding is best-effort (per-target buffered channel, drop-oldest on overflow) and happens before parsing so even malformed packets are mirrored.
 - **`udpsend` tool** (`cmd/udpsend`): CLI utility to send a single UDP datagram to a `host:port`. Accepts payload as UTF-8 string (`-payload`) or hex string (`-hex`). Useful for manual testing and scripting.
 - **`udprecv` tool** (`cmd/udprecv`): CLI utility to listen on a UDP address and print each received datagram with RFC3339Nano timestamp, source address, and byte count. Output is either quoted string (default) or hex dump (`-hex` flag). Configurable receive buffer via `-buf`.
 
+### Changed
+
+- Map marker clicks no longer open the station detail card; station `firstSeen` and `lastSeen` now appear directly in the hover tooltip.
+- The local `MyCall` map marker hover now shows only callsign and device name, since station freshness metadata is not useful for the own marker.
+- Web public/channel chat history now requests 7 days, while `DM_<CALLSIGN>` leaves the window unset so the backend's DM default applies.
+
 ### Fixed
 
+- Outgoing message echo matching now accepts truncated numeric node sequence suffixes such as `{571`, preventing valid node echoes from being marked as failed.
+- Public and channel chat sends now show a green cloud after the local node echo is observed, matching the existing failed-send indicator behavior.
+- Web DM history requests no longer send a public/channel history window, allowing the backend's DM default window to apply.
 - Direct-node hover and details keep showing `rssi`/`snr` after live `msg`/`pos` updates that omit those fields. Live freshness merges now preserve existing signal values instead of clearing them with `undefined`.
 - Indirect `pos` packets now refresh `lastSeen` on every hop in the `via` chain. Signal values stay attached to direct packets and the last relay hop only.
 

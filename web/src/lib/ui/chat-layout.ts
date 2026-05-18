@@ -17,3 +17,11 @@ export function chatSidebarGridColumns(collapsed: boolean): string {
 export function chatSidebarNewDmLabel(collapsed: boolean): string {
 	return collapsed ? 'DM' : 'New DM';
 }
+
+export function chatSidebarGridStyle(collapsed: boolean, desktop: boolean): string {
+	if (!desktop && !collapsed) {
+		return '';
+	}
+
+	return `grid-template-columns: ${chatSidebarGridColumns(collapsed)}`;
+}
