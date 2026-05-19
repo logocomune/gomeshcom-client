@@ -86,6 +86,7 @@ Keep the browser on the same origin as the Go server (for example `http://192.16
 - Node map with OpenLayers — color-coded by freshness, clustering for dense areas
 - Outgoing messages with duplicate suppression
 - UDP RX forwarding to one or more downstream listeners
+- MeshCom IoT UDP simulator for local position-packet testing
 - Multi-arch Docker image (`linux/amd64`, `linux/arm64`)
 
 ## Configuration
@@ -121,6 +122,16 @@ All options via environment variable or CLI flag (prefix `GOMESHCOM_`).
 ./build.sh
 # Output: bin/
 ```
+
+## Local UDP Simulation
+
+Use the IoT simulator to feed changing position packets into a local `gomeshcomd` instance:
+
+```bash
+go run ./cmd/iot-simulator -my-call IQ5SIM-9
+```
+
+The simulator can send MeshCom `pos` packets from `QQ1TST-1` and `QQ1TST-2`, plus scheduled DM, broadcast, and channel-2 messages to `127.0.0.1:1799`, based on enabled flags. Use any combination of `-enable-pos1`, `-enable-pos2`, `-enable-dm`, `-enable-broadcast`, and `-enable-chan2` to enable timed sends; without them the simulator stays in receive-only responder mode. It also responds to DMs for `QQ1TST-1` and `QQ1TST-2` with readable TX/RX logs. See [MeshCom IoT UDP Simulator](docs/iot-simulator.md) for flags.
 
 ## Disclaimer
 

@@ -4,6 +4,7 @@ import {
 	connectEvents,
 	eventDetail,
 	eventJSON,
+	isReplayEvent,
 	eventSummary,
 	freshnessDeltasFromEvent,
 	messageKind,
@@ -35,7 +36,7 @@ function timedEvent(type: string, receivedAt: string, data: unknown): StreamEven
 
 describe('event helpers', () => {
 	it('summarizes message packets', () => {
-		expect.assertions(5);
+		expect.assertions(7);
 
 		const received = event('packet.received', {
 			remote_addr: '192.168.1.53:1799',
@@ -47,6 +48,11 @@ describe('event helpers', () => {
 		expect(eventSummary(received)).toBe('QQ1ABC-1 -> Broadcast: hello');
 		expect(eventDetail(received)).toBe('Message · no id');
 		expect(eventJSON(received)).toContain('"msg": "hello"');
+
+		expect(isReplayEvent(received)).toBe(false);
+		expect(isReplayEvent(event('packet.received', { replay: true, packet: { type: 'msg' } }))).toBe(
+			true
+		);
 	});
 
 	it('keeps newest events first', () => {
@@ -385,7 +391,9 @@ describe('applyLiveFreshness', () => {
 
 	it('pos packet updates lastSeen for every relay in via chain', () => {
 		const s = [stored('ORIGIN-1'), stored('MID-1'), stored('RELAY-1')];
-		const events: StreamEvent[] = [packetEvent('ORIGIN-1,MID-1,RELAY-1', 'pos', { rssi: -88, snr: 4 })];
+		const events: StreamEvent[] = [
+			packetEvent('ORIGIN-1,MID-1,RELAY-1', 'pos', { rssi: -88, snr: 4 })
+		];
 		const result = applyLiveFreshness(s, events);
 
 		expect(result.find((p) => p.source === 'ORIGIN-1')?.lastSeen).toBe(t1);
@@ -461,6 +469,34 @@ describe('applyLiveFreshness', () => {
 });
 
 describe('connectEvents auth flow', () => {
+	it('passes replay from timestamp to SSE endpoint', () => {
+		let activeSource: FakeEventSource | undefined;
+		vi.stubGlobal(
+			'EventSource',
+			class extends FakeEventSource {
+				constructor(url: string, init?: EventSourceInit) {
+					super(url, init);
+					activeSource = this;
+				}
+			}
+		);
+
+		const stop = connectEvents(
+			{
+				onState: () => undefined,
+				onEvent: () => undefined
+			},
+			{ replayFrom: '2026-05-19T17:00:00.000Z' }
+		);
+
+		expect(activeSource).toBeDefined();
+		const url = new URL(activeSource!.url);
+		expect(url.pathname).toBe('/api/events');
+		expect(url.searchParams.get('from')).toBe('2026-05-19T17:00:00.000Z');
+
+		stop();
+	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();

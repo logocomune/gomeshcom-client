@@ -35,6 +35,7 @@ export type MeshcomPacket = {
 export type PacketReceivedPayload = {
 	remote_addr?: string;
 	packet?: MeshcomPacket;
+	replay?: boolean;
 };
 
 export type StreamEvent = {

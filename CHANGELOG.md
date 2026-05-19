@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **IoT simulator granular auto-send flags**: `cmd/iot-simulator` now exposes `-enable-pos1`, `-enable-pos2`, `-enable-dm`, `-enable-broadcast`, and `-enable-chan2` so each timed send stream can be enabled independently while DM responders remain active. All responder transmissions now use configured `-target` UDP endpoint.
+- **UDP stream replay cursor**: `/api/events` accepts `from=<RFC3339 timestamp>` and the web UDP stream clear action stores that cursor in `localStorage`, clears visible packets, and reconnects SSE from that point.
+
+### Changed
+
+- **IoT simulator command README**: documented local usage, responder behavior, common run modes, flags, and log output for `cmd/iot-simulator`.
+- **Web UI helper refactoring**: extracted `ChatPanel`, `UdpStreamPanel`, and pure chat record/UDP stream presentation helpers from the monolithic `+page.svelte`, added unit coverage for those helpers, and documented the next component extraction slices.
+
+### Fixed
+
+- **Broadcast clear backend deletion**: the web UI now always sends the delete request when clearing the Broadcast chat so backend chat log files are removed even if local history state is empty.
+
+- **DM send echo matching**: pending outbound DM records are now removed when the node echo appends a truncated sequence suffix such as `{42`, preventing duplicate spinner records.
+
 ---
 
 ## [0.5.0] - 2026-05-18

@@ -751,6 +751,14 @@ func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 		t.Fatalf("append recent record: %v", err)
 	}
 	if err := logger.Append(receivelog.Record{
+		ReceivedAt: time.Now().UTC().Add(-time.Minute),
+		RemoteAddr: "127.0.0.1:1799",
+		Raw:        `{"src_type":"node","type":"pos","src":"POS1","msg":"","lat":48,"lat_dir":"N","long":16,"long_dir":"E","aprs_symbol":"#","aprs_symbol_group":"/","hw_id":"MAC","msg_id":"ABC","alt":123,"batt":85,"firmware":"4.35","fw_sub":"p","rssi":-90,"snr":8}`,
+		PacketType: "pos",
+	}); err != nil {
+		t.Fatalf("append recent position record: %v", err)
+	}
+	if err := logger.Append(receivelog.Record{
 		ReceivedAt: time.Now().UTC().Add(-7 * time.Hour),
 		RemoteAddr: "127.0.0.1:1799",
 		Raw:        `{"type":"msg","src":"OLD","dst":"*","msg":"old"}`,
@@ -774,8 +782,57 @@ func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 	if !strings.Contains(body, "QQ1ABC-1") {
 		t.Fatalf("recent packet missing from stream body: %q", body)
 	}
+	if !strings.Contains(body, `"replay":true`) {
+		t.Fatalf("replay marker missing from stream body: %q", body)
+	}
 	if strings.Contains(body, "OLD") {
 		t.Fatalf("old packet replayed: %q", body)
+	}
+}
+
+func TestStreamEventsReplayFromQueryOverridesDefaultWindow(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "raw")
+	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})
+	oldTime := time.Now().UTC().Add(-2 * time.Hour)
+	if err := logger.Append(receivelog.Record{
+		ReceivedAt: oldTime,
+		RemoteAddr: "127.0.0.1:1799",
+		Raw:        `{"type":"msg","src":"OLDIN","dst":"*","msg":"old"}`,
+		PacketType: "msg",
+	}); err != nil {
+		t.Fatalf("append old record: %v", err)
+	}
+
+	cfg := testConfig()
+	cfg.ReceiveLog = config.ReceiveLog{
+		Enabled:      true,
+		Path:         dir,
+		ReplayWindow: time.Hour,
+	}
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil)
+	from := oldTime.Add(-time.Minute).Format(time.RFC3339Nano)
+	body := streamBodyUntilPath(t, server, "/api/events?from="+from, "event: packet.received")
+
+	if !strings.Contains(body, "OLDIN") {
+		t.Fatalf("from replay packet missing from stream body: %q", body)
+	}
+	if !strings.Contains(body, `"replay":true`) {
+		t.Fatalf("replay marker missing from stream body: %q", body)
+	}
+}
+
+func TestStreamEventsRejectsInvalidReplayFromQuery(t *testing.T) {
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/events?from=bad", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), "invalid from timestamp") {
+		t.Fatalf("body = %q, want invalid from error", response.Body.String())
 	}
 }
 
@@ -854,8 +911,13 @@ func TestDeleteBroadcast(t *testing.T) {
 
 func streamBodyUntil(t *testing.T, server *Server, marker string) string {
 	t.Helper()
+	return streamBodyUntilPath(t, server, "/api/events", marker)
+}
 
-	request := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+func streamBodyUntilPath(t *testing.T, server *Server, path string, marker string) string {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodGet, path, nil)
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
 	request = request.WithContext(ctx)

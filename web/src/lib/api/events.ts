@@ -19,12 +19,19 @@ const MAX_EVENTS = 300;
 // Backend heartbeat interval is 15s; give it 2× headroom.
 const HEARTBEAT_TIMEOUT_MS = 30_000;
 
-export function connectEvents(handlers: {
-	onState: (state: ConnectionState) => void;
-	onEvent: (event: StreamEvent) => void;
-	onPositions?: (positions: MapPosition[]) => void;
-	onStation?: (station: StationIdentity) => void;
-}): () => void {
+export type ConnectEventsOptions = {
+	replayFrom?: string | Date;
+};
+
+export function connectEvents(
+	handlers: {
+		onState: (state: ConnectionState) => void;
+		onEvent: (event: StreamEvent) => void;
+		onPositions?: (positions: MapPosition[]) => void;
+		onStation?: (station: StationIdentity) => void;
+	},
+	options: ConnectEventsOptions = {}
+): () => void {
 	let source: EventSource | null = null;
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
 	let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -72,6 +79,20 @@ export function connectEvents(handlers: {
 		}
 	}
 
+	function replayFromValue(): string | undefined {
+		if (options.replayFrom instanceof Date) return options.replayFrom.toISOString();
+		return options.replayFrom;
+	}
+
+	function eventsEndpoint(): string {
+		const replayFrom = replayFromValue();
+		if (!replayFrom) return `${API_BASE}/events`;
+
+		const url = new URL(`${API_BASE}/events`, globalThis.location?.origin ?? `http://localhost`);
+		url.searchParams.set(`from`, replayFrom);
+		return url.toString();
+	}
+
 	function scheduleReconnect() {
 		clearHeartbeat();
 		if (closed || retryTimer !== null) return;
@@ -85,7 +106,7 @@ export function connectEvents(handlers: {
 	function open() {
 		if (closed) return;
 		handlers.onState('connecting');
-		source = new EventSource(`${API_BASE}/events`, { withCredentials: true });
+		source = new EventSource(eventsEndpoint(), { withCredentials: true });
 
 		source.onopen = () => {
 			handlers.onState('connected');
@@ -158,6 +179,12 @@ export function packetFromEvent(event: StreamEvent): MeshcomPacket | null {
 	if (event.type !== 'packet.received') return null;
 	const payload = event.data as PacketReceivedPayload;
 	return payload.packet ?? null;
+}
+
+export function isReplayEvent(event: StreamEvent): boolean {
+	if (event.type !== 'packet.received') return false;
+	const payload = event.data as PacketReceivedPayload;
+	return payload.replay === true;
 }
 
 export function eventSummary(event: StreamEvent): string {
@@ -397,16 +424,16 @@ export function applyLiveFreshness(stored: MapPosition[], events: StreamEvent[])
 		const coordPos = positionFromEvent(event);
 		if (coordPos) {
 			const current = bySource.get(coordPos.source);
-				if (!current || coordPos.updatedAt >= current.updatedAt) {
-					const merged: MapPosition = {
-						...(current ?? coordPos),
-						...coordPos,
-						rssi: coordPos.rssi ?? current?.rssi,
-						snr: coordPos.snr ?? current?.snr
-					};
-					// Indirect pos sets lastDirectSeen=undefined — preserve existing if better.
-					if (
-						current?.lastDirectSeen &&
+			if (!current || coordPos.updatedAt >= current.updatedAt) {
+				const merged: MapPosition = {
+					...(current ?? coordPos),
+					...coordPos,
+					rssi: coordPos.rssi ?? current?.rssi,
+					snr: coordPos.snr ?? current?.snr
+				};
+				// Indirect pos sets lastDirectSeen=undefined — preserve existing if better.
+				if (
+					current?.lastDirectSeen &&
 					(!merged.lastDirectSeen || current.lastDirectSeen > merged.lastDirectSeen)
 				) {
 					merged.lastDirectSeen = current.lastDirectSeen;

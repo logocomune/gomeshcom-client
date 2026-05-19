@@ -1,19 +1,17 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { login, onUnauthorized, UnauthorizedError } from '$lib/api/auth';
 	import {
 		applyLiveFreshness,
-		cleanMessage,
 		connectEvents,
 		eventJSON,
-		eventSummary,
 		messageKind,
 		packetBadge,
+		isReplayEvent,
 		packetFromEvent,
 		prependEvent,
 		stationCallsignFromEvent,
-		splitSourcePath,
-		stripMessagePrefix
+		splitSourcePath
 	} from '$lib/api/events';
 	import { base } from '$app/paths';
 	import { stationStore } from '$lib/stores/station';
@@ -35,50 +33,22 @@
 		saveLastChatTarget
 	} from '$lib/api/chat';
 	import { buildAckIndex } from '$lib/api/acks';
-	import { hardwareHumanName } from '$lib/api/hardware';
 	import logo from '$lib/assets/gomeshcom-logo.png';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
+	import UdpStreamPanel from '$lib/components/UdpStreamPanel.svelte';
+	import ChatPanel from '$lib/components/ChatPanel.svelte';
 	import ConnectionOverlay from '$lib/components/ConnectionOverlay.svelte';
 	import { watchDesktop } from '$lib/responsive';
 	import MeshMapPanel from '$lib/map/MeshMapPanel.svelte';
-	import { getSendComposerState } from '$lib/ui/send';
 	import type { ConnectionState, StreamEvent, Conversation, ChatRecord } from '$lib/api/types';
 	import type { ChatTarget } from '$lib/api/chat';
 	import type { MapPosition } from '$lib/map/types';
-	import { partitionChannels, groupTooltip, resolveGroup } from '$lib/api/groups';
-	import {
-		chatSidebarGridColumns,
-		chatSidebarGridStyle,
-		chatSidebarNewDmLabel,
-		loadChatChannelsCollapsed,
-		saveChatChannelsCollapsed
-	} from '$lib/ui/chat-layout';
-	import {
-		mdiAccountOutline,
-		mdiAlertCircleOutline,
-		mdiArrowRight,
-		mdiBroadcast,
-		mdiChevronLeft,
-		mdiChevronRight,
-		mdiNotificationClearAll,
-		mdiTrashCanOutline,
-		mdiCheckCircleOutline,
-		mdiChip,
-		mdiClockOutline,
-		mdiClose,
-		mdiCodeJson,
-		mdiCogOutline,
-		mdiEmailOutline,
-		mdiMapMarkerRadiusOutline,
-		mdiBattery,
-		mdiGauge,
-		mdiPlus,
-		mdiPound,
-		mdiSignalVariant,
-		mdiThermometer,
-		mdiTune,
-		mdiWaterPercent
-	} from '@mdi/js';
+	import { partitionChannels } from '$lib/api/groups';
+	import { loadChatChannelsCollapsed, saveChatChannelsCollapsed } from '$lib/ui/chat-layout';
+	import { formatTime } from '$lib/ui/format';
+	import { chatMdiIcon, chatRecordMatchesFilter, stripNodeSequence } from '$lib/ui/chat-records';
+	import { filterStreamEvents, mdiForEvent, packetTone } from '$lib/ui/stream';
+	import { mdiClose } from '@mdi/js';
 
 	let events = $state<StreamEvent[]>([]);
 	let connection = $state<ConnectionState>('connecting');
@@ -98,8 +68,6 @@
 	let sendEchoTimer: ReturnType<typeof setTimeout> | null = null;
 	let streamFilter = $state('');
 	let chatFilter = $state('');
-	let chatScrollEl = $state<HTMLDivElement | null>(null);
-	let messageInputEl = $state<HTMLInputElement | null>(null);
 	let conversations = $state<Conversation[]>([]);
 	let chatHistory = $state<Record<string, ChatRecord[]>>({});
 	let historyHours = $state(168);
@@ -119,21 +87,12 @@
 	let authSubmitting = $state(false);
 	let channelsCollapsed = $state(false);
 
-	$effect(() => {
-		const _deps = [chatTarget, displayChatRecords];
-		void _deps;
-		tick().then(() => chatScrollEl?.scrollTo({ top: chatScrollEl.scrollHeight }));
-	});
-
-	$effect(() => {
-		void chatTarget;
-		tick().then(() => setTimeout(() => messageInputEl?.focus(), 0));
-	});
 	let stopStream: (() => void) | null = null;
 	let stopUnauthorizedWatch: (() => void) | null = null;
 
 	const STORAGE_CHAT_WIDTH = 'meshcom:chatWidthPct';
 	const STORAGE_STREAM_HEIGHT = 'meshcom:streamHeightPx';
+	const STORAGE_STREAM_REPLAY_FROM = 'meshcom:streamReplayFrom';
 	const DEFAULT_CHAT_WIDTH = 50;
 	const DEFAULT_STREAM_HEIGHT = 300;
 
@@ -248,22 +207,7 @@
 		}
 	});
 
-	let filteredEvents = $derived(
-		streamFilter.trim() === ''
-			? events
-			: (() => {
-					const term = streamFilter.trim().toLowerCase();
-					return events.filter((event) => {
-						const packet = packetFromEvent(event);
-						if (eventSummary(event).toLowerCase().includes(term)) return true;
-						if (packet?.src?.toLowerCase().includes(term)) return true;
-						if (packet?.dst?.toLowerCase().includes(term)) return true;
-						if (packet?.msg?.toLowerCase().includes(term)) return true;
-						if (packetBadge(event).toLowerCase().includes(term)) return true;
-						return false;
-					});
-				})()
-	);
+	let filteredEvents = $derived(filterStreamEvents(events, streamFilter));
 
 	const statusText: Record<ConnectionState, string> = {
 		connecting: 'Connecting',
@@ -297,39 +241,54 @@
 		clearSendEcho();
 	});
 
+	function streamReplayFrom(): string | undefined {
+		return localStorage.getItem(STORAGE_STREAM_REPLAY_FROM) ?? undefined;
+	}
+
+	function clearUdpStream() {
+		localStorage.setItem(STORAGE_STREAM_REPLAY_FROM, new Date().toISOString());
+		events = [];
+		selectedEvent = null;
+		rawEvent = null;
+	}
+
 	function startStream() {
 		stopStream?.();
-		stopStream = connectEvents({
-			onState: (state) => {
-				connection = state;
-			},
-			onPositions: (positions) => {
-				storedPositions = positions;
-			},
-			onStation: (station) => {
-				stationCallsign = station.callsign;
-				if (station.version) appVersion = station.version;
-				txDisabled = !!station.txDisabled;
-				stationStore.set(station);
-			},
-			onEvent: (event) => {
-				events = prependEvent(events, event);
-				selectedEvent ??= event;
-				stationCallsign ||= stationCallsignFromEvent(event) ?? '';
+		const replayFrom = streamReplayFrom();
+		stopStream = connectEvents(
+			{
+				onState: (state) => {
+					connection = state;
+				},
+				onPositions: (positions) => {
+					storedPositions = positions;
+				},
+				onStation: (station) => {
+					stationCallsign = station.callsign;
+					if (station.version) appVersion = station.version;
+					txDisabled = !!station.txDisabled;
+					stationStore.set(station);
+				},
+				onEvent: (event) => {
+					events = prependEvent(events, event);
+					selectedEvent ??= event;
+					stationCallsign ||= stationCallsignFromEvent(event) ?? '';
 
-				const packet = packetFromEvent(event);
-				if (packet?.type === 'msg') {
-					appendLiveChatRecord(packet, event.receivedAt);
-					if (sending && splitSourcePath(packet.src).origin === stationCallsign) {
+					const packet = packetFromEvent(event);
+					if (packet?.type === 'msg' && !isReplayEvent(event)) {
+						appendLiveChatRecord(packet, event.receivedAt);
+						if (sending && splitSourcePath(packet.src).origin === stationCallsign) {
+							clearSendEcho();
+						}
+					}
+					if (event.type === 'message.failed') {
+						appendChatRecord(event.data as ChatRecord);
 						clearSendEcho();
 					}
 				}
-				if (event.type === 'message.failed') {
-					appendChatRecord(event.data as ChatRecord);
-					clearSendEcho();
-				}
-			}
-		});
+			},
+			replayFrom ? { replayFrom } : {}
+		);
 	}
 
 	async function reloadProtectedData() {
@@ -378,86 +337,6 @@
 		}
 	}
 
-	function formatTime(value: string): string {
-		return new Date(value).toLocaleTimeString('it-IT', {
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit'
-		});
-	}
-
-	function packetTone(event: StreamEvent): string {
-		const badge = packetBadge(event);
-		if (badge === 'error') return 'border-red-500/70 bg-red-500/25 text-red-200';
-		if (badge === 'msg') return 'border-blue-500/70 bg-blue-500/25 text-blue-200';
-		if (badge === 'pos') return 'border-emerald-500/70 bg-emerald-500/25 text-emerald-200';
-		if (badge === 'tele') return 'border-purple-500/70 bg-purple-500/25 text-purple-200';
-		return 'border-gray-500/50 bg-gray-500/20 text-gray-200';
-	}
-
-	function packetField(event: StreamEvent, key: string): string {
-		const packet = packetFromEvent(event);
-		const value = packet?.[key];
-		return value == null || value === '' ? '—' : String(value);
-	}
-
-	function isMessageEvent(event: StreamEvent): boolean {
-		return packetFromEvent(event)?.type === 'msg';
-	}
-
-	function messageRoute(event: StreamEvent): {
-		origin: string;
-		relays: string[];
-		destination: string;
-	} {
-		const packet = packetFromEvent(event);
-		const source = splitSourcePath(packet?.src);
-		return {
-			origin: source.origin,
-			relays: source.relays,
-			destination: packet?.dst === '*' ? 'Broadcast' : (packet?.dst ?? 'unknown')
-		};
-	}
-
-	function mdiForEvent(event: StreamEvent): string {
-		const packet = packetFromEvent(event);
-		if (packet?.type === 'msg') {
-			const kind = messageKind(packet.msg).kind;
-			if (kind === 'time') return mdiClockOutline;
-			if (kind === 'ack') return mdiCheckCircleOutline;
-			if (kind === 'reject') return mdiAlertCircleOutline;
-			if (kind === 'config') return mdiCogOutline;
-			return mdiEmailOutline;
-		}
-		if (packet?.type === 'pos') return mdiMapMarkerRadiusOutline;
-		if (packet?.type === 'tele') return mdiBroadcast;
-		return mdiAlertCircleOutline;
-	}
-
-	function iconTooltip(event: StreamEvent): string {
-		const packet = packetFromEvent(event);
-		if (!packet) return 'Parse error';
-		if (packet.type === 'msg') {
-			const kind = messageKind(packet.msg).kind;
-			if (kind === 'ack') return 'ACK — message acknowledged';
-			if (kind === 'reject') return 'REJ — message rejected';
-			if (kind === 'time') return 'Network time sync';
-			if (kind === 'config') return 'Config update';
-			return 'Text message';
-		}
-		if (packet.type === 'pos') return 'Position report';
-		if (packet.type === 'tele') return 'Telemetry';
-		return `Raw packet · ${packet.src_type ?? 'unknown'}`;
-	}
-
-	function formatRtt(ms: number): string {
-		if (ms < 0) return '';
-		if (ms < 1000) return `${ms}ms`;
-		const sec = Math.round(ms / 1000);
-		if (sec < 60) return `${sec}s`;
-		return `${Math.floor(sec / 60)}m ${sec % 60}s`;
-	}
-
 	function markRead(convId: string) {
 		const now = new Date().toISOString();
 		saveReadTimestamp(convId, now);
@@ -487,10 +366,7 @@
 		const wasBroadcast = isBroadcastTarget;
 		deleting = true;
 		try {
-			const msgs = chatHistory[id];
-			if (msgs === undefined || msgs.length > 0) {
-				await deleteConversation(id);
-			}
+			await deleteConversation(id);
 
 			const nextHistory = { ...chatHistory };
 			delete nextHistory[id];
@@ -536,46 +412,6 @@
 		}
 		newDmOpen = false;
 		selectContact(call);
-	}
-
-	function chatRecordSeqId(rec: ChatRecord): string | null {
-		const match = (rec.msg ?? '').match(/\{(\d+)\s*$/);
-		return match?.[1] ?? null;
-	}
-
-	function chatMdiIcon(rec: ChatRecord): string {
-		const kind = messageKind(rec.msg).kind;
-		if (kind === 'time') return mdiClockOutline;
-		if (kind === 'ack') return mdiCheckCircleOutline;
-		if (kind === 'reject') return mdiAlertCircleOutline;
-		if (kind === 'config') return mdiCogOutline;
-		return mdiEmailOutline;
-	}
-
-	function chatIconTooltip(rec: ChatRecord): string {
-		if (rec.delivery_status === 'pending') return 'Pending';
-		if (rec.delivery_status === 'failed') return 'Failed';
-		const kind = messageKind(rec.msg).kind;
-		if (kind === 'ack') return 'ACK — message acknowledged';
-		if (kind === 'reject') return 'REJ — message rejected';
-		if (kind === 'time') return 'Network time sync';
-		if (kind === 'config') return 'Config update';
-		return 'Text message';
-	}
-
-	function chatRecordMatchesFilter(rec: ChatRecord, filter: string): boolean {
-		const term = filter.trim().toLowerCase();
-		if (term === '') return true;
-		const kind = messageKind(rec.msg);
-		const haystack: string[] = [
-			rec.src ?? '',
-			rec.dst ?? '',
-			rec.msg ?? '',
-			cleanMessage(rec.msg),
-			kind.kind,
-			kind.label
-		];
-		return haystack.some((value) => value.toLowerCase().includes(term));
 	}
 
 	function clearSendEcho() {
@@ -757,10 +593,6 @@
 		if (next.length === existing.length) return;
 		chatHistory = { ...chatHistory, [convId]: next };
 	}
-
-	function stripNodeSequence(msg: string): string {
-		return msg.replace(/\{\d+\}$/, '');
-	}
 </script>
 
 <svelte:head>
@@ -890,461 +722,31 @@
 	<div class="flex min-h-0 flex-1 flex-col gap-2 p-2 overflow-y-auto md:overflow-hidden">
 		<!-- Top row: Chat + Map -->
 		<div class="flex flex-col md:flex-row shrink-0 md:flex-1 md:min-h-0 gap-2" data-panel-row>
-			<!-- Chat panel -->
-			<div
-				data-testid="chat-panel"
-				class="flex h-[80vh] md:h-auto md:min-h-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm"
-				style={isDesktop ? `flex: 0 0 ${chatWidthPct}%; min-width: 0` : ''}
-			>
-				<div
-					class="flex h-9 shrink-0 items-center justify-between border-b border-gray-700/60 px-3"
-				>
-					<span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Chat</span>
-					<span class="font-mono text-[11px] text-gray-500"
-						>{displayChatRecords.length} messages</span
-					>
-				</div>
-
-				<div class="grid min-h-0 flex-1" style={chatSidebarGridStyle(channelsCollapsed, isDesktop)}>
-					<!-- Destinations sidebar -->
-					<aside class="flex min-h-0 flex-col border-r border-gray-700/60 bg-[#1c2230]">
-						<div
-							class="flex items-center border-b border-gray-700/60 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500 {channelsCollapsed
-								? 'justify-center px-1'
-								: 'justify-between px-3'}"
-						>
-							<span class={channelsCollapsed ? 'sr-only' : ''}>Channels</span>
-							<button
-								type="button"
-								class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-gray-500 hover:text-gray-200"
-								aria-label={channelsCollapsed ? 'Expand channels' : 'Collapse channels'}
-								title={channelsCollapsed ? 'Expand channels' : 'Collapse channels'}
-								onclick={toggleChannelsSidebar}
-							>
-								<MdiIcon path={channelsCollapsed ? mdiChevronRight : mdiChevronLeft} size={14} />
-							</button>
-						</div>
-						<div class="min-h-0 flex-1 overflow-auto p-1.5">
-							<!-- Broadcast (always shown) -->
-							<button
-								type="button"
-								class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
-									? 'justify-center gap-0'
-									: 'gap-2'} {chatTarget.kind === 'channel' && chatTarget.value === 'Broadcast'
-									? 'bg-blue-500/15 text-blue-200'
-									: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
-								aria-label="Broadcast channel"
-								title="Broadcast channel"
-								onclick={() => selectChannel('Broadcast')}
-							>
-								<MdiIcon path={mdiBroadcast} size={14} />
-								{#if unreadIds.has('P_broadcast')}
-									<span
-										class="mr-0.5 inline-block size-1.5 shrink-0 rounded-full bg-emerald-400"
-										aria-label="unread"
-									></span>
-								{/if}
-								<span
-									class={channelsCollapsed
-										? 'sr-only'
-										: `truncate ${unreadIds.has('P_broadcast') ? 'font-semibold' : ''}`}
-									>Broadcast</span
-								>
-							</button>
-
-							<!-- Known groups from live traffic -->
-							{#if resolvedChannels.known.length > 0}
-								<div class="mt-1.5 space-y-0.5 border-t border-gray-700/60 pt-1.5">
-									{#each resolvedChannels.known as { channel, group } (channel)}
-										{@const knownCid = conversationIdFor({ kind: 'channel', value: channel })}
-										<button
-											type="button"
-											title={groupTooltip(group)}
-											class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
-												? 'justify-center gap-0'
-												: 'gap-2'} {chatTarget.kind === 'channel' && chatTarget.value === channel
-												? 'bg-blue-500/15 text-blue-200'
-												: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
-											aria-label={group.note}
-											onclick={() => selectChannel(channel)}
-										>
-											<span class="shrink-0 text-sm leading-none">{group.flag}</span>
-											{#if unreadIds.has(knownCid)}
-												<span
-													class="mr-0.5 inline-block size-1.5 shrink-0 rounded-full bg-emerald-400"
-													aria-label="unread"
-												></span>
-											{/if}
-											<span
-												class={channelsCollapsed
-													? 'sr-only'
-													: `truncate ${unreadIds.has(knownCid) ? 'font-semibold' : ''}`}
-												>{group.note}</span
-											>
-										</button>
-									{/each}
-								</div>
-							{/if}
-
-							<!-- Unknown group numbers -->
-							{#if resolvedChannels.unknown.length > 0}
-								<div class="mt-1.5 space-y-0.5 border-t border-gray-700/60 pt-1.5">
-									{#each resolvedChannels.unknown as channel (channel)}
-										{@const unknownCid = conversationIdFor({ kind: 'channel', value: channel })}
-										<button
-											type="button"
-											class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
-												? 'justify-center gap-0'
-												: 'gap-2'} {chatTarget.kind === 'channel' && chatTarget.value === channel
-												? 'bg-blue-500/15 text-blue-200'
-												: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
-											aria-label={channel}
-											title={channel}
-											onclick={() => selectChannel(channel)}
-										>
-											<MdiIcon path={mdiPound} size={14} />
-											{#if unreadIds.has(unknownCid)}
-												<span
-													class="mr-0.5 inline-block size-1.5 shrink-0 rounded-full bg-emerald-400"
-													aria-label="unread"
-												></span>
-											{/if}
-											<span
-												class={channelsCollapsed
-													? 'sr-only'
-													: `truncate ${unreadIds.has(unknownCid) ? 'font-semibold' : ''}`}
-												>{channel}</span
-											>
-										</button>
-									{/each}
-								</div>
-							{/if}
-
-							<!-- Direct Messages -->
-							<div class="mt-2 border-t border-gray-700/60 pt-1.5">
-								<div
-									class="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-600"
-								>
-									Direct Messages
-								</div>
-								{#if contacts.length === 0}
-									<div class="px-2 py-1 text-[10px] text-gray-600">No DMs yet</div>
-								{:else}
-									<div class="space-y-0.5">
-										{#each contacts as contact (contact)}
-											{@const dmCid = conversationIdFor({ kind: 'contact', value: contact })}
-											<button
-												type="button"
-												class="flex w-full items-center rounded px-2 py-1.5 text-left text-xs {channelsCollapsed
-													? 'justify-center gap-0'
-													: 'gap-2'} {chatTarget.kind === 'contact' && chatTarget.value === contact
-													? 'bg-blue-500/15 text-blue-200'
-													: 'text-gray-300 hover:bg-white/[0.04] hover:text-gray-100'}"
-												aria-label={contact}
-												title={contact}
-												onclick={() => selectContact(contact)}
-											>
-												<MdiIcon path={mdiAccountOutline} size={14} />
-												{#if unreadIds.has(dmCid)}
-													<span
-														class="mr-0.5 inline-block size-1.5 shrink-0 rounded-full bg-emerald-400"
-														aria-label="unread"
-													></span>
-												{/if}
-												<span
-													class={channelsCollapsed
-														? 'sr-only'
-														: `truncate ${unreadIds.has(dmCid) ? 'font-semibold' : ''}`}
-													>{contact}</span
-												>
-											</button>
-										{/each}
-									</div>
-								{/if}
-								<button
-									type="button"
-									class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-blue-500/40 px-2 py-1.5 text-[11px] font-medium text-blue-400/70 hover:border-blue-400/70 hover:bg-blue-500/10 hover:text-blue-300"
-									aria-label="New direct message"
-									title="New direct message"
-									onclick={openNewDm}
-								>
-									<MdiIcon path={mdiPlus} size={14} />
-									<span>{chatSidebarNewDmLabel(channelsCollapsed)}</span>
-								</button>
-							</div>
-						</div>
-					</aside>
-
-					<!-- Messages section -->
-					<section class="flex min-h-0 flex-col">
-						<div
-							class="flex h-10 shrink-0 items-center justify-between border-b border-gray-700/60 px-3"
-						>
-							<div class="min-w-0 flex-1">
-								{#if chatTarget.kind === 'channel' && chatTarget.value !== 'Broadcast'}
-									{@const group = resolveGroup(chatTarget.value)}
-									<div class="flex items-center gap-2">
-										{#if group}
-											<span class="text-xl leading-none">{group.flag}</span>
-											<div>
-												<div class="text-sm font-semibold text-white">{group.note}</div>
-												<div class="text-[10px] text-gray-500">
-													Group {group.group} · {group.prefix}
-												</div>
-											</div>
-										{:else}
-											<div>
-												<div class="text-sm font-semibold text-white"># {chatTarget.value}</div>
-												<div class="text-[10px] text-gray-500">channel · receive view</div>
-											</div>
-										{/if}
-									</div>
-								{:else}
-									<div>
-										<div class="text-sm font-semibold text-white">{chatTarget.value}</div>
-										<div class="text-[10px] text-gray-500">
-											{chatTarget.kind === 'channel' ? 'channel' : 'direct'} · receive view
-										</div>
-									</div>
-								{/if}
-							</div>
-							<label class="ml-2 min-w-0 shrink">
-								<span class="sr-only">Filter messages</span>
-								<input
-									type="search"
-									class="h-7 w-28 rounded border border-gray-700/60 bg-[#111827] px-2 text-xs text-gray-200 outline-none placeholder:text-gray-500 focus:border-blue-500/60 md:w-44"
-									bind:value={chatFilter}
-									placeholder="Filter"
-								/>
-							</label>
-							<button
-								type="button"
-								class="ml-2 flex h-7 w-7 shrink-0 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
-								aria-label={isBroadcastTarget ? 'Clear messages' : 'Delete conversation'}
-								title={isBroadcastTarget ? 'Clear messages' : 'Delete conversation'}
-								onclick={openDeleteConfirm}
-							>
-								<MdiIcon
-									path={isBroadcastTarget ? mdiNotificationClearAll : mdiTrashCanOutline}
-									size={14}
-								/>
-							</button>
-						</div>
-
-						<div bind:this={chatScrollEl} class="min-h-0 flex-1 overflow-auto p-2">
-							{#if displayChatRecords.length === 0}
-								<div class="flex h-full items-center justify-center text-sm text-gray-500">
-									{chatFilter.trim() === '' ? 'No messages in this chat' : 'No matching messages'}
-								</div>
-							{:else}
-								<div class="space-y-2">
-									{#each displayChatRecords as rec (chatRecordKey(rec))}
-										{@const srcPath = splitSourcePath(rec.src)}
-										{@const isSent = srcPath.origin === stationCallsign}
-										{@const seqId = isSent ? chatRecordSeqId(rec) : null}
-										{@const ackEntries = seqId ? (ackIndex.acked.get(seqId) ?? []) : []}
-										{@const rejEntries = seqId ? (ackIndex.rejected.get(seqId) ?? []) : []}
-										{@const gatewayAck = ackEntries.find((a) => a.ackSource === 'gateway') ?? null}
-										{@const loraAck = ackEntries.find((a) => a.ackSource === 'lora') ?? null}
-										{@const bestAck = gatewayAck ?? loraAck}
-										{@const rttMs = bestAck
-											? new Date(bestAck.receivedAt).getTime() - new Date(rec.received_at).getTime()
-											: -1}
-										<div
-											class="rounded border border-gray-700/60 bg-[#1c2230] p-2 md:p-3 transition-colors hover:border-gray-600/60"
-										>
-											<div class="flex items-center justify-between gap-2 md:gap-3">
-												<div class="flex min-w-0 items-center gap-2">
-													<span
-														class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-blue-500/70 bg-blue-500/25 text-blue-200"
-														title={chatIconTooltip(rec)}
-													>
-														<MdiIcon path={chatMdiIcon(rec)} size={16} />
-													</span>
-													<div class="min-w-0">
-														<div class="truncate text-xs md:text-sm font-semibold text-white">
-															{srcPath.origin}
-														</div>
-														<div class="truncate text-[10px] text-gray-500">
-															{messageKind(rec.msg).label.toUpperCase()}
-														</div>
-													</div>
-												</div>
-												<div class="flex items-center gap-1.5">
-													<div class="font-mono text-[10px] md:text-[11px] text-gray-500">
-														{formatTime(rec.received_at)}
-													</div>
-													{#if rec.delivery_status === 'pending'}
-														<span
-															class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-400/30 border-t-blue-300"
-															style="width: 0.875rem; height: 0.875rem; border: 2px solid rgba(96, 165, 250, 0.3); border-top-color: rgb(147, 197, 253);"
-															title="Pending"
-														></span>
-													{:else if rec.delivery_status === 'failed'}
-														<span class="text-[13px] font-bold text-red-400" title="Failed">✗</span>
-													{:else if isSent}
-														{#if chatTarget.kind === 'contact'}
-															{#if seqId && rejEntries.length > 0}
-																<span class="text-[13px] font-bold text-red-400" title="Rejected"
-																	>✗</span
-																>
-															{:else if seqId && gatewayAck}
-																<span
-																	class="flex items-center gap-1"
-																	title="Gateway delivered in {formatRtt(rttMs)}"
-																>
-																	<span class="text-[13px] font-bold text-green-400">☁️✓</span>
-																	<span class="font-mono text-[10px] text-green-600/80"
-																		>{formatRtt(rttMs)}</span
-																	>
-																</span>
-															{:else if seqId && loraAck}
-																<span
-																	class="flex items-center gap-1"
-																	title="Acknowledged in {formatRtt(rttMs)}"
-																>
-																	<span class="text-[13px] font-bold text-green-400">✓✓</span>
-																	<span class="font-mono text-[10px] text-green-600/80"
-																		>{formatRtt(rttMs)}</span
-																	>
-																</span>
-															{:else}
-																<span
-																	class="text-[13px] text-gray-600"
-																	title="Sent, waiting for ACK">✓</span
-																>
-															{/if}
-														{:else if seqId && gatewayAck}
-															<span
-																class="text-[13px] text-green-400"
-																title="Delivered via gateway ({gatewayAck.source})">☁️</span
-															>
-														{:else}
-															<span class="text-[13px] text-green-400" title="Node echo observed"
-																>☁️</span
-															>
-														{/if}
-													{/if}
-												</div>
-											</div>
-											<div
-												class="mt-2 rounded border border-gray-700/60 bg-[#111827] px-3 py-2 text-[11px] md:text-sm leading-relaxed text-gray-100"
-											>
-												{cleanMessage(rec.msg) || rec.msg}
-											</div>
-											{#if isSent && chatTarget.kind === 'contact' && seqId && bestAck}
-												<div
-													class="mt-1 flex items-center gap-2 font-mono text-[10px] text-green-600/70"
-												>
-													<span>ack</span>
-													{#if bestAck.via.length > 0}
-														<span>via {bestAck.via.join(' → ')}</span>
-													{/if}
-													{#if bestAck.rssi != null}
-														<span class="flex items-center gap-0.5">
-															<MdiIcon path={mdiSignalVariant} size={10} />
-															{bestAck.rssi} dBm
-														</span>
-													{/if}
-													{#if bestAck.snr != null}
-														<span class="flex items-center gap-0.5">
-															<MdiIcon path={mdiTune} size={10} />
-															SNR {bestAck.snr}
-														</span>
-													{/if}
-												</div>
-											{/if}
-											<div
-												class="mt-1.5 flex items-center justify-between gap-2 font-mono text-[10px] md:text-[11px]"
-											>
-												<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-gray-500">
-													{#if srcPath.relays.length > 0}
-														<span>via {srcPath.relays.join(' → ')}</span>
-													{/if}
-													{#if rec.rssi != null}
-														<span class="flex items-center gap-0.5" title="RSSI — signal strength">
-															<MdiIcon path={mdiSignalVariant} size={11} />
-															{rec.rssi} dBm
-														</span>
-													{/if}
-													{#if rec.snr != null}
-														<span
-															class="flex items-center gap-0.5"
-															title="SNR — signal to noise ratio"
-														>
-															<MdiIcon path={mdiTune} size={11} />
-															SNR {rec.snr}
-														</span>
-													{/if}
-												</div>
-												<button
-													type="button"
-													class="text-gray-600 hover:text-blue-300"
-													onclick={() => (rawChatRecord = rec)}
-												>
-													<MdiIcon path={mdiCodeJson} size={16} />
-												</button>
-											</div>
-										</div>
-									{/each}
-								</div>
-							{/if}
-						</div>
-
-						<div class="shrink-0 border-t border-gray-700/60 p-2">
-							{#if sendError}
-								<div
-									class="mb-1.5 rounded px-2 py-1 text-xs {sendError.startsWith('Duplicate')
-										? 'bg-amber-900/40 text-amber-300'
-										: 'bg-red-900/40 text-red-300'}"
-								>
-									{sendError}
-								</div>
-							{/if}
-							<div class="flex gap-2">
-								<div class="relative min-w-0 flex-1">
-									<input
-										class="h-10 w-full rounded border border-gray-700/60 bg-[#111827] px-3 text-sm text-gray-200 outline-none placeholder:text-gray-500 focus:border-blue-500/60"
-										bind:this={messageInputEl}
-										bind:value={draftMessage}
-										placeholder="Type a message…"
-										maxlength={149}
-										disabled={sending || txDisabled}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' && !e.shiftKey) {
-												e.preventDefault();
-												handleSend();
-											}
-										}}
-									/>
-									<span
-										class="pointer-events-none absolute bottom-1.5 right-2 text-[10px] tabular-nums {draftMessage.length >=
-										140
-											? 'text-red-400'
-											: 'text-gray-600'}"
-									>
-										{draftMessage.length}/149
-									</span>
-								</div>
-								<div class="flex flex-col items-center gap-1">
-									<button
-										class="h-10 rounded border border-gray-700/60 bg-blue-600/80 px-4 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-										disabled={!getSendComposerState({ draftMessage, sending, txDisabled }).canSend}
-										onclick={handleSend}
-									>
-										{getSendComposerState({ draftMessage, sending, txDisabled }).label}
-									</button>
-									{#if getSendComposerState({ draftMessage, sending, txDisabled }).hint}
-										<span class="text-[10px] font-semibold uppercase tracking-wide text-amber-300">
-											{getSendComposerState({ draftMessage, sending, txDisabled }).hint}
-										</span>
-									{/if}
-								</div>
-							</div>
-						</div>
-					</section>
-				</div>
-			</div>
+			<ChatPanel
+				{ackIndex}
+				{channelsCollapsed}
+				bind:chatFilter
+				{chatTarget}
+				{chatWidthPct}
+				{contacts}
+				{displayChatRecords}
+				bind:draftMessage
+				{isBroadcastTarget}
+				{isDesktop}
+				{resolvedChannels}
+				{sendError}
+				{sending}
+				{stationCallsign}
+				{txDisabled}
+				{unreadIds}
+				{handleSend}
+				onDelete={openDeleteConfirm}
+				onNewDm={openNewDm}
+				onSelectChannel={selectChannel}
+				onSelectContact={selectContact}
+				onShowRawRecord={(record) => (rawChatRecord = record)}
+				onToggleChannels={toggleChannelsSidebar}
+			/>
 
 			<!-- Vertical drag handle -->
 			<div
@@ -1390,413 +792,17 @@
 			></div>
 		</div>
 
-		<!-- UDP stream panel -->
-		<div
-			data-testid="udp-panel"
-			class="flex shrink-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm h-[80vh] md:h-auto md:min-h-[160px]"
-			style={isDesktop ? `height: ${streamHeightPx}px` : ''}
-		>
-			<div class="flex h-9 shrink-0 items-center justify-between border-b border-gray-700/60 px-3">
-				<div class="flex items-center gap-2">
-					<span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-						>UDP stream</span
-					>
-					<span class="rounded bg-gray-700/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-500"
-						>/api/events</span
-					>
-				</div>
-				<div class="flex items-center gap-2">
-					<div class="relative">
-						<input
-							type="text"
-							bind:value={streamFilter}
-							placeholder="Filter…"
-							class="h-6 w-36 rounded border border-gray-700/60 bg-[#1c2230] py-0 pl-2 pr-6 text-[11px] text-gray-200 placeholder:text-gray-600 focus:border-blue-500/60 focus:outline-none"
-						/>
-						{#if streamFilter}
-							<button
-								type="button"
-								class="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200"
-								aria-label="Clear filter"
-								onclick={() => (streamFilter = '')}
-							>
-								<MdiIcon path={mdiClose} size={12} />
-							</button>
-						{/if}
-					</div>
-					<span class="font-mono text-[11px] text-gray-500">
-						{filteredEvents.length}{streamFilter ? `/${events.length}` : ''}
-					</span>
-				</div>
-			</div>
-
-			<div class="min-h-0 flex-1 overflow-auto">
-				{#if events.length === 0}
-					<div class="flex h-full items-center justify-center text-sm text-gray-500">
-						Waiting for UDP packets
-					</div>
-				{:else if filteredEvents.length === 0}
-					<div class="flex h-full items-center justify-center text-sm text-gray-500">
-						No results for "{streamFilter}"
-					</div>
-				{:else}
-					<div class="divide-y divide-gray-700/50">
-						{#each filteredEvents as event (event.id)}
-							<div
-								role="button"
-								tabindex="0"
-								class="grid w-full grid-cols-[3rem_1fr] md:grid-cols-[4.5rem_1fr_2rem] gap-2 md:gap-3 px-3 py-2 text-left hover:bg-white/[0.03] {selectedEvent?.id ===
-								event.id
-									? 'bg-white/[0.04]'
-									: ''}"
-								onclick={() => (isDesktop ? (selectedEvent = event) : (rawEvent = event))}
-								onkeydown={(keyEvent) => {
-									if (keyEvent.key === 'Enter' || keyEvent.key === ' ')
-										isDesktop ? (selectedEvent = event) : (rawEvent = event);
-								}}
-							>
-								<div class="font-mono text-[10px] md:text-[11px] text-gray-500">
-									{formatTime(event.receivedAt)}
-								</div>
-								<div class="min-w-0">
-									{#if isMessageEvent(event)}
-										{@const route = messageRoute(event)}
-										{@const packet = packetFromEvent(event)}
-										{@const text =
-											stripMessagePrefix(packet?.msg ?? '') || packetField(event, 'msg')}
-										<div class="flex min-w-0 items-center gap-1.5">
-											<span
-												class="flex h-6 w-6 shrink-0 items-center justify-center rounded border {packetTone(
-													event
-												)}"
-												title={iconTooltip(event)}
-											>
-												<MdiIcon path={mdiForEvent(event)} size={17} />
-											</span>
-											<span class="shrink-0 text-xs md:text-sm font-bold text-white"
-												>{route.origin}</span
-											>
-											{#if route.relays.length > 0}
-												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
-													>(via {route.relays.join(', ')})</span
-												>
-											{/if}
-											<span class="hidden md:inline shrink-0 text-gray-500"
-												><MdiIcon path={mdiArrowRight} size={13} /></span
-											>
-											<span class="hidden md:inline shrink-0 text-sm text-gray-200"
-												>{route.destination}</span
-											>
-											<span class="mx-0.5 shrink-0 text-gray-400">·</span>
-											<span class="min-w-0 truncate italic text-xs md:text-sm text-white"
-												>"{text}"</span
-											>
-											{#if packet?.rssi != null || packet?.snr != null}
-												<span class="ml-auto flex shrink-0 items-center gap-2 pl-2">
-													{#if packet?.rssi != null}
-														<span
-															class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
-															title="RSSI — received signal strength (dBm)"
-														>
-															<span class="text-gray-300"
-																><MdiIcon path={mdiSignalVariant} size={14} /></span
-															>
-															{packet.rssi}
-														</span>
-													{/if}
-													{#if packet?.snr != null}
-														<span
-															class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
-															title="SNR — signal-to-noise ratio (dB)"
-														>
-															<span class="text-gray-300"><MdiIcon path={mdiTune} size={14} /></span
-															>
-															{packet.snr}
-														</span>
-													{/if}
-												</span>
-											{/if}
-										</div>
-									{:else if packetFromEvent(event)?.type === 'tele'}
-										{@const packet = packetFromEvent(event)}
-										{@const source = splitSourcePath(packet?.src)}
-										<div class="flex min-w-0 items-center gap-1.5">
-											<span
-												class="flex h-6 w-6 shrink-0 items-center justify-center rounded border {packetTone(
-													event
-												)}"
-												title={iconTooltip(event)}
-											>
-												<MdiIcon path={mdiForEvent(event)} size={17} />
-											</span>
-											<span class="shrink-0 text-xs md:text-sm font-bold text-white"
-												>{source.origin}</span
-											>
-											{#if source.relays.length > 0}
-												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
-													>(via {source.relays.join(', ')})</span
-												>
-											{/if}
-											<span class="mx-0.5 shrink-0 text-gray-400">·</span>
-											<span class="flex min-w-0 items-center gap-2">
-												{#if packet?.batt != null}
-													<span
-														class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-													>
-														<span class="text-gray-500"
-															><MdiIcon path={mdiBattery} size={12} /></span
-														>
-														{packet.batt}%
-													</span>
-												{/if}
-												{#if packet?.temp1 != null}
-													<span
-														class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-													>
-														<span class="text-gray-500"
-															><MdiIcon path={mdiThermometer} size={12} /></span
-														>
-														{packet.temp1}°C
-													</span>
-												{/if}
-												{#if packet?.hum != null}
-													<span
-														class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-													>
-														<span class="text-gray-500"
-															><MdiIcon path={mdiWaterPercent} size={12} /></span
-														>
-														{packet.hum}%
-													</span>
-												{/if}
-												{#if packet?.qnh != null || packet?.qfe != null}
-													<span
-														class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-													>
-														<span class="text-gray-500"><MdiIcon path={mdiGauge} size={12} /></span>
-														{packet.qnh ?? packet.qfe} hPa
-													</span>
-												{/if}
-											</span>
-											{#if packet?.rssi != null || packet?.snr != null}
-												<span class="ml-auto flex shrink-0 items-center gap-2 pl-2">
-													{#if packet?.rssi != null}
-														<span
-															class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
-															title="RSSI — received signal strength (dBm)"
-														>
-															<span class="text-gray-300"
-																><MdiIcon path={mdiSignalVariant} size={14} /></span
-															>
-															{packet.rssi}
-														</span>
-													{/if}
-													{#if packet?.snr != null}
-														<span
-															class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
-															title="SNR — signal-to-noise ratio (dB)"
-														>
-															<span class="text-gray-300"><MdiIcon path={mdiTune} size={14} /></span
-															>
-															{packet.snr}
-														</span>
-													{/if}
-												</span>
-											{/if}
-										</div>
-									{:else if packetFromEvent(event)?.type === 'pos'}
-										{@const packet = packetFromEvent(event)}
-										{@const source = splitSourcePath(packet?.src)}
-										{@const hardware = hardwareHumanName(packet?.hw_id)}
-										<div class="flex min-w-0 items-center gap-1.5">
-											<span
-												class="flex h-6 w-6 shrink-0 items-center justify-center rounded border {packetTone(
-													event
-												)}"
-												title={iconTooltip(event)}
-											>
-												<MdiIcon path={mdiForEvent(event)} size={17} />
-											</span>
-											<span class="shrink-0 text-xs md:text-sm font-bold text-white"
-												>{source.origin}</span
-											>
-											{#if source.relays.length > 0}
-												<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
-													>(via {source.relays.join(', ')})</span
-												>
-											{/if}
-											<span class="mx-0.5 shrink-0 text-gray-400">·</span>
-											<span class="flex min-w-0 items-center gap-2">
-												{#if packet?.lat != null && packet?.long != null}
-													<span
-														class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-													>
-														<span class="text-gray-500"
-															><MdiIcon path={mdiMapMarkerRadiusOutline} size={12} /></span
-														>
-														{packet.lat.toFixed(4)}, {packet.long.toFixed(4)}
-													</span>
-												{/if}
-												{#if packet?.alt != null}
-													<span
-														class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
-														>{packet.alt} m</span
-													>
-												{/if}
-												{#if packet?.batt != null}
-													<span
-														class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-													>
-														<span class="text-gray-500"
-															><MdiIcon path={mdiBattery} size={12} /></span
-														>
-														{packet.batt}%
-													</span>
-												{/if}
-												{#if hardware}
-													<span
-														class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-														title="Hardware ID {packet?.hw_id}"
-													>
-														<span class="text-gray-500"><MdiIcon path={mdiChip} size={12} /></span>
-														{hardware}
-													</span>
-												{/if}
-											</span>
-											{#if packet?.rssi != null || packet?.snr != null}
-												<span class="ml-auto flex shrink-0 items-center gap-2 pl-2">
-													{#if packet?.rssi != null}
-														<span
-															class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
-															title="RSSI — received signal strength (dBm)"
-														>
-															<span class="text-gray-300"
-																><MdiIcon path={mdiSignalVariant} size={14} /></span
-															>
-															{packet.rssi}
-														</span>
-													{/if}
-													{#if packet?.snr != null}
-														<span
-															class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
-															title="SNR — signal-to-noise ratio (dB)"
-														>
-															<span class="text-gray-300"><MdiIcon path={mdiTune} size={14} /></span
-															>
-															{packet.snr}
-														</span>
-													{/if}
-												</span>
-											{/if}
-										</div>
-									{:else}
-										{@const packet = packetFromEvent(event)}
-										{@const source = splitSourcePath(packet?.src)}
-										<div class="flex min-w-0 items-center gap-1.5">
-											<span
-												class="flex h-6 w-6 shrink-0 items-center justify-center rounded border {packetTone(
-													event
-												)}"
-												title={iconTooltip(event)}
-											>
-												<MdiIcon path={mdiForEvent(event)} size={17} />
-											</span>
-											{#if packet}
-												<span class="shrink-0 text-xs md:text-sm font-bold text-white"
-													>{source.origin}</span
-												>
-												{#if source.relays.length > 0}
-													<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
-														>(via {source.relays.join(', ')})</span
-													>
-												{/if}
-												<span class="mx-0.5 shrink-0 text-gray-400">·</span>
-												<span class="flex min-w-0 items-center gap-2">
-													{#if packet.lat != null && packet.long != null}
-														<span
-															class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-														>
-															<span class="text-gray-500"
-																><MdiIcon path={mdiMapMarkerRadiusOutline} size={12} /></span
-															>
-															{packet.lat.toFixed(4)}, {packet.long.toFixed(4)}
-														</span>
-													{/if}
-													{#if packet.alt != null}
-														<span
-															class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
-															>{packet.alt} m</span
-														>
-													{/if}
-													{#if packet.batt != null}
-														<span
-															class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
-														>
-															<span class="text-gray-500"
-																><MdiIcon path={mdiBattery} size={12} /></span
-															>
-															{packet.batt}%
-														</span>
-													{/if}
-													{#if packet.lat == null && packet.batt == null}
-														<span
-															class="rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase {packetTone(
-																event
-															)}">{packetBadge(event)}</span
-														>
-													{/if}
-												</span>
-											{:else}
-												<span class="min-w-0 truncate text-sm text-gray-300"
-													>{eventSummary(event)}</span
-												>
-											{/if}
-											{#if packet?.rssi != null || packet?.snr != null}
-												<span class="ml-auto flex shrink-0 items-center gap-2 pl-2">
-													{#if packet?.rssi != null}
-														<span
-															class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
-															title="RSSI — received signal strength (dBm)"
-														>
-															<span class="text-gray-300"
-																><MdiIcon path={mdiSignalVariant} size={14} /></span
-															>
-															{packet.rssi}
-														</span>
-													{/if}
-													{#if packet?.snr != null}
-														<span
-															class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
-															title="SNR — signal-to-noise ratio (dB)"
-														>
-															<span class="text-gray-300"><MdiIcon path={mdiTune} size={14} /></span
-															>
-															{packet.snr}
-														</span>
-													{/if}
-												</span>
-											{/if}
-										</div>
-									{/if}
-								</div>
-								<button
-									type="button"
-									class="hidden md:flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 bg-[#1c2230] text-gray-400 hover:border-blue-500/50 hover:text-blue-300"
-									title="Show JSON"
-									aria-label="Show JSON"
-									onclick={(clickEvent) => {
-										clickEvent.stopPropagation();
-										rawEvent = event;
-									}}
-								>
-									<MdiIcon path={mdiCodeJson} size={14} />
-								</button>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-		</div>
+		<UdpStreamPanel
+			{events}
+			{filteredEvents}
+			bind:streamFilter
+			{selectedEvent}
+			{isDesktop}
+			{streamHeightPx}
+			onClearEvents={clearUdpStream}
+			selectEvent={(event) => (isDesktop ? (selectedEvent = event) : (rawEvent = event))}
+			showRawEvent={(event) => (rawEvent = event)}
+		/>
 	</div>
 </main>
 

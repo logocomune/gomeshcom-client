@@ -286,6 +286,12 @@ func (s *Server) handleOutgoingTimeout(message outbox.PendingMessage) {
 }
 
 func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
+	replayCutoff, replayEnabled, err := s.replayCutoff(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -323,7 +329,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	if err := s.replayRecentPackets(w, flusher); err != nil {
+	if err := s.replayRecentPackets(w, flusher, replayCutoff, replayEnabled); err != nil {
 		return
 	}
 
@@ -427,17 +433,33 @@ func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) replayCutoff(r *http.Request) (time.Time, bool, error) {
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	if from != "" {
+		cutoff, err := time.Parse(time.RFC3339Nano, from)
+		if err != nil {
+			return time.Time{}, false, fmt.Errorf("invalid from timestamp")
+		}
+		return cutoff.UTC(), true, nil
+	}
+
+	if s.cfg.ReceiveLog.ReplayWindow <= 0 {
+		return time.Time{}, false, nil
+	}
+	return time.Now().UTC().Add(-s.cfg.ReceiveLog.ReplayWindow), true, nil
+}
+
 func writeHeartbeat(w http.ResponseWriter) error {
 	_, err := fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
 	return err
 }
 
-func (s *Server) replayRecentPackets(w http.ResponseWriter, flusher http.Flusher) error {
-	if s.receiveLog == nil || s.cfg.ReceiveLog.ReplayWindow <= 0 {
+func (s *Server) replayRecentPackets(w http.ResponseWriter, flusher http.Flusher, cutoff time.Time, enabled bool) error {
+	if s.receiveLog == nil || !enabled {
 		return nil
 	}
 
-	records, err := s.receiveLog.ReadSince(time.Now().UTC().Add(-s.cfg.ReceiveLog.ReplayWindow))
+	records, err := s.receiveLog.ReadSince(cutoff)
 	if err != nil {
 		return err
 	}
@@ -451,12 +473,12 @@ func (s *Server) replayRecentPackets(w http.ResponseWriter, flusher http.Flusher
 		if err != nil {
 			continue
 		}
-
 		if err := writeSSE(w, events.Event{
 			Type: "packet.received",
 			Data: map[string]any{
 				"remote_addr": record.RemoteAddr,
 				"packet":      packet.Packet,
+				"replay":      true,
 			},
 		}); err != nil {
 			return err
