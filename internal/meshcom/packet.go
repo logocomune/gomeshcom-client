@@ -33,8 +33,8 @@ type TextMessage struct {
 	SourceType  string      `json:"src_type,omitempty"`
 	Firmware    StringValue `json:"firmware,omitempty"`
 	FWSub       StringValue `json:"fw_sub,omitempty"`
-	RSSI        int         `json:"rssi,omitempty"`
-	SNR         int         `json:"snr,omitempty"`
+	RSSI        *int        `json:"rssi,omitempty"`
+	SNR         *int        `json:"snr,omitempty"`
 }
 
 type Position struct {
@@ -54,16 +54,16 @@ type Position struct {
 	Battery         int         `json:"batt,omitempty"`
 	Firmware        StringValue `json:"firmware,omitempty"`
 	FWSub           StringValue `json:"fw_sub,omitempty"`
-	RSSI            int         `json:"rssi,omitempty"`
-	SNR             int         `json:"snr,omitempty"`
+	RSSI            *int        `json:"rssi,omitempty"`
+	SNR             *int        `json:"snr,omitempty"`
 }
 
 type Telemetry struct {
 	Type       PacketType `json:"type"`
 	Source     string     `json:"src,omitempty"`
 	SourceType string     `json:"src_type,omitempty"`
-	RSSI       int        `json:"rssi,omitempty"`
-	SNR        int        `json:"snr,omitempty"`
+	RSSI       *int       `json:"rssi,omitempty"`
+	SNR        *int       `json:"snr,omitempty"`
 	Temp1      float64    `json:"temp1,omitempty"`
 	Temp2      float64    `json:"temp2,omitempty"`
 	Humidity   float64    `json:"hum,omitempty"`

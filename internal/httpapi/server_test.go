@@ -36,6 +36,92 @@ func (b *stubBridge) SendText(_ context.Context, _, _ string, _ int) error {
 	return b.err
 }
 
+func TestAPIResponsesDisableCaching(t *testing.T) {
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "success", path: "/api/health"},
+		{name: "error", path: "/api/events?from=bad"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			response := httptest.NewRecorder()
+
+			server.Handler().ServeHTTP(response, request)
+
+			assertNoCacheHeaders(t, response.Header())
+		})
+	}
+}
+
+func TestEventStreamDisablesCaching(t *testing.T) {
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(request.Context())
+	cancel()
+	request = request.WithContext(ctx)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assertNoCacheHeaders(t, response.Header())
+}
+
+func TestIndexHTMLDisablesCaching(t *testing.T) {
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/index.html", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assertIndexNoCacheHeaders(t, response.Header())
+}
+
+func TestImmutableStaticResponsesUseLongCache(t *testing.T) {
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/_app/immutable/entry/app.js", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if got := response.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("Cache-Control = %q, want immutable cache", got)
+	}
+}
+
+func assertIndexNoCacheHeaders(t *testing.T, header http.Header) {
+	t.Helper()
+	expected := map[string]string{
+		"Cache-Control": "no-cache, must-revalidate",
+		"Pragma":        "no-cache",
+		"Expires":       "0",
+	}
+	for name, want := range expected {
+		if got := header.Get(name); got != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func assertNoCacheHeaders(t *testing.T, header http.Header) {
+	t.Helper()
+	expected := map[string]string{
+		"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+		"Pragma":        "no-cache",
+		"Expires":       "0",
+	}
+	for name, want := range expected {
+		if got := header.Get(name); got != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestHealth(t *testing.T) {
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
@@ -450,6 +536,8 @@ func TestCreateMessageDedup(t *testing.T) {
 	}
 }
 
+func intPtr(value int) *int { return &value }
+
 func TestListPositions(t *testing.T) {
 	positionStore := positions.New(t.TempDir() + "/positions.json")
 	seenAt := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
@@ -458,8 +546,8 @@ func TestListPositions(t *testing.T) {
 		Latitude:  48.1,
 		Longitude: 16.3,
 		Altitude:  123,
-		RSSI:      -90,
-		SNR:       8,
+		RSSI:      intPtr(-90),
+		SNR:       intPtr(8),
 	}, seenAt)
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), positionStore, nil, nil, nil, nil)
@@ -663,8 +751,8 @@ func TestStreamEventsHeartbeatAndIdentity(t *testing.T) {
 		Source:    "QQ1ABC-1",
 		Latitude:  48.1,
 		Longitude: 16.3,
-		RSSI:      -90,
-		SNR:       8,
+		RSSI:      intPtr(-90),
+		SNR:       intPtr(8),
 	}, testTime())
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), positionStore, nil, nil, nil, nil)
@@ -742,8 +830,9 @@ func TestStreamEventsStationIdentityTxEnabledByDefault(t *testing.T) {
 func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "raw")
 	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})
+	recentTime := time.Now().UTC().Add(-2 * time.Minute)
 	if err := logger.Append(receivelog.Record{
-		ReceivedAt: time.Now().UTC().Add(-time.Minute),
+		ReceivedAt: recentTime,
 		RemoteAddr: "127.0.0.1:1799",
 		Raw:        `{"type":"msg","src":"QQ1ABC-1","dst":"*","msg":"hello"}`,
 		PacketType: "msg",
@@ -774,7 +863,7 @@ func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 		ReplayWindow: 6 * time.Hour,
 	}
 	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil)
-	body := streamBodyUntil(t, server, "event: packet.received")
+	body := streamBodyUntil(t, server, "QQ1ABC-1")
 
 	if !strings.Contains(body, "event: packet.received") {
 		t.Fatalf("replay event missing from stream body: %q", body)
@@ -784,6 +873,9 @@ func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 	}
 	if !strings.Contains(body, `"replay":true`) {
 		t.Fatalf("replay marker missing from stream body: %q", body)
+	}
+	if !strings.Contains(body, `"received_at":"`+recentTime.Format(time.RFC3339Nano)+`"`) {
+		t.Fatalf("replay received_at missing from stream body: %q", body)
 	}
 	if strings.Contains(body, "OLD") {
 		t.Fatalf("old packet replayed: %q", body)

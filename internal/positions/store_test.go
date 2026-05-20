@@ -12,6 +12,8 @@ import (
 	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
 )
 
+func intPtr(value int) *int { return &value }
+
 func TestStoreUpdatesPositionByOriginCallsign(t *testing.T) {
 	store := New(filepath.Join(t.TempDir(), "positions.json"))
 	firstSeen := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
@@ -22,16 +24,16 @@ func TestStoreUpdatesPositionByOriginCallsign(t *testing.T) {
 		Latitude:  43.5,
 		Longitude: 10.3,
 		Altitude:  367,
-		RSSI:      -108,
-		SNR:       1,
+		RSSI:      intPtr(-108),
+		SNR:       intPtr(1),
 	}, firstSeen)
 	updated := store.Update(meshcom.Position{
 		Source:    "QQ5EKX-11,QQ5AKT-10",
 		Latitude:  43.6,
 		Longitude: 10.4,
 		Altitude:  380,
-		RSSI:      -100,
-		SNR:       3,
+		RSSI:      intPtr(-100),
+		SNR:       intPtr(3),
 	}, lastSeen)
 
 	if !created || !updated {
@@ -68,8 +70,8 @@ func TestStoreSaveAndLoad(t *testing.T) {
 		Longitude:  16.3,
 		Altitude:   123,
 		HardwareID: "TLORA_V2",
-		RSSI:       -90,
-		SNR:        8,
+		RSSI:       intPtr(-90),
+		SNR:        intPtr(8),
 	}, seenAt)
 
 	if err := store.SaveIfDirty(); err != nil {
@@ -223,8 +225,8 @@ func TestLastHopFreshnessOnPosPacket(t *testing.T) {
 		Source:    "QQ0ORG-1,QQ0REL-1",
 		Latitude:  43.0,
 		Longitude: 10.0,
-		RSSI:      -90,
-		SNR:       5,
+		RSSI:      intPtr(-90),
+		SNR:       intPtr(5),
 	}, t1)
 
 	relay := s.Snapshot()["QQ0REL-1"]
@@ -258,8 +260,8 @@ func TestViaChainFreshnessOnPosPacket(t *testing.T) {
 		Source:    "QQ0ORG-1,QQ0MID-1,QQ0REL-1",
 		Latitude:  43.0,
 		Longitude: 10.0,
-		RSSI:      -90,
-		SNR:       5,
+		RSSI:      intPtr(-90),
+		SNR:       intPtr(5),
 	}, t1)
 
 	relay := s.Snapshot()["QQ0REL-1"]
@@ -300,8 +302,8 @@ func TestLastHopFreshnessSkippedIfNoRecord(t *testing.T) {
 		Source:    "ORIGIN-1,GHOST-RELAY",
 		Latitude:  43.0,
 		Longitude: 10.0,
-		RSSI:      -90,
-		SNR:       5,
+		RSSI:      intPtr(-90),
+		SNR:       intPtr(5),
 	}, t0)
 
 	snap := s.Snapshot()
@@ -320,7 +322,7 @@ func TestTouchFromPacketDirect(t *testing.T) {
 	s.Update(meshcom.Position{Source: "A-1", Latitude: 43.0, Longitude: 10.0}, t0)
 
 	// Touch via direct msg packet.
-	changed := s.TouchFromPacket("A-1", -80, 7, t1)
+	changed := s.TouchFromPacket("A-1", intPtr(-80), intPtr(7), t1)
 	if !changed {
 		t.Fatal("TouchFromPacket: expected changed=true")
 	}
@@ -342,7 +344,7 @@ func TestTouchFromPacketDirectSkipsIfNoRecord(t *testing.T) {
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 
 	s := New(filepath.Join(dir, "p.json"))
-	changed := s.TouchFromPacket("GHOST-1", -80, 7, t0)
+	changed := s.TouchFromPacket("GHOST-1", intPtr(-80), intPtr(7), t0)
 	if changed {
 		t.Fatal("TouchFromPacket on missing origin: expected changed=false")
 	}
@@ -360,10 +362,10 @@ func TestTouchFromPacketIndirect(t *testing.T) {
 	// Create origin via an indirect pos so it has no lastDirectSeen.
 	s.Update(meshcom.Position{Source: "ORIGIN-1,BOOTSTRAP", Latitude: 43.0, Longitude: 10.0}, t0)
 	// Create relay via a direct pos so it has a pre-existing lastDirectSeen at t0.
-	s.Update(meshcom.Position{Source: "RELAY-1", Latitude: 44.0, Longitude: 11.0, RSSI: -70, SNR: 2}, t0)
+	s.Update(meshcom.Position{Source: "RELAY-1", Latitude: 44.0, Longitude: 11.0, RSSI: intPtr(-70), SNR: intPtr(2)}, t0)
 
 	// Indirect msg from ORIGIN-1 via RELAY-1.
-	changed := s.TouchFromPacket("ORIGIN-1,RELAY-1", -95, 3, t1)
+	changed := s.TouchFromPacket("ORIGIN-1,RELAY-1", intPtr(-95), intPtr(3), t1)
 	if !changed {
 		t.Fatal("TouchFromPacket indirect: expected changed=true")
 	}
@@ -403,7 +405,7 @@ func TestTouchFromPacketIndirectUpdatesAllViaHopsLastSeen(t *testing.T) {
 	s.Update(meshcom.Position{Source: "MID-1", Latitude: 44.0, Longitude: 11.0}, t0)
 	s.Update(meshcom.Position{Source: "RELAY-1", Latitude: 45.0, Longitude: 12.0}, t0)
 
-	changed := s.TouchFromPacket("ORIGIN-1,MID-1,RELAY-1", -95, 3, t1)
+	changed := s.TouchFromPacket("ORIGIN-1,MID-1,RELAY-1", intPtr(-95), intPtr(3), t1)
 	if !changed {
 		t.Fatal("TouchFromPacket indirect multi-hop: expected changed=true")
 	}
@@ -445,7 +447,7 @@ func TestTouchFromPacketIndirectSkipsRelayIfNoRecord(t *testing.T) {
 	// Only origin exists; relay has no record.
 	s.Update(meshcom.Position{Source: "ORIGIN-1", Latitude: 43.0, Longitude: 10.0}, t0)
 
-	s.TouchFromPacket("ORIGIN-1,GHOST-RELAY", -95, 3, t1)
+	s.TouchFromPacket("ORIGIN-1,GHOST-RELAY", intPtr(-95), intPtr(3), t1)
 
 	if _, exists := s.Snapshot()["GHOST-RELAY"]; exists {
 		t.Fatal("relay with no record must not be created by TouchFromPacket")

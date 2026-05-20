@@ -11,10 +11,24 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Chat message cards**: removed the raw JSON button from public and direct chat message cards.
+- **DM ACK details**: direct-message chat cards now show every ACK source with its own RTT and relay path details instead of only the preferred ACK summary.
+
 - **IoT simulator command README**: documented local usage, responder behavior, common run modes, flags, and log output for `cmd/iot-simulator`.
 - **Web UI helper refactoring**: extracted `ChatPanel`, `UdpStreamPanel`, and pure chat record/UDP stream presentation helpers from the monolithic `+page.svelte`, added unit coverage for those helpers, and documented the next component extraction slices.
 
 ### Fixed
+
+- **Sanitized amateur radio callsigns**: audited and updated all mock/example/placeholder amateur radio callsigns to use compliant "QQ" prefix format across simulator commands, frontend Svelte pages, test files, and API docs.
+
+- **DM ACK scoping**: ACK and reject indicators now match the sent message destination and local callsign, preventing ACKs for different messages with the same sequence number from appearing on the wrong chat card.
+- **Replay packet filtering for chat/ACK UI**: frontend ACK indexing now ignores `packet.received` SSE events with `replay:true`, so replay bursts are not counted as extra ACKs on latest chat messages.
+
+- **ACK timing**: packet SSE events and chat JSONL records now share the same backend `received_at` timestamp, and the web client uses backend time for chat and ACK RTT instead of browser arrival time.
+
+- **Position signal freshness**: direct `msg`, `tele`, and `pos` packets without `rssi`/`snr` now preserve existing node signal values instead of overwriting them with `0`.
+
+- **HTTP response caching**: all `/api/*` responses now send no-store cache headers, `/_app/immutable/*` assets use one-year immutable caching, and `index.html` requires revalidation.
 
 - **Broadcast clear backend deletion**: the web UI now always sends the delete request when clearing the Broadcast chat so backend chat log files are removed even if local history state is empty.
 

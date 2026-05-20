@@ -32,7 +32,7 @@
 		loadLastChatTarget,
 		saveLastChatTarget
 	} from '$lib/api/chat';
-	import { buildAckIndex } from '$lib/api/acks';
+	import { buildAckIndex, buildAckIndexFromChatRecords, mergeAckIndexes } from '$lib/api/acks';
 	import logo from '$lib/assets/gomeshcom-logo.png';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import UdpStreamPanel from '$lib/components/UdpStreamPanel.svelte';
@@ -175,7 +175,12 @@
 	let isBroadcastTarget = $derived(
 		chatTarget.kind === 'channel' && chatTarget.value === 'Broadcast'
 	);
-	let ackIndex = $derived(buildAckIndex(events));
+	let ackIndex = $derived(
+		mergeAckIndexes(
+			buildAckIndex(events),
+			buildAckIndexFromChatRecords(chatHistory[currentConvId] ?? [])
+		)
+	);
 
 	let displayChatRecords = $derived(
 		(chatHistory[currentConvId] ?? []).filter((rec) => {
@@ -407,7 +412,7 @@
 	function confirmNewDm() {
 		const call = newDmCallsign.trim().toUpperCase();
 		if (!callsignPattern.test(call)) {
-			newDmError = 'Invalid callsign (e.g. IU5PMP-1)';
+			newDmError = 'Invalid callsign (e.g. QQ5PMP-1)';
 			return;
 		}
 		newDmOpen = false;
@@ -744,7 +749,6 @@
 				onNewDm={openNewDm}
 				onSelectChannel={selectChannel}
 				onSelectContact={selectContact}
-				onShowRawRecord={(record) => (rawChatRecord = record)}
 				onToggleChannels={toggleChannelsSidebar}
 			/>
 
@@ -968,7 +972,7 @@
 				<input
 					id="new-dm-callsign"
 					class="w-full rounded border border-gray-700/60 bg-[#111827] px-3 py-2 font-mono text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500/60"
-					placeholder="IU5PMP-1"
+					placeholder="QQ5PMP-1"
 					bind:value={newDmCallsign}
 					oninput={() => (newDmError = '')}
 					onkeydown={(e) => {

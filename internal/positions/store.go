@@ -135,7 +135,7 @@ func (s *Store) Update(position meshcom.Position, seenAt time.Time) bool {
 	if isDirect {
 		applyFreshness(&record, freshnessDirect, seenAt, position.RSSI, position.SNR)
 	} else {
-		applyFreshness(&record, freshnessIndirect, seenAt, 0, 0)
+		applyFreshness(&record, freshnessIndirect, seenAt, nil, nil)
 		s.touchViaChainLocked(via, position.RSSI, position.SNR, seenAt)
 	}
 
@@ -152,7 +152,7 @@ func (s *Store) Update(position meshcom.Position, seenAt time.Time) bool {
 // coordinates. Only updates records that already exist — never creates new ones.
 // Direct packets: full freshness (lastSeen, lastDirectSeen, rssi, snr) on origin.
 // Indirect packets: lastSeen only on origin; full freshness on last relay.
-func (s *Store) TouchFromPacket(src string, rssi, snr int, seenAt time.Time) bool {
+func (s *Store) TouchFromPacket(src string, rssi, snr *int, seenAt time.Time) bool {
 	callsign, via := meshcom.SplitSourcePath(src)
 	if callsign == "" {
 		return false
@@ -173,7 +173,7 @@ func (s *Store) TouchFromPacket(src string, rssi, snr int, seenAt time.Time) boo
 		}
 	} else {
 		if rec, exists := s.records[callsign]; exists {
-			applyFreshness(&rec, freshnessIndirect, seenAt, 0, 0)
+			applyFreshness(&rec, freshnessIndirect, seenAt, nil, nil)
 			s.records[callsign] = rec
 			s.dirty = true
 			changed = true
@@ -226,19 +226,23 @@ const (
 
 // applyFreshness updates lastSeen and, for direct mode, lastDirectSeen/rssi/snr.
 // For indirect mode only lastSeen is updated; rssi/snr/lastDirectSeen are left as-is.
-func applyFreshness(rec *Record, mode freshnessMode, seenAt time.Time, rssi, snr int) {
+func applyFreshness(rec *Record, mode freshnessMode, seenAt time.Time, rssi, snr *int) {
 	rec.LastSeen = seenAt.UTC()
 	if mode == freshnessDirect {
 		t := seenAt.UTC()
 		rec.LastDirectSeen = &t
-		rec.RSSI = rssi
-		rec.SNR = snr
+		if rssi != nil {
+			rec.RSSI = *rssi
+		}
+		if snr != nil {
+			rec.SNR = *snr
+		}
 	}
 }
 
 // touchLastHopLocked applies direct freshness to an existing record.
 // Caller must hold s.mu.
-func (s *Store) touchLastHopLocked(callsign string, rssi, snr int, seenAt time.Time) bool {
+func (s *Store) touchLastHopLocked(callsign string, rssi, snr *int, seenAt time.Time) bool {
 	rec, exists := s.records[callsign]
 	if !exists {
 		return false
@@ -251,7 +255,7 @@ func (s *Store) touchLastHopLocked(callsign string, rssi, snr int, seenAt time.T
 
 // touchViaChainLocked applies indirect freshness to every relay in via, then
 // applies direct freshness to last hop. Caller must hold s.mu.
-func (s *Store) touchViaChainLocked(via []string, rssi, snr int, seenAt time.Time) bool {
+func (s *Store) touchViaChainLocked(via []string, rssi, snr *int, seenAt time.Time) bool {
 	changed := false
 	for i, callsign := range via {
 		rec, exists := s.records[callsign]
@@ -261,7 +265,7 @@ func (s *Store) touchViaChainLocked(via []string, rssi, snr int, seenAt time.Tim
 		if i == len(via)-1 {
 			applyFreshness(&rec, freshnessDirect, seenAt, rssi, snr)
 		} else {
-			applyFreshness(&rec, freshnessIndirect, seenAt, 0, 0)
+			applyFreshness(&rec, freshnessIndirect, seenAt, nil, nil)
 		}
 		s.records[callsign] = rec
 		s.dirty = true

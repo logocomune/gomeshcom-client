@@ -3,7 +3,7 @@
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import { conversationIdFor, chatRecordKey } from '$lib/api/chat';
 	import type { ChatTarget } from '$lib/api/chat';
-	import type { AckIndex } from '$lib/api/acks';
+	import { ackEntriesForRecord, rejectEntriesForRecord, type AckIndex } from '$lib/api/acks';
 	import { cleanMessage, messageKind, splitSourcePath } from '$lib/api/events';
 	import type { ChatRecord } from '$lib/api/types';
 	import { groupTooltip, partitionChannels, resolveGroup } from '$lib/api/groups';
@@ -16,7 +16,6 @@
 		mdiBroadcast,
 		mdiChevronLeft,
 		mdiChevronRight,
-		mdiCodeJson,
 		mdiNotificationClearAll,
 		mdiPlus,
 		mdiPound,
@@ -47,7 +46,6 @@
 		onNewDm,
 		onSelectChannel,
 		onSelectContact,
-		onShowRawRecord,
 		onToggleChannels
 	}: {
 		ackIndex: AckIndex;
@@ -71,7 +69,6 @@
 		onNewDm: () => void;
 		onSelectChannel: (channel: string) => void;
 		onSelectContact: (contact: string) => void;
-		onShowRawRecord: (record: ChatRecord) => void;
 		onToggleChannels: () => void;
 	} = $props();
 
@@ -330,8 +327,18 @@
 							{@const sourcePath = splitSourcePath(record.src)}
 							{@const isSent = sourcePath.origin === stationCallsign}
 							{@const sequenceId = isSent ? chatRecordSeqId(record) : null}
-							{@const ackEntries = sequenceId ? (ackIndex.acked.get(sequenceId) ?? []) : []}
-							{@const rejectEntries = sequenceId ? (ackIndex.rejected.get(sequenceId) ?? []) : []}
+							{@const ackEntries = ackEntriesForRecord(
+								ackIndex,
+								sequenceId,
+								record,
+								stationCallsign
+							)}
+							{@const rejectEntries = rejectEntriesForRecord(
+								ackIndex,
+								sequenceId,
+								record,
+								stationCallsign
+							)}
 							{@const gatewayAck =
 								ackEntries.find((entry) => entry.ackSource === 'gateway') ?? null}
 							{@const loraAck = ackEntries.find((entry) => entry.ackSource === 'lora') ?? null}
@@ -341,21 +348,17 @@
 								: -1}
 							<div
 								class="rounded border border-gray-700/60 bg-[#1c2230] p-2 md:p-3 transition-colors hover:border-gray-600/60"
+								title={record.delivery_status === 'pending'
+									? 'Pending'
+									: record.delivery_status === 'failed'
+										? 'Failed'
+										: undefined}
 							>
 								<div class="flex items-center justify-between gap-2 md:gap-3">
 									<div class="flex min-w-0 items-center gap-2">
-										<span
-											class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-blue-500/70 bg-blue-500/25 text-blue-200"
-											title={chatIconTooltip(record)}
-										>
-											<MdiIcon path={chatMdiIcon(record)} size={16} />
-										</span>
 										<div class="min-w-0">
 											<div class="truncate text-xs md:text-sm font-semibold text-white">
 												{sourcePath.origin}
-											</div>
-											<div class="truncate text-[10px] text-gray-500">
-												{messageKind(record.msg).label.toUpperCase()}
 											</div>
 										</div>
 									</div>
@@ -417,54 +420,57 @@
 								>
 									{cleanMessage(record.msg) || record.msg}
 								</div>
-								{#if isSent && chatTarget.kind === 'contact' && sequenceId && bestAck}
-									<div class="mt-1 flex items-center gap-2 font-mono text-[10px] text-green-600/70">
-										<span>ack</span>
-										{#if bestAck.via.length > 0}
-											<span>via {bestAck.via.join(' → ')}</span>
-										{/if}
-										{#if bestAck.rssi != null}
-											<span class="flex items-center gap-0.5">
-												<MdiIcon path={mdiSignalVariant} size={10} />
-												{bestAck.rssi} dBm
-											</span>
-										{/if}
-										{#if bestAck.snr != null}
-											<span class="flex items-center gap-0.5">
-												<MdiIcon path={mdiTune} size={10} />
-												SNR {bestAck.snr}
-											</span>
-										{/if}
+								{#if isSent && chatTarget.kind === 'contact' && sequenceId && ackEntries.length > 0}
+									<div class="mt-1 space-y-0.5 font-mono text-[10px] text-green-600/70">
+										{#each ackEntries as ackEntry, ackEntryIndex (ackEntry.ackSource + '-' + ackEntry.receivedAt + '-' + ackEntryIndex)}
+											<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+												<span>ack {ackEntry.ackSource}</span>
+												<span
+													>{formatRtt(
+														new Date(ackEntry.receivedAt).getTime() -
+															new Date(record.received_at).getTime()
+													)}</span
+												>
+												{#if ackEntry.via.length > 0}
+													<span>via {ackEntry.via.join(' → ')}</span>
+												{/if}
+												{#if ackEntry.rssi != null}
+													<span class="flex items-center gap-0.5">
+														<MdiIcon path={mdiSignalVariant} size={10} />
+														{ackEntry.rssi} dBm
+													</span>
+												{/if}
+												{#if ackEntry.snr != null}
+													<span class="flex items-center gap-0.5">
+														<MdiIcon path={mdiTune} size={10} />
+														SNR {ackEntry.snr}
+													</span>
+												{/if}
+											</div>
+										{/each}
 									</div>
 								{/if}
-								<div
-									class="mt-1.5 flex items-center justify-between gap-2 font-mono text-[10px] md:text-[11px]"
-								>
-									<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-gray-500">
+								{#if sourcePath.relays.length > 0 || (!isSent && (record.rssi != null || record.snr != null))}
+									<div
+										class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10px] text-gray-500 md:text-[11px]"
+									>
 										{#if sourcePath.relays.length > 0}
 											<span>via {sourcePath.relays.join(' → ')}</span>
 										{/if}
-										{#if record.rssi != null}
+										{#if !isSent && record.rssi != null}
 											<span class="flex items-center gap-0.5" title="RSSI — signal strength">
 												<MdiIcon path={mdiSignalVariant} size={11} />
 												{record.rssi} dBm
 											</span>
 										{/if}
-										{#if record.snr != null}
+										{#if !isSent && record.snr != null}
 											<span class="flex items-center gap-0.5" title="SNR — signal to noise ratio">
 												<MdiIcon path={mdiTune} size={11} />
 												SNR {record.snr}
 											</span>
 										{/if}
 									</div>
-									<button
-										type="button"
-										class="text-gray-600 hover:text-blue-300"
-										onclick={() => onShowRawRecord(record)}
-									>
-										<MdiIcon path={mdiCodeJson} size={16} />
-									</button>
-								</div>
+								{/if}
 							</div>
 						{/each}
 					</div>

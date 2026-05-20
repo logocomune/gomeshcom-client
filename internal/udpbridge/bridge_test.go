@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/logocomune/gomeshcom-udp/internal/chatlog"
 	"github.com/logocomune/gomeshcom-udp/internal/events"
 	"github.com/logocomune/gomeshcom-udp/internal/positions"
 	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
@@ -19,11 +20,12 @@ import (
 
 func TestHandleDatagramLogsValidPacket(t *testing.T) {
 	dir := t.TempDir()
+	chatDir := filepath.Join(dir, "chat")
 	bus := events.NewBus()
 	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receivelog.New(receivelog.Config{
 		Enabled: true,
 		Path:    dir,
-	}), nil, nil, false, nil)
+	}), chatlog.New(chatDir, ""), nil, false, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -35,6 +37,23 @@ func TestHandleDatagramLogsValidPacket(t *testing.T) {
 	event := readEvent(t, subscriber)
 	if event.Type != "packet.received" {
 		t.Fatalf("event type = %q, want packet.received", event.Type)
+	}
+
+	payload, ok := event.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("event data type = %T, want map", event.Data)
+	}
+	receivedAt, ok := payload["received_at"].(string)
+	if !ok || receivedAt == "" {
+		t.Fatalf("event received_at = %#v, want non-empty string", payload["received_at"])
+	}
+	if _, err := time.Parse(time.RFC3339Nano, receivedAt); err != nil {
+		t.Fatalf("event received_at parse: %v", err)
+	}
+
+	chatRecord := readChatRecord(t, filepath.Join(chatDir, "P_broadcast.jsonl"))
+	if chatRecord.ReceivedAt.Format(time.RFC3339Nano) != receivedAt {
+		t.Fatalf("chat received_at = %s, want event received_at %s", chatRecord.ReceivedAt.Format(time.RFC3339Nano), receivedAt)
 	}
 
 	record := readRecord(t, todayReceiveLogPath(dir))
@@ -142,6 +161,26 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 		record := store.Snapshot()["QQ1ABC-1"]
 		if record.RSSI != -80 || record.SNR != 5 {
 			t.Fatalf("msg should update rssi/snr: %+v", record)
+		}
+	})
+
+	t.Run("msg packet without signal preserves existing rssi/snr", func(t *testing.T) {
+		bus := events.NewBus()
+		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil)
+
+		posRaw := `{"type":"pos","src":"QQ1ABC-1","lat":48.1,"long":16.3,"rssi":-70,"snr":2}`
+		bridge.handleDatagram("127.0.0.1:1799", []byte(posRaw), posRaw)
+
+		msgRaw := `{"type":"msg","src":"QQ1ABC-1","dst":"*","msg":"hello"}`
+		bridge.handleDatagram("127.0.0.1:1799", []byte(msgRaw), msgRaw)
+
+		record := store.Snapshot()["QQ1ABC-1"]
+		if record.RSSI != -70 || record.SNR != 2 {
+			t.Fatalf("msg without signal should preserve rssi/snr: %+v", record)
+		}
+		if record.LastDirectSeen == nil {
+			t.Fatal("msg without signal should still touch direct freshness")
 		}
 	})
 }
@@ -271,9 +310,9 @@ func TestEffectiveNodeAddr(t *testing.T) {
 			wantAddr:    "10.0.0.5:1799",
 		},
 		{
-			name:    "auto-detect no packets yet returns error",
+			name:     "auto-detect no packets yet returns error",
 			nodeAddr: "",
-			wantErr: true,
+			wantErr:  true,
 		},
 	}
 
@@ -502,6 +541,31 @@ func FuzzHandleDatagram(f *testing.F) {
 		// Must never panic.
 		bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
 	})
+}
+
+func readChatRecord(t *testing.T, path string) chatlog.Record {
+	t.Helper()
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open chat log: %v", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() {
+		t.Fatal("chat log empty")
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan chat log: %v", err)
+	}
+
+	var record chatlog.Record
+	if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+		t.Fatalf("unmarshal chat log: %v", err)
+	}
+
+	return record
 }
 
 func todayReceiveLogPath(dir string) string {

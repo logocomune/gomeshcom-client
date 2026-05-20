@@ -44,6 +44,8 @@ GOMESHCOM_LOG_LEVEL=debug go run ./cmd/gomeshcomd
 
 Swagger/OpenAPI contract: [`docs/openapi.yaml`](openapi.yaml).
 
+All `/api/*` responses send `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`, `Pragma: no-cache`, and `Expires: 0` so browsers and proxies do not reuse stale API data. Static assets under `/_app/immutable/` send `Cache-Control: public, max-age=31536000, immutable`; `index.html` sends `Cache-Control: no-cache, must-revalidate` so deploys can publish new asset URLs quickly.
+
 - `GET /api/health`
 - `GET /api/positions`
 - `POST /api/messages`

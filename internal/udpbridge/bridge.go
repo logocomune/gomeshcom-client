@@ -79,6 +79,7 @@ func (b *Bridge) Listen(ctx context.Context) error {
 }
 
 func (b *Bridge) handleDatagram(remoteAddr string, data []byte, rawPacket string) {
+	receivedAt := time.Now().UTC()
 	slog.Debug("udp datagram received", "remote_addr", remoteAddr, "bytes", len(data), "raw", rawPacket)
 
 	packet, err := meshcom.ParsePacket(data)
@@ -102,7 +103,7 @@ func (b *Bridge) handleDatagram(remoteAddr string, data []byte, rawPacket string
 	case meshcom.Position:
 		b.updatePositionStore(typed)
 	case meshcom.TextMessage:
-		b.logChatMessage(typed)
+		b.logChatMessage(typed, receivedAt)
 		b.touchPositionFreshness(typed.Source, typed.RSSI, typed.SNR)
 	case meshcom.Telemetry:
 		b.touchPositionFreshness(typed.Source, typed.RSSI, typed.SNR)
@@ -113,6 +114,7 @@ func (b *Bridge) handleDatagram(remoteAddr string, data []byte, rawPacket string
 		Data: map[string]any{
 			"remote_addr": remoteAddr,
 			"packet":      packet.Packet,
+			"received_at": receivedAt.Format(time.RFC3339Nano),
 		},
 	})
 }
@@ -143,7 +145,7 @@ func (b *Bridge) updatePositionStore(position meshcom.Position) {
 	}
 }
 
-func (b *Bridge) touchPositionFreshness(src string, rssi, snr int) {
+func (b *Bridge) touchPositionFreshness(src string, rssi, snr *int) {
 	if b.positions == nil {
 		return
 	}
@@ -152,11 +154,11 @@ func (b *Bridge) touchPositionFreshness(src string, rssi, snr int) {
 	}
 }
 
-func (b *Bridge) logChatMessage(msg meshcom.TextMessage) {
+func (b *Bridge) logChatMessage(msg meshcom.TextMessage, receivedAt time.Time) {
 	if b.chatLog == nil {
 		return
 	}
-	if err := b.chatLog.Append(msg, time.Now().UTC()); err != nil {
+	if err := b.chatLog.Append(msg, receivedAt); err != nil {
 		slog.Error("chat log write failed", "error", err)
 	}
 }

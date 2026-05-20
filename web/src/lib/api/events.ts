@@ -61,19 +61,21 @@ export function connectEvents(
 		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 	}
 
-	function push(type: string, data: unknown) {
+	function push(type: string, data: unknown, receivedAt = new Date().toISOString()) {
 		resetHeartbeat();
 		handlers.onEvent({
 			id: generateId(),
 			type,
-			receivedAt: new Date().toISOString(),
+			receivedAt,
 			data
 		});
 	}
 
 	function parseEvent(type: string, event: MessageEvent<string>) {
 		try {
-			push(type, JSON.parse(event.data));
+			const data = JSON.parse(event.data);
+			const receivedAt = packetReceivedAt(data);
+			push(type, data, receivedAt);
 		} catch {
 			push(type, event.data);
 		}
@@ -169,6 +171,12 @@ export function connectEvents(
 		source = null;
 		handlers.onState('disconnected');
 	};
+}
+
+function packetReceivedAt(data: unknown): string | undefined {
+	if (typeof data !== 'object' || data === null) return undefined;
+	const receivedAt = (data as PacketReceivedPayload).received_at;
+	return typeof receivedAt === 'string' && receivedAt !== '' ? receivedAt : undefined;
 }
 
 export function prependEvent(events: StreamEvent[], event: StreamEvent): StreamEvent[] {
@@ -329,7 +337,7 @@ export function cleanMessage(message: string): string {
 	return message
 		.replace(/^\{CET\}/, '')
 		.replace(/^\{SET\}/, '')
-		.replace(/\{\d+\s*$/, '') // strip trailing MeshCom seq-ID suffix e.g. "{123"
+		.replace(/\{\d+\}?\s*$/, '') // strip trailing MeshCom seq-ID suffix e.g. "{123"
 		.trim();
 }
 
@@ -345,18 +353,18 @@ export function msgSeqId(packet: MeshcomPacket | null): string | null {
 	if (!packet) return null;
 	// msg_id is a hex packet ID (e.g. "E4B9D23B"), not the seq number.
 	// The seq number is always embedded as {NNN at the end of the message text.
-	const match = (packet.msg ?? '').match(/\{(\d+)\s*$/);
+	const match = (packet.msg ?? '').match(/\{(\d+)\}?\s*$/);
 	return match?.[1] ?? null;
 }
 
 export function ackSeqId(packet: MeshcomPacket | null): string | null {
-	// Handles: "ack571", ":ack571", "IU5PMP-1 :ack571"
+	// Handles: "ack571", ":ack571", "QQ5PMP-1 :ack571"
 	const match = (packet?.msg ?? '').match(/(?:^|\s):?ack(\d+)/i);
 	return match?.[1] ?? null;
 }
 
 export function rejSeqId(packet: MeshcomPacket | null): string | null {
-	// Handles: "rej571", ":rej571", "IU5PMP-1 :rej571"
+	// Handles: "rej571", ":rej571", "QQ5PMP-1 :rej571"
 	const match = (packet?.msg ?? '').match(/(?:^|\s):?rej(\d+)/i);
 	return match?.[1] ?? null;
 }

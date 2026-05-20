@@ -2,9 +2,9 @@
 //
 // Usage:
 //
-//	iot-simulator -my-call IQ5ABC-1 -target 127.0.0.1:1799
-//	iot-simulator -my-call IQ5ABC-1 -target 127.0.0.1:1799 -listen-addr :1798 -interval 1m -pos2-interval 2m
-//	iot-simulator -my-call IQ5ABC-1 -enable-pos1 -enable-pos2 -enable-dm -enable-broadcast -enable-chan2
+//	iot-simulator -my-call QQ5ABC-1 -target 127.0.0.1:1799
+//	iot-simulator -my-call QQ5ABC-1 -target 127.0.0.1:1799 -listen-addr :1798 -interval 1m -pos2-interval 2m
+//	iot-simulator -my-call QQ5ABC-1 -enable-pos1 -enable-pos2 -enable-dm -enable-broadcast -enable-chan2
 package main
 
 import (
@@ -451,8 +451,8 @@ func (s *udpSender) newPositionPacket(options positionOptions) meshcom.Position 
 		Battery:         options.battery,
 		Firmware:        meshcom.StringValue(options.firmware),
 		FWSub:           "p",
-		RSSI:            0,
-		SNR:             0,
+		RSSI:            intPtr(0),
+		SNR:             intPtr(0),
 	}
 }
 
@@ -468,8 +468,8 @@ func (s *udpSender) newTextMessage(sourceType string, source string, destination
 		MessageID:   newMessageID(s.random),
 		Firmware:    meshcom.StringValue("sim"),
 		FWSub:       "p",
-		RSSI:        -70,
-		SNR:         8,
+		RSSI:        intPtr(-70),
+		SNR:         intPtr(8),
 	}
 }
 
@@ -504,6 +504,8 @@ func replyCallsign(message meshcom.TextMessage, fallback string) string {
 	}
 	return strings.ToUpper(strings.TrimSpace(fallback))
 }
+
+func intPtr(value int) *int { return &value }
 
 func jitterCoordinate(random *rand.Rand, base float64, jitter float64) float64 {
 	if jitter == 0 {

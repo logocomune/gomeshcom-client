@@ -59,7 +59,7 @@ node response:
 1. The simulator echoes the received message back as a UDP node packet from
    the configured `-target` as a packet toward `QQ1TST-1`, adding `{123` when the message has no sequence.
 2. The simulator sends an ACK from `QQ1TST-1` to the same configured target, for example
-   `IQ5SIM-9 :ack123`.
+   `QQ5SIM-9 :ack123`.
 
 Incoming UDP `msg` packets addressed to `QQ1TST-2` are handled as a repeater:
 
@@ -78,7 +78,7 @@ Each received and transmitted datagram is logged on stderr in a human-readable
 single line:
 
 ```text
-14:23:05 | TX | msg  | QQ1TST-1 -> IQ5SIM-9 | {"type":"msg",...}
+14:23:05 | TX | msg  | QQ1TST-1 -> QQ5SIM-9 | {"type":"msg",...}
 14:23:12 | RX | msg  | - -> QQ1TST-2 | {"type":"msg",...}
 ```
 

@@ -7,6 +7,7 @@ import {
 	isReplayEvent,
 	eventSummary,
 	freshnessDeltasFromEvent,
+	msgSeqId,
 	messageKind,
 	mergeMapPositions,
 	positionFromEvent,
@@ -95,7 +96,7 @@ describe('event helpers', () => {
 	});
 
 	it('splits relay path and detects system messages', () => {
-		expect.assertions(3);
+		expect.assertions(4);
 
 		expect(splitSourcePath('QQ1XAR-32,QQ5AKT-10,QQ5CND-10')).toEqual({
 			origin: 'QQ1XAR-32',
@@ -107,6 +108,7 @@ describe('event helpers', () => {
 			icon: '◷'
 		});
 		expect(messageKind('ack123').kind).toBe('ack');
+		expect(msgSeqId({ msg: 'hello {123}' })).toBe('123');
 	});
 
 	it('extracts latest map positions from events', () => {
@@ -254,11 +256,11 @@ describe('event helpers', () => {
 			}
 		});
 
-		const i5ekx = positions.find((p) => p.source === 'QQ5EKX-11');
-		const oe1abc = positions.find((p) => p.source === 'QQ1ABC-1');
+		const qq5ekx = positions.find((p) => p.source === 'QQ5EKX-11');
+		const qq1abc = positions.find((p) => p.source === 'QQ1ABC-1');
 
-		expect(i5ekx?.hwId).toBe('4');
-		expect(oe1abc?.hwId).toBeUndefined();
+		expect(qq5ekx?.hwId).toBe('4');
+		expect(qq1abc?.hwId).toBeUndefined();
 	});
 });
 
@@ -502,6 +504,33 @@ describe('connectEvents auth flow', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it('uses backend packet received_at as stream event time', () => {
+		let activeSource: FakeEventSource | undefined;
+		const received: StreamEvent[] = [];
+		vi.stubGlobal(
+			'EventSource',
+			class extends FakeEventSource {
+				constructor(url: string, init?: EventSourceInit) {
+					super(url, init);
+					activeSource = this;
+				}
+			}
+		);
+
+		const stop = connectEvents({
+			onState: () => undefined,
+			onEvent: (event) => received.push(event)
+		});
+
+		activeSource?.emit('packet.received', {
+			received_at: '2026-05-19T17:30:00.123Z',
+			packet: { type: 'msg', src: 'QQ1ABC-1', dst: '*', msg: 'hello' }
+		});
+
+		expect(received[0]?.receivedAt).toBe('2026-05-19T17:30:00.123Z');
+		stop();
+	});
+
 	it('switches to unauthenticated after SSE error and 401 session status', async () => {
 		const states: string[] = [];
 		let activeSource:
@@ -569,5 +598,12 @@ class FakeEventSource {
 
 	emitError() {
 		this.onerror?.();
+	}
+
+	emit(type: string, data: unknown) {
+		const event = new MessageEvent(type, { data: JSON.stringify(data) });
+		for (const listener of this.listeners.get(type) ?? []) {
+			listener(event);
+		}
 	}
 }

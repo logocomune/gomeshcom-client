@@ -34,6 +34,7 @@ export type MeshcomPacket = {
 
 export type PacketReceivedPayload = {
 	remote_addr?: string;
+	received_at?: string;
 	packet?: MeshcomPacket;
 	replay?: boolean;
 };

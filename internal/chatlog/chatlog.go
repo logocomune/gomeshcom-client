@@ -59,8 +59,12 @@ func (l *Logger) Append(msg meshcom.TextMessage, receivedAt time.Time) error {
 		Dst:        msg.Destination,
 		MsgID:      msg.MessageID,
 		Msg:        msg.Message,
-		RSSI:       msg.RSSI,
-		SNR:        msg.SNR,
+	}
+	if msg.RSSI != nil {
+		rec.RSSI = *msg.RSSI
+	}
+	if msg.SNR != nil {
+		rec.SNR = *msg.SNR
 	}
 
 	return l.appendRecord(name, rec)

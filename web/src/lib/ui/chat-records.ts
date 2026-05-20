@@ -9,7 +9,7 @@ import {
 } from '@mdi/js';
 
 export function chatRecordSeqId(record: ChatRecord): string | null {
-	const match = (record.msg ?? '').match(/\{(\d+)\s*$/);
+	const match = (record.msg ?? '').match(/\{(\d+)\}?\s*$/);
 	return match?.[1] ?? null;
 }
 

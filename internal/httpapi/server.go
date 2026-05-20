@@ -85,10 +85,45 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.getConversation), s))
 	mux.Handle("DELETE /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.deleteConversation), s))
 	mux.Handle("/", spaHandler(webui.FS()))
+	handler := cacheHeadersMiddleware(mux)
 	if s.cfg.RequestLog.Enabled {
-		return requestLogMiddleware(mux)
+		return requestLogMiddleware(handler)
 	}
-	return mux
+	return handler
+}
+
+func cacheHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setCacheHeaders(w.Header(), r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func setCacheHeaders(header http.Header, path string) {
+	switch {
+	case strings.HasPrefix(path, "/api/"):
+		setNoCacheHeaders(header)
+	case strings.HasPrefix(path, "/_app/immutable/"):
+		setImmutableCacheHeaders(header)
+	case path == "/" || path == "/index.html":
+		setIndexNoCacheHeaders(header)
+	}
+}
+
+func setNoCacheHeaders(header http.Header) {
+	header.Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	header.Set("Pragma", "no-cache")
+	header.Set("Expires", "0")
+}
+
+func setImmutableCacheHeaders(header http.Header) {
+	header.Set("Cache-Control", "public, max-age=31536000, immutable")
+}
+
+func setIndexNoCacheHeaders(header http.Header) {
+	header.Set("Cache-Control", "no-cache, must-revalidate")
+	header.Set("Pragma", "no-cache")
+	header.Set("Expires", "0")
 }
 
 type statusRecorder struct {
@@ -293,7 +328,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	setNoCacheHeaders(w.Header())
 	w.Header().Set("Connection", "keep-alive")
 
 	flusher, ok := w.(http.Flusher)
@@ -478,6 +513,7 @@ func (s *Server) replayRecentPackets(w http.ResponseWriter, flusher http.Flusher
 			Data: map[string]any{
 				"remote_addr": record.RemoteAddr,
 				"packet":      packet.Packet,
+				"received_at": record.ReceivedAt.UTC().Format(time.RFC3339Nano),
 				"replay":      true,
 			},
 		}); err != nil {
