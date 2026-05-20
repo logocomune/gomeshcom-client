@@ -7,6 +7,7 @@ export type DmTraceSegment = {
 	from: MapPosition;
 	to: MapPosition;
 	expiresAtMs: number;
+	isAck: boolean;
 };
 
 function normalizeCallsign(value?: string): string {
@@ -22,6 +23,10 @@ function splitSourcePath(source?: string): { origin: string; relays: string[] } 
 		origin: parts[0] ?? '',
 		relays: parts.slice(1)
 	};
+}
+
+function isAckMessage(message?: string): boolean {
+	return /(?:^|\s):?ack\d+/i.test(message ?? '');
 }
 
 function isDirectMessagePacket(packet: PacketReceivedPayload['packet']): boolean {
@@ -59,6 +64,7 @@ export function buildRealtimeDmTraceSegments(
 		if (!packet) continue;
 		const source = splitSourcePath(packet.src);
 		const dst = normalizeCallsign(packet.dst);
+		const isAck = isAckMessage(packet.msg);
 		if (!source.origin || !dst) continue;
 		const hops = [source.origin, ...source.relays, dst].map((hop) => normalizeCallsign(hop));
 
@@ -70,7 +76,7 @@ export function buildRealtimeDmTraceSegments(
 			const expiresAtMs = eventMs + DM_TRACE_TTL_MS;
 			const current = segmentByPath.get(key);
 			if (!current || current.expiresAtMs < expiresAtMs) {
-				segmentByPath.set(key, { from, to, expiresAtMs });
+				segmentByPath.set(key, { from, to, expiresAtMs, isAck });
 			}
 		}
 	}

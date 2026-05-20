@@ -383,7 +383,7 @@
 				new Style({
 					zIndex: 1,
 					stroke: new Stroke({
-						color: 'rgba(56,189,248,0.95)',
+						color: segment.isAck ? 'rgba(168,85,247,0.95)' : 'rgba(56,189,248,0.95)',
 						width: 2,
 						lineDash: [7, 7]
 					})

@@ -83,6 +83,7 @@ describe('buildRealtimeDmTraceSegments', () => {
 		expect(paths).toContain('IU5RTR-02>IZ5CND-10');
 		expect(paths).toContain('IZ5CND-10>IU5PMP-1');
 		expect(segments).toHaveLength(2);
+		expect(segments.every((segment) => segment.isAck)).toBe(true);
 	});
 	it('ignores broadcast/channel and system control traffic', () => {
 		const positions = [makePosition({ source: 'QQ1AAA' }), makePosition({ source: 'QQ2BBB' })];
