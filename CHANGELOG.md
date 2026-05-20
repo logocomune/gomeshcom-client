@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file.
 
 - **IoT simulator granular auto-send flags**: `cmd/iot-simulator` now exposes `-enable-pos1`, `-enable-pos2`, `-enable-dm`, `-enable-broadcast`, and `-enable-chan2` so each timed send stream can be enabled independently while DM responders remain active. All responder transmissions now use configured `-target` UDP endpoint.
 - **UDP stream replay cursor**: `/api/events` accepts `from=<RFC3339 timestamp>` and the web UDP stream clear action stores that cursor in `localStorage`, clears visible packets, and reconnects SSE from that point.
+- **Map ruler overlay**: default map now has a disabled-by-default ruler button that draws green `MyCall -> direct station` lines and prints distance labels along each line in kilometers.
+- **Realtime DM route tracking**: map toolbar now includes a toggle button that draws dashed hop-by-hop DM routes (`src -> via -> dst`) for live direct messages and automatically removes each route after 45 seconds.
 
 ### Changed
 

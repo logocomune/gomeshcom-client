@@ -7,13 +7,16 @@
 		mdiGridOff,
 		mdiLayersTriple,
 		mdiLayersTripleOutline,
+		mdiMapMarkerPath,
 		mdiMinus,
 		mdiPlus,
+		mdiRuler,
 		mdiTagOff,
 		mdiTagText
 	} from '@mdi/js';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import { getMaidenheadLayer } from './maidenhead-layer';
+	import type { StreamEvent } from '$lib/api/types';
 	import type { MapPosition } from './types';
 	import {
 		nodeFreshness,
@@ -23,19 +26,31 @@
 		MYCALL_ZINDEX
 	} from './node-state';
 	import { buildOwnMarkerTooltipHtml, buildTooltipHtml, escHtml } from './map-tooltip';
+	import { buildRulerLinks } from './ruler';
+	import { buildRealtimeDmTraceSegments } from './realtime-trace';
 
 	const STORAGE_CENTER = 'meshcom:map:center';
 	const STORAGE_ZOOM = 'meshcom:map:zoom';
 	const STORAGE_MAIDENHEAD = 'meshcom:map:maidenhead';
 	const STORAGE_LABELS = 'meshcom:map:labels';
 	const STORAGE_CLUSTERING = 'meshcom:map:clustering';
+	const STORAGE_RULER = 'meshcom:map:ruler';
+	const STORAGE_DM_TRACKING = 'meshcom:map:dm-tracking';
 
-	let { positions = [], myCall = '' }: { positions?: MapPosition[]; myCall?: string } = $props();
+	let {
+		positions = [],
+		myCall = '',
+		events = []
+	}: { positions?: MapPosition[]; myCall?: string; events?: StreamEvent[] } = $props();
 
 	let mapElement: HTMLDivElement;
 	let tooltipElement: HTMLDivElement;
 	let map: any;
 	let markerSource: any;
+	let rulerSource: any;
+	let rulerLayer: any;
+	let dmTraceSource: any;
+	let dmTraceLayer: any;
 	let clusterBubbleLayer: any;
 	let maidenheadLayer: any;
 	let olContext: any = {};
@@ -43,8 +58,11 @@
 	let showMaidenhead = $state(false);
 	let showLabels = $state(true);
 	let showClustering = $state(true);
+	let showRuler = $state(false);
+	let showDmTracking = $state(false);
 	let now = $state(Date.now());
 	let tickerHandle: ReturnType<typeof setInterval> | null = null;
+	let dmTraceTickerHandle: ReturnType<typeof setInterval> | null = null;
 
 	let visibleCount = $derived(positions.filter((p) => nodeFreshness(p, now) !== 'hidden').length);
 	let myCallPosition = $derived(
@@ -58,7 +76,15 @@
 		now;
 		showLabels;
 		myCall;
+		showRuler;
 		if (initialized) updateMarkers();
+	});
+
+	$effect(() => {
+		events;
+		positions;
+		showDmTracking;
+		if (initialized) updateDmTraceLayer(Date.now());
 	});
 
 	onMount(async () => {
@@ -69,7 +95,7 @@
 			{ fromLonLat, toLonLat },
 			{ Style, Fill, Stroke, Circle: CircleStyle, Text },
 			Feature,
-			{ Point },
+			{ Point, LineString },
 			Overlay
 		] = await Promise.all([
 			import('ol'),
@@ -82,9 +108,24 @@
 			import('ol/Overlay').then((module) => module.default)
 		]);
 
-		olContext = { fromLonLat, toLonLat, Style, Fill, Stroke, CircleStyle, Text, Feature, Point };
+		olContext = {
+			fromLonLat,
+			toLonLat,
+			Style,
+			Fill,
+			Stroke,
+			CircleStyle,
+			Text,
+			Feature,
+			Point,
+			LineString
+		};
 
 		markerSource = new VectorSource();
+		rulerSource = new VectorSource();
+		rulerLayer = new VectorLayer({ source: rulerSource });
+		dmTraceSource = new VectorSource();
+		dmTraceLayer = new VectorLayer({ source: dmTraceSource });
 		const clusterSource = new Cluster({ source: markerSource, distance: 30 });
 
 		// Only render a bubble when 4+ nodes collapse into one cluster point.
@@ -120,6 +161,8 @@
 			layers: [
 				new TileLayer({ source: new OSM() }),
 				maidenheadLayer,
+				dmTraceLayer,
+				rulerLayer,
 				new VectorLayer({ source: markerSource }),
 				clusterBubbleLayer
 			],
@@ -174,15 +217,20 @@
 		map.on('moveend', saveMapState);
 
 		initialized = true;
-		updateMarkers();
 		loadMapState();
+		updateMarkers();
+		updateDmTraceLayer(Date.now());
 		tickerHandle = setInterval(() => {
 			now = Date.now();
 		}, 30_000);
+		dmTraceTickerHandle = setInterval(() => {
+			if (showDmTracking) updateDmTraceLayer(Date.now());
+		}, 1_000);
 	});
 
 	onDestroy(() => {
 		if (tickerHandle !== null) clearInterval(tickerHandle);
+		if (dmTraceTickerHandle !== null) clearInterval(dmTraceTickerHandle);
 		map?.setTarget(undefined);
 	});
 
@@ -219,6 +267,16 @@
 			showClustering = clusteringStr === 'true';
 			clusterBubbleLayer?.setVisible(showClustering);
 		}
+
+		const rulerStr = localStorage.getItem(STORAGE_RULER);
+		if (rulerStr !== null) {
+			showRuler = rulerStr === 'true';
+		}
+
+		const dmTrackingStr = localStorage.getItem(STORAGE_DM_TRACKING);
+		if (dmTrackingStr !== null) {
+			showDmTracking = dmTrackingStr === 'true';
+		}
 	}
 
 	function saveMapState() {
@@ -235,12 +293,45 @@
 		localStorage.setItem(STORAGE_MAIDENHEAD, String(showMaidenhead));
 		localStorage.setItem(STORAGE_LABELS, String(showLabels));
 		localStorage.setItem(STORAGE_CLUSTERING, String(showClustering));
+		localStorage.setItem(STORAGE_RULER, String(showRuler));
+		localStorage.setItem(STORAGE_DM_TRACKING, String(showDmTracking));
 	}
 
 	function updateMarkers() {
-		const { fromLonLat, Feature, Point, Style, Fill, Stroke, CircleStyle, Text } = olContext;
+		const { fromLonLat, Feature, Point, LineString, Style, Fill, Stroke, CircleStyle, Text } =
+			olContext;
 		if (!markerSource || !fromLonLat || !Feature) return;
 		markerSource.clear();
+		rulerSource?.clear();
+
+		if (showRuler && rulerSource && LineString) {
+			for (const link of buildRulerLinks(myCallPosition, positions, now)) {
+				const lineFeature = new Feature({
+					geometry: new LineString([
+						fromLonLat([link.from.lon, link.from.lat]),
+						fromLonLat([link.to.lon, link.to.lat])
+					])
+				});
+				lineFeature.setStyle(
+					new Style({
+						zIndex: 2,
+						stroke: new Stroke({
+							color: 'rgba(34,197,94,0.92)',
+							width: 2
+						}),
+						text: new Text({
+							text: link.label,
+							placement: 'line',
+							overflow: true,
+							font: '600 10px Inter, sans-serif',
+							fill: new Fill({ color: '#ecfdf5' }),
+							stroke: new Stroke({ color: '#14532d', width: 3 })
+						})
+					})
+				);
+				rulerSource.addFeature(lineFeature);
+			}
+		}
 
 		for (const position of positions) {
 			const freshness = nodeFreshness(position, now);
@@ -273,6 +364,35 @@
 		}
 	}
 
+	function updateDmTraceLayer(nowMs: number) {
+		const { fromLonLat, Feature, LineString, Style, Stroke } = olContext;
+		if (!dmTraceSource || !fromLonLat || !Feature || !LineString || !showDmTracking) {
+			dmTraceSource?.clear();
+			return;
+		}
+		dmTraceSource.clear();
+		const segments = buildRealtimeDmTraceSegments(positions, events, nowMs);
+		for (const segment of segments) {
+			const feature = new Feature({
+				geometry: new LineString([
+					fromLonLat([segment.from.lon, segment.from.lat]),
+					fromLonLat([segment.to.lon, segment.to.lat])
+				])
+			});
+			feature.setStyle(
+				new Style({
+					zIndex: 1,
+					stroke: new Stroke({
+						color: 'rgba(56,189,248,0.95)',
+						width: 2,
+						lineDash: [7, 7]
+					})
+				})
+			);
+			dmTraceSource.addFeature(feature);
+		}
+	}
+
 	function zoomBy(delta: number) {
 		const view = map?.getView();
 		if (!view) return;
@@ -297,6 +417,18 @@
 
 	function toggleLabels() {
 		showLabels = !showLabels;
+		updateMarkers();
+		saveMapState();
+	}
+
+	function toggleDmTracking() {
+		showDmTracking = !showDmTracking;
+		updateDmTraceLayer(Date.now());
+		saveMapState();
+	}
+
+	function toggleRuler() {
+		showRuler = !showRuler;
 		updateMarkers();
 		saveMapState();
 	}
@@ -350,13 +482,31 @@
 			<MdiIcon path={showClustering ? mdiLayersTriple : mdiLayersTripleOutline} size={16} />
 		</button>
 		<button
-			class="flex h-7 w-7 items-center justify-center rounded-b bg-white hover:bg-gray-100 {showLabels
+			class="flex h-7 w-7 items-center justify-center border-b border-gray-300 bg-white hover:bg-gray-100 {showLabels
 				? 'text-gray-800'
 				: 'text-gray-400 opacity-70'}"
 			title="Toggle callsign labels"
 			onclick={toggleLabels}
 		>
 			<MdiIcon path={showLabels ? mdiTagText : mdiTagOff} size={16} />
+		</button>
+		<button
+			class="flex h-7 w-7 items-center justify-center border-b border-gray-300 bg-white hover:bg-gray-100 {showDmTracking
+				? 'text-gray-800'
+				: 'text-gray-400 opacity-70'}"
+			title="Toggle realtime DM tracking"
+			onclick={toggleDmTracking}
+		>
+			<MdiIcon path={mdiMapMarkerPath} size={16} />
+		</button>
+		<button
+			class="flex h-7 w-7 items-center justify-center rounded-b bg-white hover:bg-gray-100 {showRuler
+				? 'text-gray-800'
+				: 'text-gray-400 opacity-70'}"
+			title="Toggle ruler distances"
+			onclick={toggleRuler}
+		>
+			<MdiIcon path={mdiRuler} size={16} />
 		</button>
 	</div>
 

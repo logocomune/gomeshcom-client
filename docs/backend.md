@@ -79,6 +79,8 @@ When `GOMESHCOM_REQUEST_LOG_ENABLED=true`, every HTTP request emits one structur
 The web map treats `rssi`/`snr` as direct-node metadata. Direct updates preserve previously known signal values when a live packet omits them; indirect updates still refresh `lastSeen` without replacing signal fields on the origin node.
 For `pos` packets with a relay chain, the live frontend refreshes `lastSeen` on every hop, keeps `rssi`/`snr` only on the last hop, and leaves origin/intermediate relays without signal fields.
 Map marker hover tooltips show station freshness plus `firstSeen` and `lastSeen`; marker clicks do not open a detail card. The local `MyCall` marker hover shows only callsign and device name.
+The map toolbar includes a ruler toggle (default off) that draws green lines from `MyCall` to currently direct-heard stations and prints per-line distance labels in kilometers.
+The map toolbar also includes a realtime DM tracking toggle that draws dashed hop-by-hop routes for live direct messages (`src -> via -> dst`) and removes each trace automatically after 45 seconds.
 
 `GET /api/positions` returns the persisted node position map loaded at startup and updated from incoming `pos` packets:
 

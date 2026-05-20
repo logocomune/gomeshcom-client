@@ -778,7 +778,7 @@
 					<span class="font-mono text-[11px] text-gray-500">{mapPositions.length} nodes</span>
 				</div>
 				<div class="relative min-h-0 flex-1 overflow-hidden">
-					<MeshMapPanel positions={mapPositions} myCall={stationCallsign} />
+					<MeshMapPanel positions={mapPositions} myCall={stationCallsign} {events} />
 				</div>
 			</div>
 		</div>
