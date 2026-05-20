@@ -21,6 +21,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- **Realtime DM trace for ACK packets**: map live tracking now keeps `msg` ACK/reject packets in route tracing, so packets like `src=IU5RTR-02,IZ5CND-10` and `dst=IU5PMP-1` render both hop segments for 45 seconds.
 - **Sanitized amateur radio callsigns**: audited and updated all mock/example/placeholder amateur radio callsigns to use compliant "QQ" prefix format across simulator commands, frontend Svelte pages, test files, and API docs.
 
 - **DM ACK scoping**: ACK and reject indicators now match the sent message destination and local callsign, preventing ACKs for different messages with the same sequence number from appearing on the wrong chat card.

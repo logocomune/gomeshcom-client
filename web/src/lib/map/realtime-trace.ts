@@ -29,7 +29,6 @@ function isDirectMessagePacket(packet: PacketReceivedPayload['packet']): boolean
 	const dst = (packet.dst ?? '').trim();
 	if (dst === '' || dst === '*' || /^\d+$/.test(dst)) return false;
 	const message = packet.msg ?? '';
-	if (/(?:^|\s):?(ack|rej)\d+/i.test(message)) return false;
 	if (/^\{(?:CET|SET)\}/.test(message)) return false;
 	return true;
 }

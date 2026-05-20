@@ -81,6 +81,7 @@ For `pos` packets with a relay chain, the live frontend refreshes `lastSeen` on 
 Map marker hover tooltips show station freshness plus `firstSeen` and `lastSeen`; marker clicks do not open a detail card. The local `MyCall` marker hover shows only callsign and device name.
 The map toolbar includes a ruler toggle (default off) that draws green lines from `MyCall` to currently direct-heard stations and prints per-line distance labels in kilometers.
 The map toolbar also includes a realtime DM tracking toggle that draws dashed hop-by-hop routes for live direct messages (`src -> via -> dst`) and removes each trace automatically after 45 seconds.
+Realtime DM route tracking includes ACK/reject `msg` packets as long as they carry a non-channel destination callsign.
 
 `GET /api/positions` returns the persisted node position map loaded at startup and updated from incoming `pos` packets:
 
