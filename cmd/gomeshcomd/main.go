@@ -94,9 +94,12 @@ func run() error {
 	}()
 
 	sc := sendcache.New(cfg.Send.DedupTTL)
+	apiServer := httpapi.NewServer(cfg, version, bus, positionStore, receiveLogger, chatLogger, bridge, sc)
+	defer apiServer.Close()
+
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewServer(cfg, version, bus, positionStore, receiveLogger, chatLogger, bridge, sc).Handler(),
+		Handler:           apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

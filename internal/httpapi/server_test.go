@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -882,7 +883,7 @@ func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 	}
 }
 
-func TestStreamEventsReplayFromQueryOverridesDefaultWindow(t *testing.T) {
+func TestStreamEventsReplayFromQueryCappedByReplayWindow(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "raw")
 	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})
 	oldTime := time.Now().UTC().Add(-2 * time.Hour)
@@ -901,15 +902,66 @@ func TestStreamEventsReplayFromQueryOverridesDefaultWindow(t *testing.T) {
 		Path:         dir,
 		ReplayWindow: time.Hour,
 	}
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil)
+	bus := events.NewBus()
+	server := NewServer(cfg, "v0.0.0-test", bus, nil, logger, nil, nil, nil)
 	from := oldTime.Add(-time.Minute).Format(time.RFC3339Nano)
-	body := streamBodyUntilPath(t, server, "/api/events?from="+from, "event: packet.received")
+	
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		bus.Publish(events.Event{Type: "packet.received", Data: "LIVEMARKER"})
+	}()
 
-	if !strings.Contains(body, "OLDIN") {
-		t.Fatalf("from replay packet missing from stream body: %q", body)
+	// Requesting 'from' 2h1m ago, but ReplayWindow is 1h. It should cap to 1h, so OLDIN (2h ago) is not replayed.
+	body := streamBodyUntilPath(t, server, "/api/events?from="+from, "LIVEMARKER")
+
+	if strings.Contains(body, "OLDIN") {
+		t.Fatalf("packet older than ReplayWindow was replayed: %q", body)
 	}
-	if !strings.Contains(body, `"replay":true`) {
-		t.Fatalf("replay marker missing from stream body: %q", body)
+}
+
+func TestStreamEventsReplayFromQueryWithinReplayWindow(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "raw")
+	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})
+	
+	// Packet 1: 90 minutes ago (within 2h ReplayWindow)
+	packet1Time := time.Now().UTC().Add(-90 * time.Minute)
+	if err := logger.Append(receivelog.Record{
+		ReceivedAt: packet1Time,
+		RemoteAddr: "127.0.0.1:1799",
+		Raw:        `{"type":"msg","src":"PACKET1","dst":"*","msg":"p1"}`,
+		PacketType: "msg",
+	}); err != nil {
+		t.Fatalf("append record 1: %v", err)
+	}
+
+	// Packet 2: 30 minutes ago (within 2h ReplayWindow)
+	packet2Time := time.Now().UTC().Add(-30 * time.Minute)
+	if err := logger.Append(receivelog.Record{
+		ReceivedAt: packet2Time,
+		RemoteAddr: "127.0.0.1:1799",
+		Raw:        `{"type":"msg","src":"PACKET2","dst":"*","msg":"p2"}`,
+		PacketType: "msg",
+	}); err != nil {
+		t.Fatalf("append record 2: %v", err)
+	}
+
+	cfg := testConfig()
+	cfg.ReceiveLog = config.ReceiveLog{
+		Enabled:      true,
+		Path:         dir,
+		ReplayWindow: 2 * time.Hour,
+	}
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil)
+	
+	// Query 'from' 1 hour ago. Only Packet 2 (30m ago) should be replayed. Packet 1 (90m ago) should be filtered out.
+	from := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	body := streamBodyUntilPath(t, server, "/api/events?from="+from, "PACKET2")
+
+	if strings.Contains(body, "PACKET1") {
+		t.Fatalf("packet older than 'from' query parameter was replayed: %q", body)
+	}
+	if !strings.Contains(body, "PACKET2") {
+		t.Fatalf("packet newer than 'from' query parameter was not replayed: %q", body)
 	}
 }
 
@@ -1001,6 +1053,66 @@ func TestDeleteBroadcast(t *testing.T) {
 	}
 }
 
+func TestServerClose(t *testing.T) {
+	bus := events.NewBus()
+	server := NewServer(testConfig(), "v0.0.0-test", bus, nil, nil, nil, nil, nil)
+	
+	// Register a message in outbox
+	server.outbox.Register("SRC", "DST", "HELLO", time.Now())
+	
+	// Close the server to cancel the background watch goroutine
+	server.Close()
+	time.Sleep(50 * time.Millisecond) // Let the cancellation goroutine run
+	
+	// Publish the packet.received event which would normally confirm and remove the message from outbox
+	bus.Publish(events.Event{
+		Type: "packet.received",
+		Data: map[string]any{
+			"packet": meshcom.TextMessage{
+				Source:      "SRC",
+				Destination: "DST",
+				Message:     "HELLO",
+			},
+		},
+	})
+	time.Sleep(50 * time.Millisecond)
+	
+	// Confirm that the message in outbox was NOT confirmed (still exists), because the watch goroutine was stopped.
+	if !server.outbox.Confirm("SRC", "DST", "HELLO") {
+		t.Error("expected message to still be pending in outbox after Close()")
+	}
+}
+
+
+type safeResponseWriter struct {
+	mu  sync.Mutex
+	rec *httptest.ResponseRecorder
+}
+
+func (s *safeResponseWriter) Header() http.Header {
+	return s.rec.Header()
+}
+
+func (s *safeResponseWriter) Write(b []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rec.Write(b)
+}
+
+func (s *safeResponseWriter) WriteHeader(statusCode int) {
+	s.rec.WriteHeader(statusCode)
+}
+
+func (s *safeResponseWriter) Flush() {
+	s.rec.Flush()
+}
+
+func (s *safeResponseWriter) BodyString() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rec.Body.String()
+}
+
 func streamBodyUntil(t *testing.T, server *Server, marker string) string {
 	t.Helper()
 	return streamBodyUntilPath(t, server, "/api/events", marker)
@@ -1014,16 +1126,17 @@ func streamBodyUntilPath(t *testing.T, server *Server, path string, marker strin
 	defer cancel()
 	request = request.WithContext(ctx)
 	response := httptest.NewRecorder()
+	safeWriter := &safeResponseWriter{rec: response}
 
 	done := make(chan struct{})
 	go func() {
-		server.Handler().ServeHTTP(response, request)
+		server.Handler().ServeHTTP(safeWriter, request)
 		close(done)
 	}()
 
 	deadline := time.After(time.Second)
 	for {
-		body := response.Body.String()
+		body := safeWriter.BodyString()
 		if strings.Contains(body, marker) {
 			cancel()
 			<-done

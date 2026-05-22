@@ -49,11 +49,13 @@ type Server struct {
 	sendCache  *sendcache.Cache
 	outbox     *outbox.Outbox
 	sessions   *sessionStore
+	cancel     context.CancelFunc
 }
 
 const outgoingEchoTimeout = 5 * time.Second
 
 func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore *positions.Store, receiveLog *receivelog.Logger, chatLog *chatlog.Logger, bridge messageSender, sc *sendcache.Cache) *Server {
+	ctx, cancel := context.WithCancel(context.Background())
 	server := &Server{
 		cfg:        cfg,
 		version:    version,
@@ -63,9 +65,10 @@ func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore
 		chatLog:    chatLog,
 		bridge:     bridge,
 		sendCache:  sc,
+		cancel:     cancel,
 	}
 	server.outbox = outbox.New(outgoingEchoTimeout, server.handleOutgoingTimeout)
-	server.watchOutgoingEchoes()
+	server.watchOutgoingEchoes(ctx)
 	if authEnabled(cfg) {
 		server.sessions = newSessionStore()
 	}
@@ -268,22 +271,30 @@ func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, outgoing)
 }
 
-func (s *Server) watchOutgoingEchoes() {
+func (s *Server) watchOutgoingEchoes(ctx context.Context) {
 	if s.bus == nil {
 		return
 	}
-	subscriber := s.bus.Subscribe(context.Background())
+	subscriber := s.bus.Subscribe(ctx)
 	go func() {
-		for event := range subscriber {
-			if event.Type != "packet.received" {
-				continue
-			}
-			message, ok := textMessageFromEvent(event)
-			if !ok {
-				continue
-			}
-			if s.outbox != nil {
-				s.outbox.Confirm(message.Source, message.Destination, message.Message)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-subscriber:
+				if !ok {
+					return
+				}
+				if event.Type != "packet.received" {
+					continue
+				}
+				message, ok := textMessageFromEvent(event)
+				if !ok {
+					continue
+				}
+				if s.outbox != nil {
+					s.outbox.Confirm(message.Source, message.Destination, message.Message)
+				}
 			}
 		}
 	}()
@@ -470,18 +481,29 @@ func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) replayCutoff(r *http.Request) (time.Time, bool, error) {
 	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	var cutoff time.Time
+	var hasCutoff bool
 	if from != "" {
-		cutoff, err := time.Parse(time.RFC3339Nano, from)
+		parsed, err := time.Parse(time.RFC3339Nano, from)
 		if err != nil {
 			return time.Time{}, false, fmt.Errorf("invalid from timestamp")
 		}
-		return cutoff.UTC(), true, nil
+		cutoff = parsed.UTC()
+		hasCutoff = true
 	}
 
-	if s.cfg.ReceiveLog.ReplayWindow <= 0 {
-		return time.Time{}, false, nil
+	if s.cfg.ReceiveLog.ReplayWindow > 0 {
+		minCutoff := time.Now().UTC().Add(-s.cfg.ReceiveLog.ReplayWindow)
+		if !hasCutoff || cutoff.Before(minCutoff) {
+			cutoff = minCutoff
+		}
+		return cutoff, true, nil
 	}
-	return time.Now().UTC().Add(-s.cfg.ReceiveLog.ReplayWindow), true, nil
+
+	if hasCutoff {
+		return cutoff, true, nil
+	}
+	return time.Time{}, false, nil
 }
 
 func writeHeartbeat(w http.ResponseWriter) error {
@@ -545,4 +567,10 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func (s *Server) Close() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 }

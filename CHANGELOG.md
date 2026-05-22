@@ -16,11 +16,13 @@ All notable changes to this project are documented in this file.
 - **Chat message cards**: removed the raw JSON button from public and direct chat message cards.
 - **DM ACK details**: direct-message chat cards now show every ACK source with its own RTT and relay path details instead of only the preferred ACK summary.
 
+- **Event stream replay cursor capping**: `/api/events` now caps the `from` parameter to the configured `ReplayWindow` if `from` is further back in time.
 - **IoT simulator command README**: documented local usage, responder behavior, common run modes, flags, and log output for `cmd/iot-simulator`.
 - **Web UI helper refactoring**: extracted `ChatPanel`, `UdpStreamPanel`, and pure chat record/UDP stream presentation helpers from the monolithic `+page.svelte`, added unit coverage for those helpers, and documented the next component extraction slices.
 
 ### Fixed
 
+- **Goroutine/subscription leak in HTTP server**: watch goroutines in the server now correctly unsubscribe and terminate on Close/Shutdown, resolving resource leaks in runtime and tests.
 - **Realtime DM trace for ACK packets**: map live tracking now keeps `msg` ACK/reject packets in route tracing, so packets like `src=IU5RTR-02,IZ5CND-10` and `dst=IU5PMP-1` render both hop segments for 45 seconds.
 - **Sanitized amateur radio callsigns**: audited and updated all mock/example/placeholder amateur radio callsigns to use compliant "QQ" prefix format across simulator commands, frontend Svelte pages, test files, and API docs.
 
