@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.6.4] - 2026-05-23
+
 ### Added
 
 - **IoT simulator granular auto-send flags**: `cmd/iot-simulator` now exposes `-enable-pos1`, `-enable-pos2`, `-enable-dm`, `-enable-broadcast`, and `-enable-chan2` so each timed send stream can be enabled independently while DM responders remain active. All responder transmissions now use configured `-target` UDP endpoint.
@@ -13,9 +17,10 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Human-friendly log output**: replaced `slog.NewTextHandler` with a zero-dependency custom handler (`internal/logfmt`) that writes columnar `YYYY-MM-DD HH:MM:SS  LEVEL  message  key=value` lines. Both `gomeshcomd` and `iot-simulator` now emit this format; level is controlled via `-log-level` flag.
+- **IoT simulator logging**: migrated `cmd/iot-simulator` from `fmt.Fprintf(os.Stderr, ...)` to structured `slog` calls with the new handler, consistent with `gomeshcomd`.
 - **Chat message cards**: removed the raw JSON button from public and direct chat message cards.
 - **DM ACK details**: direct-message chat cards now show every ACK source with its own RTT and relay path details instead of only the preferred ACK summary.
-
 - **Event stream replay cursor capping**: `/api/events` now caps the `from` parameter to the configured `ReplayWindow` if `from` is further back in time.
 - **IoT simulator command README**: documented local usage, responder behavior, common run modes, flags, and log output for `cmd/iot-simulator`.
 - **Web UI helper refactoring**: extracted `ChatPanel`, `UdpStreamPanel`, and pure chat record/UDP stream presentation helpers from the monolithic `+page.svelte`, added unit coverage for those helpers, and documented the next component extraction slices.
@@ -25,18 +30,12 @@ All notable changes to this project are documented in this file.
 - **Goroutine/subscription leak in HTTP server**: watch goroutines in the server now correctly unsubscribe and terminate on Close/Shutdown, resolving resource leaks in runtime and tests.
 - **Realtime DM trace for ACK packets**: map live tracking now keeps `msg` ACK/reject packets in route tracing, so packets like `src=IU5RTR-02,IZ5CND-10` and `dst=IU5PMP-1` render both hop segments for 45 seconds.
 - **Sanitized amateur radio callsigns**: audited and updated all mock/example/placeholder amateur radio callsigns to use compliant "QQ" prefix format across simulator commands, frontend Svelte pages, test files, and API docs.
-
 - **DM ACK scoping**: ACK and reject indicators now match the sent message destination and local callsign, preventing ACKs for different messages with the same sequence number from appearing on the wrong chat card.
 - **Replay packet filtering for chat/ACK UI**: frontend ACK indexing now ignores `packet.received` SSE events with `replay:true`, so replay bursts are not counted as extra ACKs on latest chat messages.
-
 - **ACK timing**: packet SSE events and chat JSONL records now share the same backend `received_at` timestamp, and the web client uses backend time for chat and ACK RTT instead of browser arrival time.
-
 - **Position signal freshness**: direct `msg`, `tele`, and `pos` packets without `rssi`/`snr` now preserve existing node signal values instead of overwriting them with `0`.
-
 - **HTTP response caching**: all `/api/*` responses now send no-store cache headers, `/_app/immutable/*` assets use one-year immutable caching, and `index.html` requires revalidation.
-
 - **Broadcast clear backend deletion**: the web UI now always sends the delete request when clearing the Broadcast chat so backend chat log files are removed even if local history state is empty.
-
 - **DM send echo matching**: pending outbound DM records are now removed when the node echo appends a truncated sequence suffix such as `{42`, preventing duplicate spinner records.
 
 ---

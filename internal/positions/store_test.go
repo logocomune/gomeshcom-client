@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 )
 
 func intPtr(value int) *int { return &value }

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/logocomune/gomeshcom-udp/internal/chatlog"
-	"github.com/logocomune/gomeshcom-udp/internal/events"
-	"github.com/logocomune/gomeshcom-udp/internal/positions"
-	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
-	"github.com/logocomune/gomeshcom-udp/internal/udpforward"
+	"github.com/logocomune/gomeshcom-client/internal/chatlog"
+	"github.com/logocomune/gomeshcom-client/internal/events"
+	"github.com/logocomune/gomeshcom-client/internal/positions"
+	"github.com/logocomune/gomeshcom-client/internal/receivelog"
+	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
 
 func TestHandleDatagramLogsValidPacket(t *testing.T) {

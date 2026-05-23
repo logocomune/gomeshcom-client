@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 )
 
 const SaveInterval = time.Minute

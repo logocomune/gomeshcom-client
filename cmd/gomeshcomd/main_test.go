@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/logocomune/gomeshcom-udp/internal/config"
+	"github.com/logocomune/gomeshcom-client/internal/config"
 )
 
 func TestEnsureDataDirs(t *testing.T) {

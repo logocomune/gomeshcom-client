@@ -55,7 +55,7 @@
 				Open an issue on GitHub to report a bug, request a feature, or suggest an improvement.
 			</p>
 			<a
-				href="https://github.com/logocomune/gomeshcom-udp/issues"
+				href="https://github.com/logocomune/gomeshcom-client/issues"
 				target="_blank"
 				rel="noopener noreferrer"
 				class="inline-flex items-center gap-1.5 rounded border border-gray-600/60 bg-gray-700/40 px-3 py-1.5 text-xs text-gray-200 hover:border-blue-500/50 hover:text-blue-300"
@@ -71,7 +71,7 @@
 			<h2 class="text-sm font-semibold text-gray-200">Reference Repository</h2>
 			<p class="text-xs text-gray-400">Upstream codebase used as implementation reference.</p>
 			<a
-				href="https://github.com/logocomune/gomeshcom-udp"
+				href="https://github.com/logocomune/gomeshcom-client"
 				target="_blank"
 				rel="noopener noreferrer"
 				class="inline-flex items-center gap-1.5 rounded border border-gray-600/60 bg-gray-700/40 px-3 py-1.5 text-xs text-gray-200 hover:border-blue-500/50 hover:text-blue-300"
@@ -80,7 +80,7 @@
 					<path d="M7.775 3.275a.75.75 0 0 1 1.06 0l3.89 3.89a.75.75 0 0 1 0 1.06l-3.89 3.89a.75.75 0 1 1-1.06-1.06L10.38 8 7.775 5.395a.75.75 0 0 1 0-1.06Z"/>
 					<path d="M5.25 8a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Z"/>
 				</svg>
-				github.com/logocomune/gomeshcom-udp
+				github.com/logocomune/gomeshcom-client
 			</a>
 		</div>
 

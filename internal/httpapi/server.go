@@ -14,16 +14,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/logocomune/gomeshcom-udp/internal/chatlog"
-	"github.com/logocomune/gomeshcom-udp/internal/config"
-	"github.com/logocomune/gomeshcom-udp/internal/events"
-	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
-	"github.com/logocomune/gomeshcom-udp/internal/outbox"
-	"github.com/logocomune/gomeshcom-udp/internal/positions"
-	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
-	"github.com/logocomune/gomeshcom-udp/internal/sendcache"
-	"github.com/logocomune/gomeshcom-udp/internal/udpbridge"
-	"github.com/logocomune/gomeshcom-udp/internal/webui"
+	"github.com/logocomune/gomeshcom-client/internal/chatlog"
+	"github.com/logocomune/gomeshcom-client/internal/config"
+	"github.com/logocomune/gomeshcom-client/internal/events"
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
+	"github.com/logocomune/gomeshcom-client/internal/outbox"
+	"github.com/logocomune/gomeshcom-client/internal/positions"
+	"github.com/logocomune/gomeshcom-client/internal/receivelog"
+	"github.com/logocomune/gomeshcom-client/internal/sendcache"
+	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
+	"github.com/logocomune/gomeshcom-client/internal/webui"
 )
 
 type stationIdentityEvent struct {

@@ -15,15 +15,16 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
-	"github.com/logocomune/gomeshcom-udp/internal/chatlog"
-	"github.com/logocomune/gomeshcom-udp/internal/config"
-	"github.com/logocomune/gomeshcom-udp/internal/events"
-	"github.com/logocomune/gomeshcom-udp/internal/httpapi"
-	"github.com/logocomune/gomeshcom-udp/internal/positions"
-	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
-	"github.com/logocomune/gomeshcom-udp/internal/sendcache"
-	"github.com/logocomune/gomeshcom-udp/internal/udpbridge"
-	"github.com/logocomune/gomeshcom-udp/internal/udpforward"
+	"github.com/logocomune/gomeshcom-client/internal/chatlog"
+	"github.com/logocomune/gomeshcom-client/internal/config"
+	"github.com/logocomune/gomeshcom-client/internal/events"
+	"github.com/logocomune/gomeshcom-client/internal/httpapi"
+	"github.com/logocomune/gomeshcom-client/internal/logfmt"
+	"github.com/logocomune/gomeshcom-client/internal/positions"
+	"github.com/logocomune/gomeshcom-client/internal/receivelog"
+	"github.com/logocomune/gomeshcom-client/internal/sendcache"
+	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
+	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
 
 var (
@@ -201,6 +202,6 @@ func configureLogger(levelName string) {
 		level = slog.LevelInfo
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	logger := slog.New(logfmt.New(os.Stdout, level))
 	slog.SetDefault(logger)
 }

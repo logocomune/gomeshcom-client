@@ -15,15 +15,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/logocomune/gomeshcom-udp/internal/chatlog"
-	"github.com/logocomune/gomeshcom-udp/internal/config"
-	"github.com/logocomune/gomeshcom-udp/internal/events"
-	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
-	"github.com/logocomune/gomeshcom-udp/internal/outbox"
-	"github.com/logocomune/gomeshcom-udp/internal/positions"
-	"github.com/logocomune/gomeshcom-udp/internal/receivelog"
-	"github.com/logocomune/gomeshcom-udp/internal/sendcache"
-	"github.com/logocomune/gomeshcom-udp/internal/udpbridge"
+	"github.com/logocomune/gomeshcom-client/internal/chatlog"
+	"github.com/logocomune/gomeshcom-client/internal/config"
+	"github.com/logocomune/gomeshcom-client/internal/events"
+	"github.com/logocomune/gomeshcom-client/internal/logfmt"
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
+	"github.com/logocomune/gomeshcom-client/internal/outbox"
+	"github.com/logocomune/gomeshcom-client/internal/positions"
+	"github.com/logocomune/gomeshcom-client/internal/receivelog"
+	"github.com/logocomune/gomeshcom-client/internal/sendcache"
+	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 )
 
 // stubBridge is a fake messageSender for tests.
@@ -138,7 +139,7 @@ func TestHealth(t *testing.T) {
 func TestRequestLogEnabledLogsStructuredRequest(t *testing.T) {
 	var logBuffer bytes.Buffer
 	previousLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, nil)))
+	slog.SetDefault(slog.New(logfmt.New(&logBuffer, slog.LevelDebug)))
 	t.Cleanup(func() {
 		slog.SetDefault(previousLogger)
 	})
@@ -156,7 +157,7 @@ func TestRequestLogEnabledLogsStructuredRequest(t *testing.T) {
 
 	logLine := logBuffer.String()
 	for _, want := range []string{
-		`msg="http request"`,
+		"http request",
 		"method=GET",
 		"endpoint=/api/health",
 		"status=200",
@@ -174,7 +175,7 @@ func TestRequestLogEnabledLogsStructuredRequest(t *testing.T) {
 func TestRequestLogDisabledDoesNotLogRequest(t *testing.T) {
 	var logBuffer bytes.Buffer
 	previousLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, nil)))
+	slog.SetDefault(slog.New(logfmt.New(&logBuffer, slog.LevelDebug)))
 	t.Cleanup(func() {
 		slog.SetDefault(previousLogger)
 	})
@@ -193,7 +194,7 @@ func TestRequestLogDisabledDoesNotLogRequest(t *testing.T) {
 func TestRequestLogUsesRealIPWhenCloudflareHeaderMissing(t *testing.T) {
 	var logBuffer bytes.Buffer
 	previousLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, nil)))
+	slog.SetDefault(slog.New(logfmt.New(&logBuffer, slog.LevelDebug)))
 	t.Cleanup(func() {
 		slog.SetDefault(previousLogger)
 	})
@@ -905,7 +906,7 @@ func TestStreamEventsReplayFromQueryCappedByReplayWindow(t *testing.T) {
 	bus := events.NewBus()
 	server := NewServer(cfg, "v0.0.0-test", bus, nil, logger, nil, nil, nil)
 	from := oldTime.Add(-time.Minute).Format(time.RFC3339Nano)
-	
+
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		bus.Publish(events.Event{Type: "packet.received", Data: "LIVEMARKER"})
@@ -922,7 +923,7 @@ func TestStreamEventsReplayFromQueryCappedByReplayWindow(t *testing.T) {
 func TestStreamEventsReplayFromQueryWithinReplayWindow(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "raw")
 	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})
-	
+
 	// Packet 1: 90 minutes ago (within 2h ReplayWindow)
 	packet1Time := time.Now().UTC().Add(-90 * time.Minute)
 	if err := logger.Append(receivelog.Record{
@@ -952,7 +953,7 @@ func TestStreamEventsReplayFromQueryWithinReplayWindow(t *testing.T) {
 		ReplayWindow: 2 * time.Hour,
 	}
 	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil)
-	
+
 	// Query 'from' 1 hour ago. Only Packet 2 (30m ago) should be replayed. Packet 1 (90m ago) should be filtered out.
 	from := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
 	body := streamBodyUntilPath(t, server, "/api/events?from="+from, "PACKET2")
@@ -1056,14 +1057,14 @@ func TestDeleteBroadcast(t *testing.T) {
 func TestServerClose(t *testing.T) {
 	bus := events.NewBus()
 	server := NewServer(testConfig(), "v0.0.0-test", bus, nil, nil, nil, nil, nil)
-	
+
 	// Register a message in outbox
 	server.outbox.Register("SRC", "DST", "HELLO", time.Now())
-	
+
 	// Close the server to cancel the background watch goroutine
 	server.Close()
 	time.Sleep(50 * time.Millisecond) // Let the cancellation goroutine run
-	
+
 	// Publish the packet.received event which would normally confirm and remove the message from outbox
 	bus.Publish(events.Event{
 		Type: "packet.received",
@@ -1076,13 +1077,12 @@ func TestServerClose(t *testing.T) {
 		},
 	})
 	time.Sleep(50 * time.Millisecond)
-	
+
 	// Confirm that the message in outbox was NOT confirmed (still exists), because the watch goroutine was stopped.
 	if !server.outbox.Confirm("SRC", "DST", "HELLO") {
 		t.Error("expected message to still be pending in outbox after Close()")
 	}
 }
-
 
 type safeResponseWriter struct {
 	mu  sync.Mutex

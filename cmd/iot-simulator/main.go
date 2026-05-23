@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net"
 	"os"
@@ -21,7 +22,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
+	"github.com/logocomune/gomeshcom-client/internal/logfmt"
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 )
 
 const (
@@ -36,6 +38,7 @@ type config struct {
 	listenAddr        string
 	targetAddr        string
 	myCall            string
+	logLevel          string
 	position1Interval time.Duration
 	position2Interval time.Duration
 	dmInterval        time.Duration
@@ -81,10 +84,25 @@ type udpSender struct {
 
 func main() {
 	cfg := parseFlags()
+	configureLogger(cfg.logLevel)
 	if err := run(context.Background(), cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func configureLogger(levelName string) {
+	levels := map[string]slog.Level{
+		"debug": slog.LevelDebug,
+		"info":  slog.LevelInfo,
+		"warn":  slog.LevelWarn,
+		"error": slog.LevelError,
+	}
+	level, ok := levels[levelName]
+	if !ok {
+		level = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(logfmt.New(os.Stdout, level)))
 }
 
 func parseFlags() config {
@@ -92,6 +110,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.listenAddr, "listen-addr", ":1798", "local UDP address for receiving node-bound datagrams")
 	flag.StringVar(&cfg.targetAddr, "target", "127.0.0.1:1799", "destination UDP address for emitted packets")
 	flag.StringVar(&cfg.myCall, "my-call", "", "local callsign used as DM destination (required)")
+	flag.StringVar(&cfg.logLevel, "log-level", "info", "minimum log level (debug, info, warn, error)")
 	flag.DurationVar(&cfg.position1Interval, "interval", time.Minute, "QQ1TST-1 position send interval")
 	flag.DurationVar(&cfg.position2Interval, "pos2-interval", 2*time.Minute, "QQ1TST-2 position send interval")
 	flag.DurationVar(&cfg.dmInterval, "dm-interval", time.Minute, "test DM send interval")
@@ -152,10 +171,10 @@ func run(parent context.Context, cfg config) error {
 
 	go receiveDatagrams(ctx, sender, targetAddr, messageOptions)
 
-	fmt.Fprintf(os.Stderr, "iot-simulator listening on %s, target %s, my-call %s\n", conn.LocalAddr(), targetAddr, messageOptions.myCall)
+	slog.Info("iot-simulator listening", "listen", conn.LocalAddr(), "target", targetAddr, "my_call", messageOptions.myCall)
 	autoSendsEnabled := cfg.enablePosition1 || cfg.enablePosition2 || cfg.enableDM || cfg.enableBroadcast || cfg.enableChannel2
 	if !autoSendsEnabled {
-		fmt.Fprintln(os.Stderr, "automatic sends disabled (enable with -enable-pos1/-enable-pos2/-enable-dm/-enable-broadcast/-enable-chan2)")
+		slog.Info("automatic sends disabled", "hint", "-enable-pos1/-enable-pos2/-enable-dm/-enable-broadcast/-enable-chan2")
 		<-ctx.Done()
 		return nil
 	}
@@ -282,21 +301,21 @@ func validateConfig(cfg config) error {
 func (s *udpSender) sendPosition(target *net.UDPAddr, options positionOptions) error {
 	packet := s.newPositionPacket(options)
 	return s.sendPacket(target, packet, func(written int) {
-		fmt.Fprintf(os.Stderr, "sent pos %d bytes to %s src=%s lat=%.6f long=%.6f msg_id=%s\n", written, target, packet.Source, packet.Latitude, packet.Longitude, packet.MessageID)
+		slog.Info("sent position", "bytes", written, "target", target, "src", packet.Source, "lat", packet.Latitude, "long", packet.Longitude, "msg_id", packet.MessageID)
 	})
 }
 
 func (s *udpSender) sendDirectMessage(target *net.UDPAddr, options messageOptions, count int) error {
 	packet := s.newTextMessage("lora", directSource, options.myCall, fmt.Sprintf("DM test %d", count))
 	return s.sendPacket(target, packet, func(written int) {
-		fmt.Fprintf(os.Stderr, "sent test DM %d bytes to %s src=%s dst=%s msg=%q\n", written, target, packet.Source, packet.Destination, packet.Message)
+		slog.Info("sent DM", "bytes", written, "target", target, "src", packet.Source, "dst", packet.Destination, "msg", packet.Message)
 	})
 }
 
 func (s *udpSender) sendText(target *net.UDPAddr, sourceType string, source string, destination string, message string) error {
 	packet := s.newTextMessage(sourceType, source, destination, message)
 	return s.sendPacket(target, packet, func(written int) {
-		fmt.Fprintf(os.Stderr, "sent msg %d bytes to %s src=%s dst=%s msg=%q\n", written, target, packet.Source, packet.Destination, packet.Message)
+		slog.Info("sent message", "bytes", written, "target", target, "src", packet.Source, "dst", packet.Destination, "msg", packet.Message)
 	})
 }
 
@@ -320,7 +339,7 @@ func receiveDatagrams(ctx context.Context, sender *udpSender, defaultTarget *net
 	buf := make([]byte, 65535)
 	for {
 		if err := sender.conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-			fmt.Fprintf(os.Stderr, "receive deadline failed: %v\n", err)
+			slog.Error("receive deadline failed", "error", err)
 			return
 		}
 
@@ -338,12 +357,12 @@ func receiveDatagrams(ctx context.Context, sender *udpSender, defaultTarget *net
 			case <-ctx.Done():
 				return
 			default:
-				fmt.Fprintf(os.Stderr, "receive failed: %v\n", err)
+				slog.Error("receive failed", "error", err)
 				return
 			}
 		}
 
-		fmt.Fprintf(os.Stderr, "received %d bytes from %s payload=%q\n", n, remote, buf[:n])
+		slog.Debug("received datagram", "bytes", n, "remote", remote)
 		logPacket("RX", buf[:n])
 		handleReceivedDatagram(ctx, sender, defaultTarget, append([]byte(nil), buf[:n]...), options)
 	}
@@ -388,7 +407,7 @@ func isPublicOrChannelDestination(destination string) bool {
 func respondToBroadcast(sender *udpSender, target *net.UDPAddr, received meshcom.TextMessage, options messageOptions) {
 	destination := strings.ToUpper(strings.TrimSpace(received.Destination))
 	if err := sender.sendText(target, "node", options.myCall, destination, received.Message); err != nil {
-		fmt.Fprintf(os.Stderr, "broadcast reply to %s failed: %v\n", destination, err)
+		slog.Error("broadcast reply failed", "dst", destination, "error", err)
 	}
 }
 
@@ -397,11 +416,11 @@ func respondToDirectMessage(sender *udpSender, target *net.UDPAddr, received mes
 	seq := sequenceID(received.Message)
 	echoMessage := messageWithSequence(received.Message, seq)
 	if err := sender.sendText(target, "node", replyTo, options.directSource, echoMessage); err != nil {
-		fmt.Fprintf(os.Stderr, "echo to %s failed: %v\n", options.directSource, err)
+		slog.Error("echo failed", "dst", options.directSource, "error", err)
 		return
 	}
 	if err := sender.sendText(target, "lora", options.directSource, replyTo, ackMessage(replyTo, seq)); err != nil {
-		fmt.Fprintf(os.Stderr, "ack from %s failed: %v\n", options.directSource, err)
+		slog.Error("ack failed", "src", options.directSource, "error", err)
 	}
 }
 
@@ -410,7 +429,7 @@ func respondAsRepeater(ctx context.Context, sender *udpSender, target *net.UDPAd
 	seq := sequenceID(received.Message)
 	echoMessage := messageWithSequence(received.Message, seq)
 	if err := sender.sendText(target, "node", replyTo, options.repeater, echoMessage); err != nil {
-		fmt.Fprintf(os.Stderr, "echo to %s failed: %v\n", options.repeater, err)
+		slog.Error("echo failed", "dst", options.repeater, "error", err)
 		return
 	}
 
@@ -423,11 +442,11 @@ func respondAsRepeater(ctx context.Context, sender *udpSender, target *net.UDPAd
 	}
 
 	if err := sender.sendText(target, "lora", options.repeater, replyTo, ackMessage(replyTo, seq)); err != nil {
-		fmt.Fprintf(os.Stderr, "ack from %s failed: %v\n", options.repeater, err)
+		slog.Error("ack failed", "src", options.repeater, "error", err)
 		return
 	}
 	if err := sender.sendText(target, "lora", options.repeater, replyTo, "MIRROR: "+cleanSequence(received.Message)); err != nil {
-		fmt.Fprintf(os.Stderr, "mirror from %s failed: %v\n", options.repeater, err)
+		slog.Error("mirror failed", "src", options.repeater, "error", err)
 	}
 }
 
@@ -476,7 +495,7 @@ func (s *udpSender) newTextMessage(sourceType string, source string, destination
 func logPacket(direction string, data []byte) {
 	envelope, err := meshcom.ParsePacket(data)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s | %-2s | raw | - -> - | %s\n", time.Now().Format("15:04:05"), direction, string(data))
+		slog.Debug("packet raw", "dir", direction, "raw", string(data))
 		return
 	}
 
@@ -493,7 +512,7 @@ func logPacket(direction string, data []byte) {
 		source = packet.Source
 	}
 
-	fmt.Fprintf(os.Stderr, "%s | %-2s | %-4s | %s -> %s | %s\n", time.Now().Format("15:04:05"), direction, messageType, source, destination, string(data))
+	slog.Debug("packet", "dir", direction, "type", messageType, "src", source, "dst", destination)
 }
 
 func replyCallsign(message meshcom.TextMessage, fallback string) string {

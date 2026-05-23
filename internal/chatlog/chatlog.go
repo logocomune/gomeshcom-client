@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/logocomune/gomeshcom-udp/internal/meshcom"
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 )
 
 var unsafeChars = regexp.MustCompile(`[^A-Za-z0-9_-]`)

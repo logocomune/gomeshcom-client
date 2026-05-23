@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/logocomune/gomeshcom-udp/internal/config"
+	"github.com/logocomune/gomeshcom-client/internal/config"
 )
 
 var errUnauthorized = errors.New("unauthorized")

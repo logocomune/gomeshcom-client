@@ -41,7 +41,7 @@ describe('About page', () => {
 		render(AboutPage);
 
 		await expect
-			.element(page.getByRole('link', { name: 'github.com/logocomune/gomeshcom-udp' }))
-			.toHaveAttribute('href', 'https://github.com/logocomune/gomeshcom-udp');
+			.element(page.getByRole('link', { name: 'github.com/logocomune/gomeshcom-client' }))
+			.toHaveAttribute('href', 'https://github.com/logocomune/gomeshcom-client');
 	});
 });
