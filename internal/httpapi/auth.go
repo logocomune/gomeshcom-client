@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -69,6 +70,34 @@ func (s *sessionStore) delete(token string) {
 	s.mu.Unlock()
 }
 
+func (s *sessionStore) evictExpired() {
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, expiresAt := range s.sessions {
+		if !expiresAt.After(now) {
+			delete(s.sessions, token)
+		}
+	}
+}
+
+const sessionEvictInterval = 5 * time.Minute
+
+func (s *sessionStore) start(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(sessionEvictInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.evictExpired()
+			}
+		}
+	}()
+}
+
 func authEnabled(cfg config.Config) bool {
 	return cfg.Auth.Username != "" && cfg.Auth.Password != ""
 }
@@ -126,6 +155,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10) // 1 KB
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return

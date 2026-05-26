@@ -5,7 +5,7 @@
 
 {#if state === 'connecting'}
 	<div
-		class="absolute inset-0 z-[9999] flex flex-col items-center justify-center gap-4 bg-[#111827]/90 backdrop-blur-sm"
+		class="pointer-events-none absolute inset-0 z-[9999] flex flex-col items-center justify-center gap-4 bg-[#111827]/90 backdrop-blur-sm"
 	>
 		<svg
 			class="h-10 w-10 animate-spin text-blue-400"
@@ -27,7 +27,7 @@
 	</div>
 {:else if state === 'disconnected'}
 	<div
-		class="absolute inset-0 z-[9999] flex flex-col items-center justify-center gap-4 bg-[#111827]/90 backdrop-blur-sm"
+		class="pointer-events-none absolute inset-0 z-[9999] flex flex-col items-center justify-center gap-4 bg-[#111827]/90 backdrop-blur-sm"
 	>
 		<svg
 			class="h-10 w-10 text-red-400"

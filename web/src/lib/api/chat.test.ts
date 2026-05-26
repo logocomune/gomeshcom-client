@@ -1,48 +1,12 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import {
-	loadReadTimestamps,
-	saveReadTimestamp,
-	isUnread,
-	clearReadTimestamp,
 	deleteConversation,
 	conversationIdForRecord,
 	fetchHistory,
 	loadLastChatTarget,
-	saveLastChatTarget
+	saveLastChatTarget,
+	markConversationRead
 } from './chat';
-import type { Conversation } from './types';
-
-function conv(id: string, last_seen: string): Conversation {
-	return { id, kind: 'channel', label: id, last_seen, size: 0 };
-}
-
-describe('isUnread', () => {
-	it('returns false when readTs is undefined (first-load seed pending)', () => {
-		expect(isUnread(conv('P_broadcast', '2026-05-16T10:00:00Z'), undefined)).toBe(false);
-	});
-
-	it('returns true when conv.last_seen is newer than readTs', () => {
-		expect(isUnread(conv('P_broadcast', '2026-05-16T10:05:00Z'), '2026-05-16T10:00:00Z')).toBe(
-			true
-		);
-	});
-
-	it('returns false when conv.last_seen equals readTs', () => {
-		expect(isUnread(conv('P_broadcast', '2026-05-16T10:00:00Z'), '2026-05-16T10:00:00Z')).toBe(
-			false
-		);
-	});
-
-	it('returns false when conv.last_seen is older than readTs', () => {
-		expect(isUnread(conv('P_broadcast', '2026-05-16T09:00:00Z'), '2026-05-16T10:00:00Z')).toBe(
-			false
-		);
-	});
-
-	it('returns false when conv.last_seen is empty', () => {
-		expect(isUnread(conv('P_broadcast', ''), '2026-05-16T10:00:00Z')).toBe(false);
-	});
-});
 
 describe('conversationIdForRecord', () => {
 	it('keeps outbound failed DM tied to destination when MyCall changes', () => {
@@ -81,121 +45,31 @@ describe('conversationIdForRecord', () => {
 	});
 });
 
-describe('loadReadTimestamps / saveReadTimestamp', () => {
-	let store: Record<string, string> = {};
-
-	beforeEach(() => {
-		store = {};
-		vi.stubGlobal('localStorage', {
-			length: 0,
-			_data: store,
-			getItem(key: string) {
-				return store[key] ?? null;
-			},
-			setItem(key: string, val: string) {
-				store[key] = val;
-				(this as unknown as { length: number }).length = Object.keys(store).length;
-			},
-			key(index: number) {
-				return Object.keys(store)[index] ?? null;
-			},
-			removeItem(key: string) {
-				delete store[key];
-				(this as unknown as { length: number }).length = Object.keys(store).length;
-			},
-			clear() {
-				store = {};
-				(this as unknown as { length: number }).length = 0;
-			}
-		});
-	});
-
+describe('markConversationRead', () => {
 	afterEach(() => {
-		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
 	});
 
-	it('returns empty map when localStorage is empty', () => {
-		expect(loadReadTimestamps()).toEqual({});
-	});
-
-	it('loads only meshcom:chat:read: prefixed keys', () => {
-		saveReadTimestamp('P_broadcast', '2026-05-16T10:00:00Z');
-		saveReadTimestamp('DM_QQ1ABC', '2026-05-16T10:01:00Z');
-		store['other:key'] = 'ignored';
-		store['meshcom:other'] = 'ignored';
-		(localStorage as unknown as { length: number }).length = Object.keys(store).length;
-
-		const result = loadReadTimestamps();
-		expect(result).toEqual({
-			P_broadcast: '2026-05-16T10:00:00Z',
-			DM_QQ1ABC: '2026-05-16T10:01:00Z'
+	it('calls POST with the correct URL', async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response(null, { status: 204 }));
+		await markConversationRead('P_broadcast');
+		expect(fetchSpy).toHaveBeenCalledWith('/api/chat/P_broadcast/read', {
+			method: 'POST',
+			credentials: 'same-origin'
 		});
 	});
 
-	it('saveReadTimestamp writes correct key', () => {
-		saveReadTimestamp('P_1', '2026-05-16T09:00:00Z');
-		expect(store['meshcom:chat:read:P_1']).toBe('2026-05-16T09:00:00Z');
-	});
-
-	it('loadReadTimestamps returns empty on localStorage throw', () => {
-		vi.stubGlobal('localStorage', {
-			length: 0,
-			getItem() {
-				throw new Error('quota');
-			},
-			setItem() {
-				throw new Error('quota');
-			},
-			key() {
-				throw new Error('quota');
-			},
-			removeItem() {},
-			clear() {}
+	it('encodes callsign with special chars', async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response(null, { status: 204 }));
+		await markConversationRead('DM_QQ1ABC-1');
+		expect(fetchSpy).toHaveBeenCalledWith('/api/chat/DM_QQ1ABC-1/read', {
+			method: 'POST',
+			credentials: 'same-origin'
 		});
-		expect(loadReadTimestamps()).toEqual({});
-	});
-
-	it('saveReadTimestamp does not throw on quota error', () => {
-		vi.stubGlobal('localStorage', {
-			length: 0,
-			getItem() {
-				return null;
-			},
-			setItem() {
-				throw new Error('QuotaExceededError');
-			},
-			key() {
-				return null;
-			},
-			removeItem() {},
-			clear() {}
-		});
-		expect(() => saveReadTimestamp('P_broadcast', '2026-05-16T10:00:00Z')).not.toThrow();
-	});
-
-	it('clearReadTimestamp removes the correct key', () => {
-		saveReadTimestamp('P_broadcast', '2026-05-16T10:00:00Z');
-		expect(store['meshcom:chat:read:P_broadcast']).toBeDefined();
-		clearReadTimestamp('P_broadcast');
-		expect(store['meshcom:chat:read:P_broadcast']).toBeUndefined();
-	});
-
-	it('clearReadTimestamp does not throw on localStorage error', () => {
-		vi.stubGlobal('localStorage', {
-			length: 0,
-			getItem() {
-				return null;
-			},
-			setItem() {},
-			key() {
-				return null;
-			},
-			removeItem() {
-				throw new Error('SecurityError');
-			},
-			clear() {}
-		});
-		expect(() => clearReadTimestamp('P_broadcast')).not.toThrow();
 	});
 });
 
@@ -205,22 +79,11 @@ describe('loadLastChatTarget / saveLastChatTarget', () => {
 	beforeEach(() => {
 		store = {};
 		vi.stubGlobal('localStorage', {
-			length: 0,
-			getItem(key: string) {
-				return store[key] ?? null;
-			},
-			setItem(key: string, val: string) {
-				store[key] = val;
-			},
-			key() {
-				return null;
-			},
-			removeItem(key: string) {
-				delete store[key];
-			},
-			clear() {
-				store = {};
-			}
+			getItem(key: string) { return store[key] ?? null; },
+			setItem(key: string, val: string) { store[key] = val; },
+			key() { return null; },
+			removeItem(key: string) { delete store[key]; },
+			clear() { store = {}; }
 		});
 	});
 
@@ -230,13 +93,11 @@ describe('loadLastChatTarget / saveLastChatTarget', () => {
 
 	it('saves selected chat as a conversation id', () => {
 		saveLastChatTarget({ kind: 'contact', value: 'QQ1ABC-1' });
-
 		expect(store['meshcom:chat:last']).toBe('DM_QQ1ABC-1');
 	});
 
 	it('loads saved DM when it still exists', () => {
 		store['meshcom:chat:last'] = 'DM_QQ1ABC-1';
-
 		expect(
 			loadLastChatTarget([
 				{ id: 'P_broadcast', kind: 'broadcast', label: 'Broadcast', last_seen: '', size: 0 },
@@ -247,7 +108,6 @@ describe('loadLastChatTarget / saveLastChatTarget', () => {
 
 	it('loads saved channel when it still exists', () => {
 		store['meshcom:chat:last'] = 'P_222';
-
 		expect(
 			loadLastChatTarget([
 				{ id: 'P_broadcast', kind: 'broadcast', label: 'Broadcast', last_seen: '', size: 0 },
@@ -258,7 +118,6 @@ describe('loadLastChatTarget / saveLastChatTarget', () => {
 
 	it('falls back to Broadcast when saved chat no longer exists', () => {
 		store['meshcom:chat:last'] = 'DM_MISSING-1';
-
 		expect(
 			loadLastChatTarget([
 				{ id: 'P_broadcast', kind: 'broadcast', label: 'Broadcast', last_seen: '', size: 0 }
@@ -268,14 +127,9 @@ describe('loadLastChatTarget / saveLastChatTarget', () => {
 
 	it('falls back to Broadcast when localStorage throws', () => {
 		vi.stubGlobal('localStorage', {
-			getItem() {
-				throw new Error('SecurityError');
-			},
-			setItem() {
-				throw new Error('SecurityError');
-			}
+			getItem() { throw new Error('SecurityError'); },
+			setItem() { throw new Error('SecurityError'); }
 		});
-
 		expect(loadLastChatTarget([])).toEqual({ kind: 'channel', value: 'Broadcast' });
 		expect(() => saveLastChatTarget({ kind: 'channel', value: '222' })).not.toThrow();
 	});

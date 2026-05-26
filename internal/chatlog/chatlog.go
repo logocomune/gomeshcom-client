@@ -116,6 +116,13 @@ func (l *Logger) appendRecord(name string, rec Record) error {
 	return nil
 }
 
+// ConversationID returns the conversation identifier (without .jsonl suffix)
+// for a message from src to dst, normalised relative to myCall.
+// Returns "" for DMs that do not involve myCall.
+func ConversationID(src, dst, myCall string) string {
+	return strings.TrimSuffix(filenameForMsg(src, dst, myCall), ".jsonl")
+}
+
 // filenameForMsg returns the JSONL filename for a message, normalising DM
 // conversations on the interlocutor's callsign so both directions of a DM
 // land in the same file. Returns "" when the message should be silently

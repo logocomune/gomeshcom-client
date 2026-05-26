@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: gomeshcomd API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     HTTP and Server-Sent Events API exposed by gomeshcomd.
     Static frontend routes are served by the same HTTP listener but are not
@@ -12,15 +12,124 @@ servers:
 tags:
   - name: Health
     description: Service health
+  - name: Session
+    description: Authentication session management
   - name: Messages
     description: Outgoing MeshCom messages
   - name: Positions
     description: Persisted MeshCom node positions
   - name: Events
     description: Server-Sent Events stream
+  - name: Channels
+    description: Frontend channel visibility preferences
   - name: Chat
     description: Disk-backed chat history
 paths:
+  /api/session:
+    get:
+      tags: [Session]
+      summary: Return authentication status
+      description: |
+        Returns whether authentication is required and whether the current
+        request carries a valid session cookie. This endpoint is always
+        accessible — it does not require a valid session.
+
+        When authentication is required but the caller is not authenticated,
+        returns `401` with `authenticated: false` so clients can distinguish
+        "auth disabled" from "auth required but not logged in".
+      operationId: getSession
+      responses:
+        "200":
+          description: Authentication is disabled or caller is authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStatus"
+              examples:
+                authDisabled:
+                  value:
+                    required: false
+                    authenticated: true
+                authenticated:
+                  value:
+                    required: true
+                    authenticated: true
+        "401":
+          description: Authentication is required and caller is not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStatus"
+              examples:
+                unauthenticated:
+                  value:
+                    required: true
+                    authenticated: false
+    post:
+      tags: [Session]
+      summary: Create a session (log in)
+      description: |
+        Validates username and password and sets an `HttpOnly` session cookie
+        valid for `GOMESHCOM_AUTH_SESSION_TTL` (default `24h`). The cookie name
+        is controlled by `GOMESHCOM_AUTH_COOKIE_NAME` (default
+        `meshcom_session`). Request body is capped at 1 KB.
+
+        When authentication is not configured, returns `204` immediately
+        without reading the body.
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              login:
+                value:
+                  username: admin
+                  password: secret
+      responses:
+        "204":
+          description: Session created (or auth disabled — cookie set regardless).
+          headers:
+            Set-Cookie:
+              description: Session cookie. HttpOnly, SameSite=Lax.
+              schema:
+                type: string
+        "400":
+          description: Invalid JSON body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session token generation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Session]
+      summary: Delete a session (log out)
+      description: |
+        Invalidates the current session token and clears the session cookie.
+        Always returns `204`, even if no session is present or authentication is
+        disabled.
+      operationId: deleteSession
+      responses:
+        "204":
+          description: Session invalidated (or auth disabled).
+          headers:
+            Set-Cookie:
+              description: Expired session cookie (MaxAge=-1).
+              schema:
+                type: string
   /api/health:
     get:
       tags: [Health]
@@ -140,7 +249,8 @@ paths:
         Opens a Server-Sent Events stream.
 
         The stream starts with a `heartbeat` event, then emits
-        `station.identity`, optionally `positions.snapshot`, then recent
+        `station.identity`, optionally `positions.snapshot`,
+        `chatstatus.snapshot` (unread counts per conversation), `channelshow.snapshot` (frontend channel visibility), then recent
         replayed `packet.received` events from the raw receive log, followed by
         live events. A `heartbeat` event is sent every 15 seconds. Failed
         outbound echo tracking emits `message.failed` with a `ChatRecord`
@@ -164,12 +274,101 @@ paths:
 
                     event: positions.snapshot
                     data: {}
+
+                    event: chatstatus.snapshot
+                    data: {"P_broadcast":{"lastMsgReceived":"2026-05-24T10:00:00Z","lastRead":"2026-05-24T09:55:00Z","unreadCount":3}}
+
+                    event: channelshow.snapshot
+                    data: {"mode":"allowlist","channels":["*","222"]}
         "500":
           description: Streaming unsupported by the response writer.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/channel-show:
+    get:
+      tags: [Channels]
+      summary: Return channel visibility preferences
+      description: |
+        Returns the frontend channel visibility preference. This preference is
+        not applied to packet receive, logging, chat status, replay, or live SSE
+        delivery; clients use it only to hide channel list entries.
+      operationId: getChannelShow
+      responses:
+        "200":
+          description: Current channel visibility preference.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelShowConfig"
+              examples:
+                all:
+                  value:
+                    mode: all
+                    channels: []
+                allowlist:
+                  value:
+                    mode: allowlist
+                    channels: ["*", "222"]
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags: [Channels]
+      summary: Replace channel visibility preferences
+      description: |
+        Replaces the frontend channel visibility preference. The body may be a
+        structured object or a raw channel array shorthand. Raw arrays are
+        treated as `mode: allowlist`. Valid channels are `*` (Broadcast) and
+        numeric channel IDs.
+      operationId: updateChannelShow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelShowConfig"
+            examples:
+              all:
+                value:
+                  mode: all
+                  channels: []
+              allowlist:
+                value:
+                  mode: allowlist
+                  channels: ["*", "222", "22201"]
+              arrayShorthand:
+                value: ["*", "222"]
+      responses:
+        "200":
+          description: Normalized preference stored in memory and persisted on the next periodic save.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelShowConfig"
+        "400":
+          description: Invalid JSON, mode, or channel entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Channel visibility store is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/chat/list:
     get:
       tags: [Chat]
@@ -202,7 +401,7 @@ paths:
           description: Conversation ID. Accepted forms are `P_broadcast`, `P_<channel>`, and `DM_<CALLSIGN>`.
           schema:
             type: string
-            pattern: "^(P_broadcast|P_\\d+|DM_[A-Z0-9_-]+)$"
+            pattern: "^(\\*|\\d+)$"
           examples:
             broadcast:
               value: P_broadcast
@@ -243,6 +442,11 @@ paths:
     delete:
       tags: [Chat]
       summary: Delete chat history for one conversation
+      description: |
+        Removes the conversation JSONL file from disk. Also removes the
+        corresponding entry from the in-memory chat status store and immediately
+        persists `msg_idx.json`, so the conversation does not reappear as
+        unread after a restart.
       operationId: deleteConversation
       parameters:
         - name: conversation
@@ -251,7 +455,7 @@ paths:
           description: Conversation ID.
           schema:
             type: string
-            pattern: "^(P_broadcast|P_\\d+|DM_[A-Z0-9_-]+)$"
+            pattern: "^(\\*|\\d+)$"
       responses:
         "204":
           description: Conversation deleted successfully.
@@ -273,8 +477,70 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/chat/{conversation}/read:
+    post:
+      tags: [Chat]
+      summary: Mark a conversation as read
+      description: |
+        Zeroes the unread counter and sets `lastRead` for the given
+        conversation. Idempotent — calling it when `unreadCount` is already 0
+        is a no-op (still returns 204). The updated state is reflected in the
+        next `chatstatus.snapshot` SSE event on a new connection.
+      operationId: markConversationRead
+      parameters:
+        - name: conversation
+          in: path
+          required: true
+          description: Conversation ID. Accepted forms are `P_broadcast`, `P_<channel>`, and `DM_<CALLSIGN>`.
+          schema:
+            type: string
+            pattern: "^(\\*|\\d+)$"
+          examples:
+            broadcast:
+              value: P_broadcast
+            channel:
+              value: P_262
+            direct:
+              value: DM_QQ1ABC-7
+      responses:
+        "204":
+          description: Conversation marked as read.
+        "400":
+          description: Invalid conversation ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
+    SessionStatus:
+      type: object
+      required: [required, authenticated]
+      properties:
+        required:
+          type: boolean
+          description: True when `GOMESHCOM_AUTH_USERNAME` and `GOMESHCOM_AUTH_PASSWORD` are both set.
+          example: true
+        authenticated:
+          type: boolean
+          description: True when the request carries a valid, non-expired session cookie.
+          example: false
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: admin
+        password:
+          type: string
+          example: secret
     HealthResponse:
       type: object
       required: [status]
@@ -456,6 +722,29 @@ components:
           items:
             type: string
           example: [QQ5AKT-10, QQ5PFI-1]
+    ChannelShowConfig:
+      type: object
+      required: [mode, channels]
+      properties:
+        mode:
+          type: string
+          enum: [all, allowlist]
+          description: `all` shows every channel; `allowlist` shows only entries in `channels`.
+          example: allowlist
+        channels:
+          type: array
+          description: Channels visible when `mode` is `allowlist`. `*` means Broadcast; numeric strings mean public channels.
+          items:
+            type: string
+            pattern: "^(\\*|\\d+)$"
+          example: ["*", "222", "22201"]
+    ChannelShowSnapshotEvent:
+      allOf:
+        - $ref: "#/components/schemas/ChannelShowConfig"
+      description: |
+        Frontend channel visibility preference emitted as `channelshow.snapshot`
+        on every new `/api/events` connection. Backend packet receive, logging,
+        chat status, replay, and live SSE delivery are not filtered by this setting.
     PacketReceivedEvent:
       type: object
       required: [remote_addr, packet]
@@ -567,3 +856,43 @@ components:
     PacketType:
       type: string
       enum: [msg, pos, tele]
+    ChatStatusEntry:
+      type: object
+      required: [lastMsgReceived, lastRead, unreadCount]
+      properties:
+        lastMsgReceived:
+          type: string
+          format: date-time
+          description: Timestamp of the last received inbound message (not a self-echo). Zero value if no message received yet.
+          example: "2026-05-24T10:00:00Z"
+        lastRead:
+          type: string
+          format: date-time
+          description: Timestamp of the last `POST /api/chat/{conversation}/read` call. Zero value if never read.
+          example: "2026-05-24T09:55:00Z"
+        unreadCount:
+          type: integer
+          minimum: 0
+          description: Number of inbound messages since the last MarkRead call.
+          example: 3
+        lastMsg:
+          type: string
+          description: Raw text of the most recent inbound message. Omitted when no message has been received.
+          example: hello world
+    ChatStatusSnapshotEvent:
+      type: object
+      description: |
+        Map keyed by conversation ID (`P_broadcast`, `P_<channel>`, `DM_<CALLSIGN>`)
+        with the current read/unread state for each thread.
+        Emitted as the `chatstatus.snapshot` SSE event on every new `/api/events` connection.
+      additionalProperties:
+        $ref: "#/components/schemas/ChatStatusEntry"
+      example:
+        P_broadcast:
+          lastMsgReceived: "2026-05-24T10:00:00Z"
+          lastRead: "2026-05-24T09:55:00Z"
+          unreadCount: 3
+        DM_QQ1ABC-7:
+          lastMsgReceived: "2026-05-24T08:30:00Z"
+          lastRead: "2026-05-24T08:30:00Z"
+          unreadCount: 0

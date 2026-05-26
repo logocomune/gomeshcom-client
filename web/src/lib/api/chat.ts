@@ -2,38 +2,35 @@ import { API_BASE } from './events';
 import { apiFetch } from './auth';
 import type { ChatRecord, Conversation } from './types';
 
-const READ_KEY_PREFIX = 'meshcom:chat:read:';
-const LAST_TARGET_KEY = 'meshcom:chat:last';
-
 export type ChatTarget = { kind: 'channel' | 'contact'; value: string };
 
-export function loadReadTimestamps(): Record<string, string> {
+const LAST_TARGET_KEY = 'meshcom:chat:last';
+
+export function loadLastChatTarget(conversations: Conversation[]): ChatTarget {
 	try {
-		const result: Record<string, string> = {};
-		for (let i = 0; i < localStorage.length; i++) {
-			const key = localStorage.key(i);
-			if (key?.startsWith(READ_KEY_PREFIX)) {
-				const val = localStorage.getItem(key);
-				if (val) result[key.slice(READ_KEY_PREFIX.length)] = val;
-			}
+		const id = localStorage.getItem(LAST_TARGET_KEY);
+		if (!id || id === 'P_broadcast') return broadcastTarget();
+		const conversation = conversations.find((c) => c.id === id);
+		if (!conversation) return broadcastTarget();
+		if (conversation.kind === 'dm') {
+			return { kind: 'contact', value: conversation.label || id.replace(/^DM_/, '') };
 		}
-		return result;
+		return { kind: 'channel', value: conversation.label || id.replace(/^P_/, '') };
 	} catch {
-		return {};
+		return broadcastTarget();
 	}
 }
 
-export function saveReadTimestamp(convId: string, isoTs: string): void {
+export function saveLastChatTarget(target: ChatTarget): void {
 	try {
-		localStorage.setItem(READ_KEY_PREFIX + convId, isoTs);
+		localStorage.setItem(LAST_TARGET_KEY, conversationIdFor(target));
 	} catch {
 		// quota or SSR — ignore
 	}
 }
 
-export function isUnread(conv: Conversation, readTs: string | undefined): boolean {
-	if (!conv.last_seen || !readTs) return false;
-	return conv.last_seen > readTs;
+function broadcastTarget(): ChatTarget {
+	return { kind: 'channel', value: 'Broadcast' };
 }
 
 export class SendError extends Error {
@@ -98,32 +95,8 @@ export function conversationIdFor(target: ChatTarget): string {
 	return 'DM_' + target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
 }
 
-export function loadLastChatTarget(conversations: Conversation[]): ChatTarget {
-	try {
-		const id = localStorage.getItem(LAST_TARGET_KEY);
-		if (!id || id === 'P_broadcast') return broadcastTarget();
-
-		const conversation = conversations.find((c) => c.id === id);
-		if (!conversation) return broadcastTarget();
-		if (conversation.kind === 'dm') {
-			return { kind: 'contact', value: conversation.label || id.replace(/^DM_/, '') };
-		}
-		return { kind: 'channel', value: conversation.label || id.replace(/^P_/, '') };
-	} catch {
-		return broadcastTarget();
-	}
-}
-
-export function saveLastChatTarget(target: ChatTarget): void {
-	try {
-		localStorage.setItem(LAST_TARGET_KEY, conversationIdFor(target));
-	} catch {
-		// quota or SSR — ignore
-	}
-}
-
-function broadcastTarget(): ChatTarget {
-	return { kind: 'channel', value: 'Broadcast' };
+export async function markConversationRead(id: string): Promise<void> {
+	await apiFetch(`${API_BASE}/chat/${encodeURIComponent(id)}/read`, { method: 'POST' });
 }
 
 export function conversationIdForRecord(rec: ChatRecord, myCall: string): string | null {
@@ -153,10 +126,3 @@ export async function deleteConversation(id: string): Promise<void> {
 	if (!res.ok && res.status !== 404) throw new Error(`delete failed: ${res.status}`);
 }
 
-export function clearReadTimestamp(convId: string): void {
-	try {
-		localStorage.removeItem(READ_KEY_PREFIX + convId);
-	} catch {
-		// quota or SSR — ignore
-	}
-}

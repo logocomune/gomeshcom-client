@@ -4,7 +4,7 @@ import { render } from 'vitest-browser-svelte';
 
 vi.mock('$env/dynamic/public', () => ({ env: {} }));
 
-import ChatPage from '../../routes/+page.svelte';
+import ChatPage from './ChatRouteHarness.svelte';
 import type { ChatRecord, Conversation } from '$lib/api/types';
 
 class StubEventSource {
@@ -37,16 +37,18 @@ describe('chat message filter', () => {
 
 		render(ChatPage);
 
-		await expect.element(page.getByText('alpha beacon')).toBeVisible();
-		await expect.element(page.getByText('beta packet')).toBeVisible();
+		await expect.element(page.getByTestId('chat-panel').getByText('alpha beacon')).toBeVisible();
+		await expect.element(page.getByTestId('chat-panel').getByText('beta packet')).toBeVisible();
 
 		await page.getByRole('searchbox', { name: 'Filter messages' }).fill('alpha');
 
-		await expect.element(page.getByText('alpha beacon')).toBeVisible();
+		await expect.element(page.getByTestId('chat-panel').getByText('alpha beacon')).toBeVisible();
 
 		await page.getByRole('searchbox', { name: 'Filter messages' }).fill('missing');
 
-		await expect.element(page.getByText('No matching messages')).toBeVisible();
+		await expect
+			.element(page.getByTestId('chat-panel').getByText('No matching messages'))
+			.toBeVisible();
 	});
 });
 

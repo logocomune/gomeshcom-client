@@ -17,7 +17,7 @@ import (
 func TestNewPositionPacket(t *testing.T) {
 	sender := newTestSender(t)
 	options := positionOptions{
-		source:     "IQ5SIM-1",
+		source:     "QQ5SIM-1",
 		latitude:   defaultLatitude,
 		longitude:  defaultLongitude,
 		jitter:     defaultJitter,
@@ -51,7 +51,7 @@ func TestNewPositionPacket(t *testing.T) {
 func TestNewPositionPacketParsesAsMeshComPosition(t *testing.T) {
 	sender := newTestSender(t)
 	packet := sender.newPositionPacket(positionOptions{
-		source:     "IQ5SIM-1",
+		source:     "QQ5SIM-1",
 		latitude:   defaultLatitude,
 		longitude:  defaultLongitude,
 		jitter:     0,
@@ -78,7 +78,7 @@ func TestNewPositionPacketParsesAsMeshComPosition(t *testing.T) {
 func TestSendDirectMessage(t *testing.T) {
 	sender := newTestSender(t)
 	target := newUDPReader(t)
-	options := messageOptions{myCall: "IQ5ABC-1", directSource: directSource}
+	options := messageOptions{myCall: "QQ5ABC-1", directSource: directSource}
 
 	if err := sender.sendDirectMessage(target.addr, options, 7); err != nil {
 		t.Fatalf("sendDirectMessage() error = %v", err)
@@ -103,7 +103,7 @@ func TestRunWithoutEnabledAutomaticSends(t *testing.T) {
 	cfg := config{
 		listenAddr: "127.0.0.1:0",
 		targetAddr: target.addr.String(),
-		myCall:     "IQ5ABC-1",
+		myCall:     "QQ5ABC-1",
 		seed:       1,
 	}
 
@@ -134,7 +134,7 @@ func TestRunWithoutEnabledAutomaticSends(t *testing.T) {
 func TestHandleReceivedDatagramDirectResponder(t *testing.T) {
 	sender := newTestSender(t)
 	target := newUDPReader(t)
-	options := messageOptions{myCall: "IQ5ABC-1", directSource: directSource, repeater: repeaterSource}
+	options := messageOptions{myCall: "QQ5ABC-1", directSource: directSource, repeater: repeaterSource}
 
 	handleReceivedDatagram(context.Background(), sender, target.addr, []byte(`{"type":"msg","dst":"QQ1TST-1","msg":"test"}`), options)
 
@@ -143,7 +143,7 @@ func TestHandleReceivedDatagramDirectResponder(t *testing.T) {
 		t.Fatalf("echo = %#v", echo)
 	}
 	ack := target.readTextMessage(t)
-	if ack.Source != directSource || ack.Destination != options.myCall || ack.Message != "IQ5ABC-1 :ack123" {
+	if ack.Source != directSource || ack.Destination != options.myCall || ack.Message != "QQ5ABC-1 :ack123" {
 		t.Fatalf("ack = %#v", ack)
 	}
 }
@@ -152,7 +152,7 @@ func TestHandleReceivedDatagramRepeater(t *testing.T) {
 	sender := newTestSender(t)
 	target := newUDPReader(t)
 	options := messageOptions{
-		myCall:       "IQ5ABC-1",
+		myCall:       "QQ5ABC-1",
 		directSource: directSource,
 		repeater:     repeaterSource,
 		ackDelay:     time.Millisecond,
@@ -177,7 +177,7 @@ func TestHandleReceivedDatagramRepeater(t *testing.T) {
 func TestHandleReceivedDatagramNumericChannelDestination(t *testing.T) {
 	sender := newTestSender(t)
 	target := newUDPReader(t)
-	options := messageOptions{myCall: "IQ5ABC-1", directSource: directSource, repeater: repeaterSource}
+	options := messageOptions{myCall: "QQ5ABC-1", directSource: directSource, repeater: repeaterSource}
 
 	handleReceivedDatagram(context.Background(), sender, target.addr, []byte(`{"type":"msg","src":"WRITER-9","dst":"7","msg":"hello"}`), options)
 
@@ -190,7 +190,7 @@ func TestHandleReceivedDatagramNumericChannelDestination(t *testing.T) {
 func TestHandleReceivedDatagramBroadcastDestination(t *testing.T) {
 	sender := newTestSender(t)
 	target := newUDPReader(t)
-	options := messageOptions{myCall: "IQ5ABC-1", directSource: directSource, repeater: repeaterSource}
+	options := messageOptions{myCall: "QQ5ABC-1", directSource: directSource, repeater: repeaterSource}
 
 	handleReceivedDatagram(context.Background(), sender, target.addr, []byte(`{"type":"msg","dst":"*","msg":"hello"}`), options)
 
@@ -203,7 +203,7 @@ func TestHandleReceivedDatagramBroadcastDestination(t *testing.T) {
 func TestHandleReceivedDatagramIgnoresOtherDestinations(t *testing.T) {
 	sender := newTestSender(t)
 	target := newUDPReader(t)
-	options := messageOptions{myCall: "IQ5ABC-1", directSource: directSource, repeater: repeaterSource}
+	options := messageOptions{myCall: "QQ5ABC-1", directSource: directSource, repeater: repeaterSource}
 
 	handleReceivedDatagram(context.Background(), sender, target.addr, []byte(`{"type":"msg","dst":"OTHER-1","msg":"hello"}`), options)
 
@@ -229,13 +229,13 @@ func TestSequenceHelpers(t *testing.T) {
 
 func TestReplyCallsignUsesIncomingOrigin(t *testing.T) {
 	message := meshcom.TextMessage{Source: "writer-9,relay-1"}
-	if got := replyCallsign(message, "IQ5ABC-1"); got != "WRITER-9" {
+	if got := replyCallsign(message, "QQ5ABC-1"); got != "WRITER-9" {
 		t.Fatalf("replyCallsign() = %q, want WRITER-9", got)
 	}
 
 	message.Source = ""
-	if got := replyCallsign(message, "IQ5ABC-1"); got != "IQ5ABC-1" {
-		t.Fatalf("replyCallsign() fallback = %q, want IQ5ABC-1", got)
+	if got := replyCallsign(message, "QQ5ABC-1"); got != "QQ5ABC-1" {
+		t.Fatalf("replyCallsign() fallback = %q, want QQ5ABC-1", got)
 	}
 }
 
@@ -264,7 +264,7 @@ func TestNewPositionOptionsUsesRequestedSource(t *testing.T) {
 func TestValidateConfig(t *testing.T) {
 	validConfig := config{
 		targetAddr:        "127.0.0.1:1799",
-		myCall:            "IQ5ABC-1",
+		myCall:            "QQ5ABC-1",
 		position1Interval: time.Second,
 		position2Interval: time.Second,
 		dmInterval:        time.Second,
@@ -282,14 +282,14 @@ func TestValidateConfig(t *testing.T) {
 			cfg: validConfig,
 		},
 		"no enabled auto sends allows zero intervals": {
-			cfg: config{targetAddr: "127.0.0.1:1799", myCall: "IQ5ABC-1"},
+			cfg: config{targetAddr: "127.0.0.1:1799", myCall: "QQ5ABC-1"},
 		},
 		"no enabled auto sends still rejects negative jitter": {
-			cfg:     config{targetAddr: "127.0.0.1:1799", myCall: "IQ5ABC-1", jitter: -0.1},
+			cfg:     config{targetAddr: "127.0.0.1:1799", myCall: "QQ5ABC-1", jitter: -0.1},
 			wantErr: true,
 		},
 		"no enabled auto sends still rejects negative ack delay": {
-			cfg:     config{targetAddr: "127.0.0.1:1799", myCall: "IQ5ABC-1", ackDelay: -time.Second},
+			cfg:     config{targetAddr: "127.0.0.1:1799", myCall: "QQ5ABC-1", ackDelay: -time.Second},
 			wantErr: true,
 		},
 		"missing target": {

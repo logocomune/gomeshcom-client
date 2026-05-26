@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -18,6 +19,11 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
 
+// chatStatusTracker is satisfied by chatstatus.Store.
+type chatStatusTracker interface {
+	RecordIncoming(convID string, ts time.Time, msg string)
+}
+
 type Bridge struct {
 	listenAddr      string
 	nodeAddr        string // explicit config; "" means auto-detect
@@ -25,18 +31,22 @@ type Bridge struct {
 	bus             *events.Bus
 	logger          *receivelog.Logger
 	chatLog         *chatlog.Logger
+	chatStatus      chatStatusTracker
+	myCall          string
 	positions       *positions.Store
 	disableTx       bool
 	forwarder       *udpforward.Forwarder
 }
 
-func NewBridge(listenAddr string, nodeAddr string, bus *events.Bus, logger *receivelog.Logger, chatLog *chatlog.Logger, positionStore *positions.Store, disableTx bool, forwarder *udpforward.Forwarder) *Bridge {
+func NewBridge(listenAddr, nodeAddr string, bus *events.Bus, logger *receivelog.Logger, chatLog *chatlog.Logger, positionStore *positions.Store, disableTx bool, forwarder *udpforward.Forwarder, myCall string, chatStatus chatStatusTracker) *Bridge {
 	return &Bridge{
 		listenAddr: listenAddr,
 		nodeAddr:   nodeAddr,
 		bus:        bus,
 		logger:     logger,
 		chatLog:    chatLog,
+		chatStatus: chatStatus,
+		myCall:     strings.ToUpper(myCall),
 		positions:  positionStore,
 		disableTx:  disableTx,
 		forwarder:  forwarder,
@@ -160,6 +170,15 @@ func (b *Bridge) logChatMessage(msg meshcom.TextMessage, receivedAt time.Time) {
 	}
 	if err := b.chatLog.Append(msg, receivedAt); err != nil {
 		slog.Error("chat log write failed", "error", err)
+	}
+	if b.chatStatus != nil {
+		origin := strings.ToUpper(strings.SplitN(msg.Source, ",", 2)[0])
+		if origin != b.myCall {
+			convID := chatlog.ConversationID(msg.Source, msg.Destination, b.myCall)
+			if convID != "" {
+				b.chatStatus.RecordIncoming(convID, receivedAt, msg.Message)
+			}
+		}
 	}
 }
 

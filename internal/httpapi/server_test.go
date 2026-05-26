@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/logocomune/gomeshcom-client/internal/chatlog"
+	"github.com/logocomune/gomeshcom-client/internal/chatstatus"
 	"github.com/logocomune/gomeshcom-client/internal/config"
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/logfmt"
@@ -39,7 +40,7 @@ func (b *stubBridge) SendText(_ context.Context, _, _ string, _ int) error {
 }
 
 func TestAPIResponsesDisableCaching(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name string
@@ -62,7 +63,7 @@ func TestAPIResponsesDisableCaching(t *testing.T) {
 }
 
 func TestEventStreamDisablesCaching(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/events", nil)
 	ctx, cancel := context.WithCancel(request.Context())
 	cancel()
@@ -75,7 +76,7 @@ func TestEventStreamDisablesCaching(t *testing.T) {
 }
 
 func TestIndexHTMLDisablesCaching(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/index.html", nil)
 	response := httptest.NewRecorder()
 
@@ -85,7 +86,7 @@ func TestIndexHTMLDisablesCaching(t *testing.T) {
 }
 
 func TestImmutableStaticResponsesUseLongCache(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/_app/immutable/entry/app.js", nil)
 	response := httptest.NewRecorder()
 
@@ -125,7 +126,7 @@ func assertNoCacheHeaders(t *testing.T, header http.Header) {
 }
 
 func TestHealth(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	response := httptest.NewRecorder()
 
@@ -146,7 +147,7 @@ func TestRequestLogEnabledLogsStructuredRequest(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.RequestLog.Enabled = true
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	request.RemoteAddr = "198.51.100.12:4321"
 	request.Header.Set("CF-Connecting-IP", "203.0.113.10")
@@ -180,7 +181,7 @@ func TestRequestLogDisabledDoesNotLogRequest(t *testing.T) {
 		slog.SetDefault(previousLogger)
 	})
 
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	response := httptest.NewRecorder()
 
@@ -201,7 +202,7 @@ func TestRequestLogUsesRealIPWhenCloudflareHeaderMissing(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.RequestLog.Enabled = true
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	request.Header.Set("X-Real-IP", "198.51.100.99")
 	response := httptest.NewRecorder()
@@ -252,7 +253,7 @@ func TestCreateMessage(t *testing.T) {
 			}
 
 			bridge := &stubBridge{err: test.bridgeErr}
-			server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, bridge, nil)
+			server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, bridge, nil, nil)
 			request := httptest.NewRequest(http.MethodPost, "/api/messages", bytes.NewReader(body))
 			response := httptest.NewRecorder()
 
@@ -274,7 +275,7 @@ func TestCreateMessagePersistsFailedWhenEchoMissing(t *testing.T) {
 	cfg.ChatLog.Path = dir
 	bus := events.NewBus()
 	log := chatlog.New(dir, cfg.MyCall)
-	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil)
+	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil, nil)
 	server.outbox = outbox.New(10*time.Millisecond, server.handleOutgoingTimeout)
 
 	body := []byte(`{"dst":"QQ1ABC-1","msg":"hello"}`)
@@ -315,7 +316,7 @@ func TestCreateMessageDoesNotFailWhenEchoArrives(t *testing.T) {
 	cfg.ChatLog.Path = dir
 	bus := events.NewBus()
 	log := chatlog.New(dir, cfg.MyCall)
-	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil)
+	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil, nil)
 	server.outbox = outbox.New(30*time.Millisecond, server.handleOutgoingTimeout)
 
 	body := []byte(`{"dst":"QQ1ABC-1","msg":"hello"}`)
@@ -357,7 +358,7 @@ func TestAuthProtectedRouteRequiresSession(t *testing.T) {
 		CookieName: "meshcom_session",
 	}
 
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/chat/list", nil)
 	response := httptest.NewRecorder()
 
@@ -380,7 +381,7 @@ func TestAuthSessionLifecycle(t *testing.T) {
 		CookieName: "meshcom_session",
 	}
 
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 
 	loginBody, err := json.Marshal(map[string]string{"username": "admin", "password": "secret"})
 	if err != nil {
@@ -437,7 +438,7 @@ func TestAuthRejectsInvalidCredentials(t *testing.T) {
 		CookieName: "meshcom_session",
 	}
 
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	loginBody, err := json.Marshal(map[string]string{"username": "admin", "password": "wrong"})
 	if err != nil {
 		t.Fatalf("marshal login body: %v", err)
@@ -454,7 +455,7 @@ func TestAuthRejectsInvalidCredentials(t *testing.T) {
 
 func TestGetSessionStatus(t *testing.T) {
 	t.Run("auth disabled", func(t *testing.T) {
-		server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+		server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 		request := httptest.NewRequest(http.MethodGet, "/api/session", nil)
 		response := httptest.NewRecorder()
 
@@ -477,7 +478,7 @@ func TestGetSessionStatus(t *testing.T) {
 			CookieName: "meshcom_session",
 		}
 
-		server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+		server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 		request := httptest.NewRequest(http.MethodGet, "/api/session", nil)
 		response := httptest.NewRecorder()
 
@@ -495,7 +496,7 @@ func TestGetSessionStatus(t *testing.T) {
 func TestCreateMessageDedup(t *testing.T) {
 	bridge := &stubBridge{}
 	sc := sendcache.New(100 * time.Millisecond)
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, bridge, sc)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, bridge, sc, nil)
 
 	post := func(dst, msg string) int {
 		body, _ := json.Marshal(map[string]string{"dst": dst, "msg": msg})
@@ -552,7 +553,7 @@ func TestListPositions(t *testing.T) {
 		SNR:       intPtr(8),
 	}, seenAt)
 
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), positionStore, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), positionStore, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/positions", nil)
 	response := httptest.NewRecorder()
 
@@ -582,7 +583,7 @@ func TestListConversations(t *testing.T) {
 		Message:     "hello",
 	}, testTime())
 
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/chat/list", nil)
 	response := httptest.NewRecorder()
 
@@ -609,7 +610,7 @@ func TestGetConversation(t *testing.T) {
 		Message:     "hello",
 	}, testTime())
 
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 
 	// Use the correct path format for Mux path values in tests
 	// Actually ServeMux in Go 1.22+ needs the path to match the pattern
@@ -633,7 +634,7 @@ func TestGetConversation(t *testing.T) {
 }
 
 func TestGetConversationInvalid(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/chat/invalid!", nil)
 	request.SetPathValue("conversation", "invalid!")
 	response := httptest.NewRecorder()
@@ -657,7 +658,7 @@ func TestGetConversationWithHours(t *testing.T) {
 	cfg.ChatLog.HistoryWindow = time.Hour
 	cfg.ChatLog.MaxHistoryWindow = 24 * time.Hour
 
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 
 	// Default window (1h) -> only "recent"
 	req1 := httptest.NewRequest(http.MethodGet, "/api/chat/P_broadcast", nil)
@@ -697,7 +698,7 @@ func TestGetConversationUsesThirtyDaysForDMDefault(t *testing.T) {
 	cfg.ChatLog.HistoryWindow = time.Hour
 	cfg.ChatLog.MaxHistoryWindow = 30 * 24 * time.Hour
 
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 
 	dmRequest := httptest.NewRequest(http.MethodGet, "/api/chat/DM_QQ1ABC-1", nil)
 	dmRequest.SetPathValue("conversation", "DM_QQ1ABC-1")
@@ -727,7 +728,7 @@ func TestGetConversationUsesThirtyDaysForDMDefault(t *testing.T) {
 }
 
 func TestSPARouting(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 
 	// Requesting root should serve SPA
 	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -757,7 +758,7 @@ func TestStreamEventsHeartbeatAndIdentity(t *testing.T) {
 		SNR:       intPtr(8),
 	}, testTime())
 
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), positionStore, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), positionStore, nil, nil, nil, nil, nil)
 	body := streamBodyUntil(t, server, "event: positions.snapshot")
 	if !strings.Contains(body, "event: positions.snapshot") {
 		t.Fatalf("snapshot event missing from stream body: %q", body)
@@ -765,7 +766,7 @@ func TestStreamEventsHeartbeatAndIdentity(t *testing.T) {
 }
 
 func TestStreamEventsStartsWithHeartbeat(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	body := streamBodyUntil(t, server, "event: heartbeat")
 	if !strings.HasPrefix(body, "event: heartbeat\ndata: {}\n\n") {
 		t.Fatalf("stream body prefix = %q, want heartbeat event", body)
@@ -781,7 +782,7 @@ func TestStreamEventsRequiresSessionWhenAuthEnabled(t *testing.T) {
 		CookieName: "meshcom_session",
 	}
 
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/events", nil)
 	response := httptest.NewRecorder()
 
@@ -795,7 +796,7 @@ func TestStreamEventsRequiresSessionWhenAuthEnabled(t *testing.T) {
 func TestStreamEventsSendsStationIdentity(t *testing.T) {
 	cfg := testConfig()
 	cfg.MyCall = "QQ1ABC-7"
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 
 	body := streamBodyUntil(t, server, "event: station.identity")
 	if !strings.Contains(body, `"callsign":"QQ1ABC-7"`) {
@@ -807,7 +808,7 @@ func TestStreamEventsSendsStationIdentityTxDisabled(t *testing.T) {
 	cfg := testConfig()
 	cfg.MyCall = "QQ1ABC-7"
 	cfg.Send.DisableTx = true
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 
 	body := streamBodyUntil(t, server, "event: station.identity")
 	if !strings.Contains(body, `"txDisabled":true`) {
@@ -818,7 +819,7 @@ func TestStreamEventsSendsStationIdentityTxDisabled(t *testing.T) {
 func TestStreamEventsStationIdentityTxEnabledByDefault(t *testing.T) {
 	cfg := testConfig()
 	cfg.MyCall = "QQ1ABC-7"
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 
 	body := streamBodyUntil(t, server, "event: station.identity")
 	if !strings.Contains(body, `"txDisabled":false`) {
@@ -864,7 +865,7 @@ func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 		Path:         dir,
 		ReplayWindow: 6 * time.Hour,
 	}
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil, nil)
 	body := streamBodyUntil(t, server, "QQ1ABC-1")
 
 	if !strings.Contains(body, "event: packet.received") {
@@ -904,7 +905,7 @@ func TestStreamEventsReplayFromQueryCappedByReplayWindow(t *testing.T) {
 		ReplayWindow: time.Hour,
 	}
 	bus := events.NewBus()
-	server := NewServer(cfg, "v0.0.0-test", bus, nil, logger, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", bus, nil, logger, nil, nil, nil, nil)
 	from := oldTime.Add(-time.Minute).Format(time.RFC3339Nano)
 
 	go func() {
@@ -952,7 +953,7 @@ func TestStreamEventsReplayFromQueryWithinReplayWindow(t *testing.T) {
 		Path:         dir,
 		ReplayWindow: 2 * time.Hour,
 	}
-	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil, nil)
 
 	// Query 'from' 1 hour ago. Only Packet 2 (30m ago) should be replayed. Packet 1 (90m ago) should be filtered out.
 	from := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
@@ -967,7 +968,7 @@ func TestStreamEventsReplayFromQueryWithinReplayWindow(t *testing.T) {
 }
 
 func TestStreamEventsRejectsInvalidReplayFromQuery(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/events?from=bad", nil)
 	response := httptest.NewRecorder()
 
@@ -986,7 +987,7 @@ func TestDeleteConversation(t *testing.T) {
 	log := chatlog.New(dir, "QQ0QQ-1")
 	log.Append(meshcom.TextMessage{Destination: "*", Message: "hello"}, testTime())
 
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/api/chat/P_broadcast", nil)
 	request.SetPathValue("conversation", "P_broadcast")
 	response := httptest.NewRecorder()
@@ -1006,7 +1007,7 @@ func TestDeleteConversation(t *testing.T) {
 }
 
 func TestDeleteConversationInvalidID(t *testing.T) {
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/api/chat/invalid!", nil)
 	request.SetPathValue("conversation", "invalid!")
 	response := httptest.NewRecorder()
@@ -1020,7 +1021,7 @@ func TestDeleteConversationInvalidID(t *testing.T) {
 
 func TestDeleteConversationMissingFile(t *testing.T) {
 	log := chatlog.New(t.TempDir(), "QQ0QQ-1")
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/api/chat/P_999", nil)
 	request.SetPathValue("conversation", "P_999")
 	response := httptest.NewRecorder()
@@ -1037,7 +1038,7 @@ func TestDeleteBroadcast(t *testing.T) {
 	log := chatlog.New(dir, "QQ0QQ-1")
 	log.Append(meshcom.TextMessage{Destination: "*", Message: "test"}, testTime())
 
-	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/api/chat/P_broadcast", nil)
 	request.SetPathValue("conversation", "P_broadcast")
 	response := httptest.NewRecorder()
@@ -1056,7 +1057,7 @@ func TestDeleteBroadcast(t *testing.T) {
 
 func TestServerClose(t *testing.T) {
 	bus := events.NewBus()
-	server := NewServer(testConfig(), "v0.0.0-test", bus, nil, nil, nil, nil, nil)
+	server := NewServer(testConfig(), "v0.0.0-test", bus, nil, nil, nil, nil, nil, nil)
 
 	// Register a message in outbox
 	server.outbox.Register("SRC", "DST", "HELLO", time.Now())
@@ -1164,4 +1165,192 @@ func testConfig() config.Config {
 
 func testTime() time.Time {
 	return time.Now().UTC().Add(-time.Hour)
+}
+
+func newTestChatStatus(t *testing.T) *chatstatus.Store {
+	t.Helper()
+	s, err := chatstatus.New(filepath.Join(t.TempDir(), "msg_idx.json"))
+	if err != nil {
+		t.Fatalf("chatstatus.New: %v", err)
+	}
+	return s
+}
+
+func TestDeleteConversationRemovesChatStatusEntry(t *testing.T) {
+	chatDir := t.TempDir()
+	log := chatlog.New(chatDir, "QQ0QQ-1")
+	cs := newTestChatStatus(t)
+
+	// Pre-populate the status entry.
+	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, cs)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/chat/P_broadcast", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+
+	snap := cs.Snapshot()
+	if _, present := snap["P_broadcast"]; present {
+		t.Fatalf("chatstatus entry for P_broadcast must be removed after DELETE, still has UnreadCount=%d", snap["P_broadcast"].UnreadCount)
+	}
+}
+
+func TestMarkConversationRead(t *testing.T) {
+	chatDir := t.TempDir()
+	log := chatlog.New(chatDir, "QQ0QQ-1")
+	cs := newTestChatStatus(t)
+
+	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, cs)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/P_broadcast/read", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+
+	snap := cs.Snapshot()
+	if snap["P_broadcast"].UnreadCount != 0 {
+		t.Fatalf("UnreadCount = %d, want 0 after MarkRead", snap["P_broadcast"].UnreadCount)
+	}
+	if snap["P_broadcast"].LastRead.IsZero() {
+		t.Fatal("LastRead must be set after MarkRead")
+	}
+}
+
+func TestMarkConversationReadInvalidID(t *testing.T) {
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/INVALID_ID!/read", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestMarkConversationReadRequiresAuth(t *testing.T) {
+	cfg := testConfig()
+	cfg.Auth = config.Auth{
+		Username:   "admin",
+		Password:   "secret",
+		SessionTTL: time.Hour,
+		CookieName: "meshcom_session",
+	}
+
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/P_broadcast/read", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestGetConversationDoesNotAlterUnreadCount(t *testing.T) {
+	chatDir := t.TempDir()
+	log := chatlog.New(chatDir, "QQ0QQ-1")
+	cs := newTestChatStatus(t)
+
+	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, cs)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/P_broadcast", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	snap := cs.Snapshot()
+	if snap["P_broadcast"].UnreadCount != 1 {
+		t.Fatalf("GET must not alter UnreadCount: got %d, want 1", snap["P_broadcast"].UnreadCount)
+	}
+}
+
+func TestStreamEventsChatStatusSnapshot(t *testing.T) {
+	cs := newTestChatStatus(t)
+	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, cs)
+	body := streamBodyUntil(t, server, "event: chatstatus.snapshot")
+
+	if !strings.Contains(body, "event: chatstatus.snapshot") {
+		t.Fatalf("chatstatus.snapshot missing from SSE stream: %q", body)
+	}
+	if !strings.Contains(body, `"unreadCount":2`) {
+		t.Fatalf("chatstatus snapshot missing unreadCount:2: %q", body)
+	}
+}
+
+func TestCreateMessageRejectsTooLargeBody(t *testing.T) {
+	bridge := &stubBridge{}
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, bridge, nil, nil)
+
+	body := bytes.Repeat([]byte("x"), 1<<14) // 16 KB > 8 KB limit
+	request := httptest.NewRequest(http.MethodPost, "/api/messages", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for oversized body", response.Code)
+	}
+	if bridge.calls.Load() != 0 {
+		t.Fatal("bridge called despite oversized body")
+	}
+}
+
+func TestCreateSessionRejectsTooLargeBody(t *testing.T) {
+	cfg := testConfig()
+	cfg.Auth = config.Auth{
+		Username:   "admin",
+		Password:   "secret",
+		SessionTTL: time.Hour,
+		CookieName: "meshcom_session",
+	}
+
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+
+	body := bytes.Repeat([]byte("x"), 1<<11) // 2 KB > 1 KB limit
+	request := httptest.NewRequest(http.MethodPost, "/api/session", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for oversized body", response.Code)
+	}
+}
+
+func TestRequestLogUsesXForwardedForWhenCFHeaderMissing(t *testing.T) {
+	var logBuffer bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(logfmt.New(&logBuffer, slog.LevelDebug)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	cfg := testConfig()
+	cfg.RequestLog.Enabled = true
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	request.Header.Set("X-Forwarded-For", "198.51.100.42")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if !strings.Contains(logBuffer.String(), "caller_ip=198.51.100.42") {
+		t.Fatalf("request log = %q, want X-Forwarded-For IP", logBuffer.String())
+	}
 }

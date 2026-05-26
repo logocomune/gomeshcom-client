@@ -34,6 +34,7 @@
 		selectedEvent,
 		isDesktop,
 		streamHeightPx,
+		fillHeight = false,
 		selectEvent,
 		onClearEvents,
 		showRawEvent
@@ -44,6 +45,7 @@
 		selectedEvent: StreamEvent | null;
 		isDesktop: boolean;
 		streamHeightPx: number;
+		fillHeight?: boolean;
 		selectEvent: (event: StreamEvent) => void;
 		onClearEvents: () => void;
 		showRawEvent: (event: StreamEvent) => void;
@@ -58,8 +60,10 @@
 
 <div
 	data-testid="udp-panel"
-	class="flex shrink-0 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm h-[80vh] md:h-auto md:min-h-[160px]"
-	style={isDesktop ? `height: ${streamHeightPx}px` : ''}
+	class="flex flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm {fillHeight
+		? 'flex-1 min-h-0'
+		: 'shrink-0 h-[80vh] md:h-auto md:min-h-[160px]'}"
+	style={!fillHeight && isDesktop ? `height: ${streamHeightPx}px` : ''}
 >
 	<div class="flex h-9 shrink-0 items-center justify-between border-b border-gray-700/60 px-3">
 		<div class="flex items-center gap-2">

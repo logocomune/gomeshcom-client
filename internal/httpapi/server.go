@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/logocomune/gomeshcom-client/internal/channelshow"
 	"github.com/logocomune/gomeshcom-client/internal/chatlog"
+	"github.com/logocomune/gomeshcom-client/internal/chatstatus"
 	"github.com/logocomune/gomeshcom-client/internal/config"
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/meshcom"
@@ -39,22 +41,32 @@ type messageSender interface {
 }
 
 type Server struct {
-	cfg        config.Config
-	version    string
-	bus        *events.Bus
-	positions  *positions.Store
-	receiveLog *receivelog.Logger
-	chatLog    *chatlog.Logger
-	bridge     messageSender
-	sendCache  *sendcache.Cache
-	outbox     *outbox.Outbox
-	sessions   *sessionStore
-	cancel     context.CancelFunc
+	cfg         config.Config
+	version     string
+	bus         *events.Bus
+	positions   *positions.Store
+	receiveLog  *receivelog.Logger
+	chatLog     *chatlog.Logger
+	chatStatus  *chatstatus.Store
+	channelShow *channelshow.Store
+	bridge      messageSender
+	sendCache   *sendcache.Cache
+	outbox      *outbox.Outbox
+	sessions    *sessionStore
+	cancel      context.CancelFunc
 }
 
 const outgoingEchoTimeout = 5 * time.Second
 
-func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore *positions.Store, receiveLog *receivelog.Logger, chatLog *chatlog.Logger, bridge messageSender, sc *sendcache.Cache) *Server {
+type ServerOption func(*Server)
+
+func WithChannelShow(store *channelshow.Store) ServerOption {
+	return func(server *Server) {
+		server.channelShow = store
+	}
+}
+
+func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore *positions.Store, receiveLog *receivelog.Logger, chatLog *chatlog.Logger, bridge messageSender, sc *sendcache.Cache, chatStatus *chatstatus.Store, options ...ServerOption) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	server := &Server{
 		cfg:        cfg,
@@ -63,14 +75,19 @@ func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore
 		positions:  positionStore,
 		receiveLog: receiveLog,
 		chatLog:    chatLog,
+		chatStatus: chatStatus,
 		bridge:     bridge,
 		sendCache:  sc,
 		cancel:     cancel,
+	}
+	for _, option := range options {
+		option(server)
 	}
 	server.outbox = outbox.New(outgoingEchoTimeout, server.handleOutgoingTimeout)
 	server.watchOutgoingEchoes(ctx)
 	if authEnabled(cfg) {
 		server.sessions = newSessionStore()
+		server.sessions.start(ctx)
 	}
 	return server
 }
@@ -84,9 +101,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/positions", requireAuth(http.HandlerFunc(s.listPositions), s))
 	mux.Handle("POST /api/messages", requireAuth(http.HandlerFunc(s.createMessage), s))
 	mux.Handle("GET /api/events", requireAuth(http.HandlerFunc(s.streamEvents), s))
+	mux.Handle("GET /api/channel-show", requireAuth(http.HandlerFunc(s.getChannelShow), s))
+	mux.Handle("PUT /api/channel-show", requireAuth(http.HandlerFunc(s.updateChannelShow), s))
 	mux.Handle("GET /api/chat/list", requireAuth(http.HandlerFunc(s.listConversations), s))
 	mux.Handle("GET /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.getConversation), s))
 	mux.Handle("DELETE /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.deleteConversation), s))
+	mux.Handle("POST /api/chat/{conversation}/read", requireAuth(http.HandlerFunc(s.markConversationRead), s))
 	mux.Handle("/", spaHandler(webui.FS()))
 	handler := cacheHeadersMiddleware(mux)
 	if s.cfg.RequestLog.Enabled {
@@ -175,7 +195,7 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 }
 
 func callerIP(r *http.Request) string {
-	for _, header := range []string{"CF-Connecting-IP", "X-Real-IP", "X-Rela-IP"} {
+	for _, header := range []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"} {
 		value := strings.TrimSpace(r.Header.Get(header))
 		if value != "" {
 			return value
@@ -226,6 +246,7 @@ func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 		Message     string `json:"msg"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<13) // 8 KB
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
@@ -375,6 +396,18 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
+	if s.chatStatus != nil {
+		if err := writeSSE(w, events.Event{Type: "chatstatus.snapshot", Data: s.chatStatus.Snapshot()}); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
+
+	if err := writeSSE(w, events.Event{Type: "channelshow.snapshot", Data: s.channelShowSnapshot()}); err != nil {
+		return
+	}
+	flusher.Flush()
+
 	if err := s.replayRecentPackets(w, flusher, replayCutoff, replayEnabled); err != nil {
 		return
 	}
@@ -462,6 +495,18 @@ func (s *Server) defaultChatHistoryHours(conversationID string) float64 {
 	return s.cfg.ChatLog.HistoryWindow.Hours()
 }
 
+func (s *Server) markConversationRead(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("conversation")
+	if !chatlog.ValidConversationID(id) {
+		writeError(w, http.StatusBadRequest, "invalid conversation id")
+		return
+	}
+	if s.chatStatus != nil {
+		s.chatStatus.MarkRead(id, time.Now().UTC())
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("conversation")
 	if !chatlog.ValidConversationID(id) {
@@ -475,6 +520,12 @@ func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	if err := s.chatLog.Remove(id); err != nil {
 		writeError(w, http.StatusInternalServerError, "remove conversation: "+err.Error())
 		return
+	}
+	if s.chatStatus != nil {
+		s.chatStatus.Remove(id)
+		if err := s.chatStatus.SaveIfDirty(); err != nil {
+			slog.Error("chat status save after conversation delete failed", "id", id, "error", err)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -561,7 +612,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(value); err != nil {
-		http.Error(w, "encode json", http.StatusInternalServerError)
+		slog.Error("json encode failed", "error", err)
 	}
 }
 

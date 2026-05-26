@@ -1,6 +1,8 @@
 import { env } from '$env/dynamic/public';
 import { apiFetch, getSessionStatus } from './auth';
 import type {
+	ChatStatusSnapshot,
+	ChannelShowConfig,
 	ConnectionState,
 	MeshcomPacket,
 	PacketReceivedPayload,
@@ -12,8 +14,6 @@ import { hardwareHumanName } from './hardware';
 import type { MapPosition } from '$lib/map/types';
 
 export const API_BASE = env.PUBLIC_API_BASE || '/api';
-
-const MAX_EVENTS = 300;
 
 // How long without any SSE data before we consider the connection dead.
 // Backend heartbeat interval is 15s; give it 2× headroom.
@@ -29,6 +29,8 @@ export function connectEvents(
 		onEvent: (event: StreamEvent) => void;
 		onPositions?: (positions: MapPosition[]) => void;
 		onStation?: (station: StationIdentity) => void;
+		onChatStatus?: (snapshot: ChatStatusSnapshot) => void;
+		onChannelShow?: (cfg: ChannelShowConfig) => void;
 	},
 	options: ConnectEventsOptions = {}
 ): () => void {
@@ -145,6 +147,24 @@ export function connectEvents(
 		source.addEventListener('message.failed', (event) =>
 			parseEvent('message.failed', event as MessageEvent<string>)
 		);
+		source.addEventListener('chatstatus.snapshot', (event) => {
+			resetHeartbeat();
+			try {
+				const data = JSON.parse((event as MessageEvent<string>).data) as ChatStatusSnapshot;
+				handlers.onChatStatus?.(data);
+			} catch {
+				// ignore malformed chatstatus.snapshot
+			}
+		});
+		source.addEventListener('channelshow.snapshot', (event) => {
+			resetHeartbeat();
+			try {
+				const data = JSON.parse((event as MessageEvent<string>).data) as ChannelShowConfig;
+				handlers.onChannelShow?.(data);
+			} catch {
+				// ignore malformed channelshow.snapshot
+			}
+		});
 		source.addEventListener('heartbeat', () => resetHeartbeat());
 		source.onerror = () => {
 			source?.close();
@@ -180,7 +200,7 @@ function packetReceivedAt(data: unknown): string | undefined {
 }
 
 export function prependEvent(events: StreamEvent[], event: StreamEvent): StreamEvent[] {
-	return [event, ...events].slice(0, MAX_EVENTS);
+	return [event, ...events];
 }
 
 export function packetFromEvent(event: StreamEvent): MeshcomPacket | null {

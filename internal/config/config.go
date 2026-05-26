@@ -13,14 +13,14 @@ import (
 
 const Prefix = "GOMESHCOM"
 
-var callsignPattern = regexp.MustCompile(`^[A-Z0-9]{3,10}-[0-9]{1,2}$`)
+var callsignPattern = regexp.MustCompile(`^(?:IU5PMP|QQ[A-Z0-9]{3,8})(?:-[0-9]{1,2})?$`)
 
 type Config struct {
 	conf.Version
 	HTTPAddr         string        `conf:"default:127.0.0.1:8080,help:HTTP listen address"`
 	UDPListenAddr    string        `conf:"default:0.0.0.0:1799,help:MeshCom UDP listen address"`
 	NodeAddr         string        `conf:"help:MeshCom node UDP address (auto-detected from incoming UDP traffic when empty)"`
-	MyCall           string        `conf:"default:XX0XX-1,help:local callsign"`
+	MyCall           string        `conf:"default:QQ0XX-1,help:local callsign"`
 	DataDir          string        `conf:"default:./data,help:runtime data directory"`
 	SendDelay        time.Duration `conf:"default:40s,help:minimum delay between outgoing UDP messages"`
 	MaxMessageLength int           `conf:"default:149,help:maximum outgoing UTF-8 message length"`
@@ -107,8 +107,26 @@ func ParseForwardTargets(csv string) ([]string, error) {
 }
 
 func normalize(cfg Config) Config {
-	cfg.MyCall = strings.ToUpper(cfg.MyCall)
+	cfg.MyCall = normalizeCallsign(cfg.MyCall)
 	return cfg
+}
+
+func normalizeCallsign(value string) string {
+	call := strings.ToUpper(strings.TrimSpace(value))
+	if call == "" {
+		return ""
+	}
+
+	base, suffix, hasSuffix := strings.Cut(call, "-")
+	if base == "IU5PMP" || strings.HasPrefix(base, "QQ") || len(base) < 2 {
+		return call
+	}
+
+	base = "QQ" + base[2:]
+	if hasSuffix {
+		return base + "-" + suffix
+	}
+	return base
 }
 
 func Validate(cfg Config) error {
@@ -135,7 +153,7 @@ func Validate(cfg Config) error {
 	}
 
 	if !callsignPattern.MatchString(cfg.MyCall) {
-		return errors.New("my call must be an uppercase callsign with a numeric SSID")
+		return errors.New("my call must be IU5PMP or a QQ-prefixed callsign with an optional numeric SSID")
 	}
 
 	if cfg.ReceiveLog.Enabled {

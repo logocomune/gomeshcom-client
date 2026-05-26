@@ -357,3 +357,31 @@ func TestRemoveConcurrentWithAppend(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestConversationID(t *testing.T) {
+	tests := []struct {
+		name   string
+		src    string
+		dst    string
+		myCall string
+		want   string
+	}{
+		{"broadcast star", "QQ1ABC-1", "*", "QQ0QQ-1", "P_broadcast"},
+		{"broadcast empty", "QQ1ABC-1", "", "QQ0QQ-1", "P_broadcast"},
+		{"numeric channel", "QQ1ABC-1", "2", "QQ0QQ-1", "P_2"},
+		{"dm inbound", "QQ1ABC-1", "QQ0QQ-1", "QQ0QQ-1", "DM_QQ1ABC-1"},
+		{"dm outbound", "QQ0QQ-1", "QQ1ABC-1", "QQ0QQ-1", "DM_QQ1ABC-1"},
+		{"dm not our call", "QQ1ABC-1", "QQ2DEF-2", "QQ0QQ-1", ""},
+		{"sanitize callsign", "QQ0QQ-1", "QQ3/P", "QQ0QQ-1", "DM_QQ3_P"},
+		{"via path stripped", "QQ1ABC-1,RELAY-1", "*", "QQ0QQ-1", "P_broadcast"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ConversationID(tt.src, tt.dst, tt.myCall)
+			if got != tt.want {
+				t.Fatalf("ConversationID(%q, %q, %q) = %q, want %q", tt.src, tt.dst, tt.myCall, got, tt.want)
+			}
+		})
+	}
+}

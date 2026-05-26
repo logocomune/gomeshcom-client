@@ -4,7 +4,7 @@ import { render } from 'vitest-browser-svelte';
 
 vi.mock('$env/dynamic/public', () => ({ env: {} }));
 
-import ChatPage from '../../routes/+page.svelte';
+import ChatPage from './ChatRouteHarness.svelte';
 
 class StubEventSource {
 	static instances: StubEventSource[] = [];
@@ -59,8 +59,8 @@ describe('chat send pending state', () => {
 		await page.getByPlaceholder('Type a message…').fill('hello pending');
 		await page.getByRole('button', { name: 'Send' }).click();
 
-		await expect.element(page.getByText('hello pending')).toBeVisible();
-		await expect.element(page.getByTitle('Pending').nth(1)).toBeVisible();
+		await expect.element(page.getByTestId('chat-panel').getByText('hello pending')).toBeVisible();
+		await expect.element(page.getByTestId('chat-panel').getByTitle('Pending').nth(1)).toBeVisible();
 	});
 
 	it('shows a green cloud when a public channel send echoes back from UDP', async () => {

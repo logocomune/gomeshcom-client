@@ -9,7 +9,9 @@ The main executable is `gomeshcomd`.
 > **Note:** `gomeshcom-client` is an independent, unofficial project.  
 > It is not affiliated with, endorsed by, or maintained by the MeshCom project or its developers.
 
-![gomeshcom-client web interface](images/screenshot01.jpg)
+| Dashboard | Chat | Map |
+|:---------:|:----:|:---:|
+| ![Dashboard](images/dashboard.jpg) | ![Chat](images/messages.jpg) | ![Map](images/map.jpg) |
 
 ## Quick Start
 
@@ -22,7 +24,7 @@ If this is your first network setup, follow the step-by-step guide first:
 ### Binary
 
 ```bash
-./gomeshcomd --my-call="XX0YY-1"
+./gomeshcomd --my-call="QQ0YY-1"
 ```
 
 Open:
@@ -44,7 +46,7 @@ docker run -d \
   -p 8080:8080 \
   -p 1799:1799/udp \
   -v gomeshcom-data:/data \
-  -e GOMESHCOM_MY_CALL=XX0YY-1 \
+  -e GOMESHCOM_MY_CALL=QQ0YY-1 \
   -e GOMESHCOM_HTTP_ADDR=0.0.0.0:8080 \
   ghcr.io/logocomune/gomeshcom:latest
 ```
@@ -78,7 +80,7 @@ docker run -d \
   -p 8080:8080 \
   -p 1799:1799/udp \
   -v gomeshcom-data:/data \
-  -e GOMESHCOM_MY_CALL=XX0YY-1 \
+  -e GOMESHCOM_MY_CALL=QQ0YY-1 \
   -e GOMESHCOM_HTTP_ADDR=0.0.0.0:8080 \
   -e GOMESHCOM_AUTH_USERNAME=meshcom \
   -e GOMESHCOM_AUTH_PASSWORD=change-me \
@@ -101,6 +103,7 @@ This allows REST and SSE requests to reuse the same session cookie.
 
 ## Features
 
+- Responsive UI — works on desktop, tablet, and smartphone browsers
 - Real-time packet stream via Server-Sent Events
 - Chat per conversation: broadcast, channels, and direct messages
 - Node map with OpenLayers: color-coded by freshness, with clustering for dense areas
@@ -117,7 +120,7 @@ All options are available via environment variable or CLI flag using the `GOMESH
 
 | Variable | Default | Description |
 |---|---|---|
-| `GOMESHCOM_MY_CALL` | `XX0XX-1` | **Required.** Your station callsign, for example `IU5PMP-1` |
+| `GOMESHCOM_MY_CALL` | `QQ0XX-1` | **Required.** Your station callsign, for example `IU5PMP-1` or `QQ1ABC-1`. Non-`IU5PMP` prefixes are rewritten to `QQ`. |
 | `GOMESHCOM_NODE_ADDR` | *(empty)* | Node UDP address. When empty, it is learned from the first incoming UDP packet. When set, it is used as-is and auto-detect is disabled. |
 | `GOMESHCOM_HTTP_ADDR` | `127.0.0.1:8080` | HTTP listen address |
 | `GOMESHCOM_UDP_LISTEN_ADDR` | `0.0.0.0:1799` | UDP listen address |
@@ -150,7 +153,7 @@ All options are available via environment variable or CLI flag using the `GOMESH
 Use the UDP simulator to feed changing position packets into a local `gomeshcomd` instance:
 
 ```bash
-go run ./cmd/iot-simulator -my-call IQ5SIM-9
+go run ./cmd/iot-simulator -my-call QQ5SIM-9
 ```
 
 The simulator can send MeshCom-compatible `pos` packets from `QQ1TST-1` and `QQ1TST-2`, plus scheduled DM, broadcast, and channel-2 messages to `127.0.0.1:1799`, based on enabled flags.

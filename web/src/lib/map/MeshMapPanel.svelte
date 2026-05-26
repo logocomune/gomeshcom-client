@@ -28,6 +28,7 @@
 	import { buildOwnMarkerTooltipHtml, buildTooltipHtml, escHtml } from './map-tooltip';
 	import { buildRulerLinks } from './ruler';
 	import { buildRealtimeDmTraceSegments } from './realtime-trace';
+	import { eventsState } from '$lib/stores/events.svelte';
 
 	const STORAGE_CENTER = 'meshcom:map:center';
 	const STORAGE_ZOOM = 'meshcom:map:zoom';
@@ -54,7 +55,7 @@
 	let clusterBubbleLayer: any;
 	let maidenheadLayer: any;
 	let olContext: any = {};
-	let initialized = false;
+	let initialized = $state(false);
 	let showMaidenhead = $state(false);
 	let showLabels = $state(true);
 	let showClustering = $state(true);
@@ -63,6 +64,7 @@
 	let now = $state(Date.now());
 	let tickerHandle: ReturnType<typeof setInterval> | null = null;
 	let dmTraceTickerHandle: ReturnType<typeof setInterval> | null = null;
+	let activePulseOverlay: any = null;
 
 	let visibleCount = $derived(positions.filter((p) => nodeFreshness(p, now) !== 'hidden').length);
 	let myCallPosition = $derived(
@@ -118,7 +120,8 @@
 			Text,
 			Feature,
 			Point,
-			LineString
+			LineString,
+			Overlay
 		};
 
 		markerSource = new VectorSource();
@@ -228,9 +231,69 @@
 		}, 1_000);
 	});
 
+	$effect(() => {
+		const target = eventsState.mapFocusTarget;
+		if (!target || !initialized) return;
+		const view = map?.getView();
+		if (!view || !olContext.fromLonLat) return;
+		view.animate({
+			center: olContext.fromLonLat([target.lng, target.lat]),
+			zoom: 12,
+			duration: 500
+		});
+		pulseAt(target.lng, target.lat);
+	});
+
+	function pulseAt(lon: number, lat: number) {
+		const { fromLonLat, Overlay } = olContext;
+		if (!map || !fromLonLat || !Overlay) return;
+
+		if (activePulseOverlay) {
+			map.removeOverlay(activePulseOverlay);
+			activePulseOverlay = null;
+		}
+
+		if (!document.getElementById('meshcom-pulse-kf')) {
+			const style = document.createElement('style');
+			style.id = 'meshcom-pulse-kf';
+			style.textContent = `
+				@keyframes meshcom-pulse {
+					0%   { transform: scale(1);   opacity: 0.9; }
+					100% { transform: scale(3.5); opacity: 0;   }
+				}`;
+			document.head.appendChild(style);
+		}
+
+		const el = document.createElement('div');
+		el.style.cssText = [
+			'width:32px', 'height:32px', 'border-radius:50%',
+			'background:rgba(52,211,153,0.35)',
+			'border:2px solid rgb(52,211,153)',
+			'animation:meshcom-pulse 0.9s ease-out 5',
+			'pointer-events:none'
+		].join(';');
+
+		const overlay = new Overlay({
+			element: el,
+			position: fromLonLat([lon, lat]),
+			positioning: 'center-center',
+			stopEvent: false
+		});
+		map.addOverlay(overlay);
+		activePulseOverlay = overlay;
+
+		setTimeout(() => {
+			if (activePulseOverlay === overlay) {
+				map.removeOverlay(overlay);
+				activePulseOverlay = null;
+			}
+		}, 5000);
+	}
+
 	onDestroy(() => {
 		if (tickerHandle !== null) clearInterval(tickerHandle);
 		if (dmTraceTickerHandle !== null) clearInterval(dmTraceTickerHandle);
+		if (activePulseOverlay) map?.removeOverlay(activePulseOverlay);
 		map?.setTarget(undefined);
 	});
 

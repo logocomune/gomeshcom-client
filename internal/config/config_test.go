@@ -56,6 +56,31 @@ func TestLoadRequestLogEnabled(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesMyCallPrefix(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"gomeshcomd"}
+	t.Cleanup(func() {
+		os.Args = oldArgs
+	})
+
+	t.Setenv("GOMESHCOM_NODE_ADDR", "")
+	t.Setenv("GOMESHCOM_MY_CALL", "ik5mnn-1")
+	t.Setenv("GOMESHCOM_HTTP_ADDR", "127.0.0.1:8080")
+	t.Setenv("GOMESHCOM_UDP_LISTEN_ADDR", "0.0.0.0:1799")
+	t.Setenv("GOMESHCOM_DATA_DIR", "./data")
+	t.Setenv("GOMESHCOM_MAX_MESSAGE_LENGTH", "149")
+	t.Setenv("GOMESHCOM_LOG_LEVEL", "info")
+
+	cfg, _, err := Load("test")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.MyCall != "QQ5MNN-1" {
+		t.Fatalf("MyCall = %q, want QQ5MNN-1", cfg.MyCall)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := map[string]struct {
 		cfg     Config
@@ -114,6 +139,28 @@ func TestValidate(t *testing.T) {
 				LogLevel: "info",
 			},
 			wantErr: true,
+		},
+		"iu5pmp callsign": {
+			cfg: Config{
+				HTTPAddr:         "127.0.0.1:8080",
+				UDPListenAddr:    "0.0.0.0:1799",
+				NodeAddr:         "192.168.0.2:1799",
+				MyCall:           "IU5PMP-1",
+				DataDir:          "./data",
+				MaxMessageLength: 149,
+				ReceiveLog: ReceiveLog{
+					Enabled:       true,
+					Path:          "./data/raw",
+					RetentionDays: 365,
+					ReplayWindow:  10,
+				},
+				ChatLog: ChatLog{
+					Path:             "./data/chat",
+					HistoryWindow:    24 * 60 * 60 * 1e9, // 24h in ns
+					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
+				},
+				LogLevel: "info",
+			},
 		},
 		"chat log max less than history": {
 			cfg: Config{
@@ -274,7 +321,7 @@ func TestValidate(t *testing.T) {
 				},
 				LogLevel: "info",
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		"invalid my call": {
 			cfg: Config{
@@ -530,10 +577,22 @@ func TestParseForwardTargets(t *testing.T) {
 	}
 }
 
-func TestNormalizeUppercasesMyCall(t *testing.T) {
-	cfg := normalize(Config{MyCall: "qq5akt-10"})
+func TestNormalizeCallsign(t *testing.T) {
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"uppercases":      {input: "qq5akt-10", want: "QQ5AKT-10"},
+		"rewrites prefix": {input: "ik5mnn-1", want: "QQ5MNN-1"},
+		"keeps iu5pmp":    {input: "iu5pmp-1", want: "IU5PMP-1"},
+	}
 
-	if cfg.MyCall != "QQ5AKT-10" {
-		t.Fatalf("MyCall = %q, want QQ5AKT-10", cfg.MyCall)
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := normalize(Config{MyCall: tc.input})
+			if cfg.MyCall != tc.want {
+				t.Fatalf("MyCall = %q, want %q", cfg.MyCall, tc.want)
+			}
+		})
 	}
 }

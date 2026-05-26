@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
+	"github.com/logocomune/gomeshcom-client/internal/channelshow"
 	"github.com/logocomune/gomeshcom-client/internal/chatlog"
+	"github.com/logocomune/gomeshcom-client/internal/chatstatus"
 	"github.com/logocomune/gomeshcom-client/internal/config"
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/httpapi"
@@ -73,6 +75,17 @@ func run() error {
 		RetentionDays: cfg.ReceiveLog.RetentionDays,
 	})
 	chatLogger := chatlog.New(cfg.ChatLog.Path, cfg.MyCall)
+	chatStatus, err := chatstatus.New(filepath.Join(cfg.ChatLog.Path, "msg_idx.json"))
+	if err != nil {
+		return fmt.Errorf("load chat status: %w", err)
+	}
+	go chatStatus.Start(ctx)
+
+	channelShow, err := channelshow.New(channelshow.DefaultPath(cfg.DataDir))
+	if err != nil {
+		return fmt.Errorf("load channel show: %w", err)
+	}
+	go channelShow.Start(ctx)
 
 	var fwd *udpforward.Forwarder
 	if cfg.Forward.Targets != "" {
@@ -87,7 +100,7 @@ func run() error {
 		defer fwd.Close()
 	}
 
-	bridge := udpbridge.NewBridge(cfg.UDPListenAddr, cfg.NodeAddr, bus, receiveLogger, chatLogger, positionStore, cfg.Send.DisableTx, fwd)
+	bridge := udpbridge.NewBridge(cfg.UDPListenAddr, cfg.NodeAddr, bus, receiveLogger, chatLogger, positionStore, cfg.Send.DisableTx, fwd, cfg.MyCall, chatStatus)
 	go func() {
 		if err := bridge.Listen(ctx); err != nil {
 			slog.Error("udp bridge stopped", "error", err)
@@ -95,7 +108,7 @@ func run() error {
 	}()
 
 	sc := sendcache.New(cfg.Send.DedupTTL)
-	apiServer := httpapi.NewServer(cfg, version, bus, positionStore, receiveLogger, chatLogger, bridge, sc)
+	apiServer := httpapi.NewServer(cfg, version, bus, positionStore, receiveLogger, chatLogger, bridge, sc, chatStatus, httpapi.WithChannelShow(channelShow))
 	defer apiServer.Close()
 
 	server := &http.Server{

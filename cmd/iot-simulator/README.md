@@ -15,13 +15,13 @@ and TX datagrams to stderr, and can act as two test stations:
 Start `gomeshcomd` with a local callsign:
 
 ```sh
-go run ./cmd/gomeshcomd --my-call IQ5SIM-9
+go run ./cmd/gomeshcomd --my-call QQ5SIM-9
 ```
 
 Run the simulator in another terminal:
 
 ```sh
-go run ./cmd/iot-simulator -my-call IQ5SIM-9
+go run ./cmd/iot-simulator -my-call QQ5SIM-9
 ```
 
 By default, the simulator listens on `:1798`, sends to `127.0.0.1:1799`, and
@@ -32,7 +32,7 @@ Enable all periodic traffic:
 
 ```sh
 go run ./cmd/iot-simulator \
-  -my-call IQ5SIM-9 \
+  -my-call QQ5SIM-9 \
   -enable-pos1 \
   -enable-pos2 \
   -enable-dm \
@@ -45,14 +45,14 @@ go run ./cmd/iot-simulator \
 Send only position packets from `QQ1TST-1`:
 
 ```sh
-go run ./cmd/iot-simulator -my-call IQ5SIM-9 -enable-pos1
+go run ./cmd/iot-simulator -my-call QQ5SIM-9 -enable-pos1
 ```
 
 Send positions from both simulated stations:
 
 ```sh
 go run ./cmd/iot-simulator \
-  -my-call IQ5SIM-9 \
+  -my-call QQ5SIM-9 \
   -enable-pos1 \
   -enable-pos2 \
   -interval 30s \
@@ -63,7 +63,7 @@ Send DM, broadcast, and channel traffic:
 
 ```sh
 go run ./cmd/iot-simulator \
-  -my-call IQ5SIM-9 \
+  -my-call QQ5SIM-9 \
   -enable-dm \
   -enable-broadcast \
   -enable-chan2 \
@@ -74,7 +74,7 @@ Target a remote `gomeshcomd` UDP listener:
 
 ```sh
 go run ./cmd/iot-simulator \
-  -my-call IQ5SIM-9 \
+  -my-call QQ5SIM-9 \
   -listen-addr :1798 \
   -target 192.168.1.50:1799
 ```
@@ -132,10 +132,10 @@ Run `go run ./cmd/iot-simulator -help` for the current flag list.
 The simulator writes startup, send, receive, and parsed packet logs to stderr:
 
 ```text
-iot-simulator listening on [::]:1798, target 127.0.0.1:1799, my-call IQ5SIM-9
+iot-simulator listening on [::]:1798, target 127.0.0.1:1799, my-call QQ5SIM-9
 sent pos 238 bytes to 127.0.0.1:1799 src=QQ1TST-1 lat=43.730218 long=10.395919 msg_id=7F3A91D2
 14:23:05 | TX | pos  | QQ1TST-1 -> - | {"type":"pos",...}
-14:23:12 | RX | msg  | IQ5SIM-9 -> QQ1TST-1 | {"type":"msg",...}
+14:23:12 | RX | msg  | QQ5SIM-9 -> QQ1TST-1 | {"type":"msg",...}
 ```
 
 ## Related Documentation

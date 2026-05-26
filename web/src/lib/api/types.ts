@@ -1,3 +1,5 @@
+export type { ChannelShowConfig, ChannelShowMode } from './channelShow';
+
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'unauthenticated';
 
 export type MeshcomPacketType = 'msg' | 'pos' | 'tele' | string;
@@ -38,6 +40,15 @@ export type PacketReceivedPayload = {
 	packet?: MeshcomPacket;
 	replay?: boolean;
 };
+
+export interface ChatStatusEntry {
+	lastMsgReceived: string;
+	lastRead: string;
+	unreadCount: number;
+	lastMsg?: string;
+}
+
+export type ChatStatusSnapshot = Record<string, ChatStatusEntry>;
 
 export type StreamEvent = {
 	id: string;
