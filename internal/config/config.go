@@ -13,7 +13,7 @@ import (
 
 const Prefix = "GOMESHCOM"
 
-var callsignPattern = regexp.MustCompile(`^(?:IU5PMP|QQ[A-Z0-9]{3,8})(?:-[0-9]{1,2})?$`)
+var callsignPattern = regexp.MustCompile(`^[A-Z0-9]{3,10}(?:-[0-9]{1,2})?$`)
 
 type Config struct {
 	conf.Version
@@ -112,21 +112,7 @@ func normalize(cfg Config) Config {
 }
 
 func normalizeCallsign(value string) string {
-	call := strings.ToUpper(strings.TrimSpace(value))
-	if call == "" {
-		return ""
-	}
-
-	base, suffix, hasSuffix := strings.Cut(call, "-")
-	if base == "IU5PMP" || strings.HasPrefix(base, "QQ") || len(base) < 2 {
-		return call
-	}
-
-	base = "QQ" + base[2:]
-	if hasSuffix {
-		return base + "-" + suffix
-	}
-	return base
+	return strings.ToUpper(strings.TrimSpace(value))
 }
 
 func Validate(cfg Config) error {
@@ -153,7 +139,7 @@ func Validate(cfg Config) error {
 	}
 
 	if !callsignPattern.MatchString(cfg.MyCall) {
-		return errors.New("my call must be IU5PMP or a QQ-prefixed callsign with an optional numeric SSID")
+		return errors.New("my call must be 3-10 alphanumeric characters with an optional numeric SSID (e.g. IU5PMP-1)")
 	}
 
 	if cfg.ReceiveLog.Enabled {

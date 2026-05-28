@@ -64,7 +64,7 @@ func TestLoadNormalizesMyCallPrefix(t *testing.T) {
 	})
 
 	t.Setenv("GOMESHCOM_NODE_ADDR", "")
-	t.Setenv("GOMESHCOM_MY_CALL", "ik5mnn-1")
+	t.Setenv("GOMESHCOM_MY_CALL", "xx5xxx-1")
 	t.Setenv("GOMESHCOM_HTTP_ADDR", "127.0.0.1:8080")
 	t.Setenv("GOMESHCOM_UDP_LISTEN_ADDR", "0.0.0.0:1799")
 	t.Setenv("GOMESHCOM_DATA_DIR", "./data")
@@ -76,8 +76,8 @@ func TestLoadNormalizesMyCallPrefix(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.MyCall != "QQ5MNN-1" {
-		t.Fatalf("MyCall = %q, want QQ5MNN-1", cfg.MyCall)
+	if cfg.MyCall != "XX5XXX-1" {
+		t.Fatalf("MyCall = %q, want XX5XXX-1", cfg.MyCall)
 	}
 }
 
@@ -582,9 +582,9 @@ func TestNormalizeCallsign(t *testing.T) {
 		input string
 		want  string
 	}{
-		"uppercases":      {input: "qq5akt-10", want: "QQ5AKT-10"},
-		"rewrites prefix": {input: "ik5mnn-1", want: "QQ5MNN-1"},
-		"keeps iu5pmp":    {input: "iu5pmp-1", want: "IU5PMP-1"},
+		"uppercases":   {input: "qq5akt-10", want: "QQ5AKT-10"},
+		"keeps prefix": {input: "xx5xxx-1", want: "XX5XXX-1"},
+		"keeps iu5pmp": {input: "iu5pmp-1", want: "IU5PMP-1"},
 	}
 
 	for name, tc := range tests {
