@@ -11,15 +11,15 @@ describe('AppController confirmNewDm', () => {
 		chatState.chatTarget = { kind: 'channel', value: 'Broadcast' };
 	});
 
-	it('normalizes non-IU prefixes to QQ before selecting contact', () => {
+	it('normalizes callsign to uppercase before selecting contact', () => {
 		const controller = new AppController();
-		chatState.newDmCallsign = 'ik5mnn-1';
+		chatState.newDmCallsign = 'xx5yyy-1';
 
 		controller.confirmNewDm();
 
 		expect(chatState.newDmError).toBe('');
 		expect(chatState.newDmOpen).toBe(false);
-		expect(chatState.chatTarget).toEqual({ kind: 'contact', value: 'QQ5MNN-1' });
+		expect(chatState.chatTarget).toEqual({ kind: 'contact', value: 'XX5YYY-1' });
 	});
 
 	it('keeps IU5PMP unchanged', () => {

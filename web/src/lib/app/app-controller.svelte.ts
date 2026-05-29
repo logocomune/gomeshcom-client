@@ -215,7 +215,7 @@ export class AppController {
 	confirmNewDm() {
 		const call = normalizeCallsign(chatState.newDmCallsign);
 		if (!isValidCallsign(call)) {
-			chatState.newDmError = 'Invalid callsign (e.g. QQ5MNN-1 or IU5PMP-1)';
+			chatState.newDmError = 'Invalid callsign (e.g. XX5YYY-1 or IU5PMP)';
 			return;
 		}
 		chatState.newDmOpen = false;
