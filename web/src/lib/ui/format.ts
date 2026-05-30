@@ -1,3 +1,7 @@
+export function formatDate(value: string): string {
+	return new Date(value).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
+}
+
 export function formatTime(value: string): string {
 	return new Date(value).toLocaleTimeString('it-IT', {
 		hour: '2-digit',

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import MeshMapPanel from '$lib/map/MeshMapPanel.svelte';
+	import MapEventTicker from '$lib/map/MapEventTicker.svelte';
 	import { connectionState } from '$lib/stores/connection.svelte';
 	import { eventsState } from '$lib/stores/events.svelte';
 </script>
@@ -22,5 +23,10 @@
 			myCall={connectionState.stationCallsign}
 			events={eventsState.events}
 		/>
+		<div class="pointer-events-none absolute bottom-10 left-2 z-[1100]">
+			<div class="pointer-events-auto">
+				<MapEventTicker events={eventsState.events} />
+			</div>
+		</div>
 	</div>
 </div>

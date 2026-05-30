@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.8.0]
+
+### Added
+
+- **Map live event ticker**: on desktop (`md` breakpoint and above), a compact semi-transparent overlay appears in the bottom-left corner of the map showing the 5 most recent UDP stream events. Each row displays the receive time, an event-type icon (coloured by packet kind), and the sender callsign. Clicking a row calls `focusOnNode` to centre and pulse that node on the map.
+
 ## [0.7.0] - 2026-05-27
 
 ### Added

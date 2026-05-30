@@ -16,7 +16,7 @@
 	} from '@mdi/js';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import { getMaidenheadLayer } from './maidenhead-layer';
-	import type { StreamEvent } from '$lib/api/types';
+	import type { PacketReceivedPayload, StreamEvent } from '$lib/api/types';
 	import type { MapPosition } from './types';
 	import {
 		nodeFreshness,
@@ -65,6 +65,8 @@
 	let tickerHandle: ReturnType<typeof setInterval> | null = null;
 	let dmTraceTickerHandle: ReturnType<typeof setInterval> | null = null;
 	let activePulseOverlay: any = null;
+	const activeMsgPulseOverlays = new Set<any>();
+	const mountedAt = Date.now();
 
 	let visibleCount = $derived(positions.filter((p) => nodeFreshness(p, now) !== 'hidden').length);
 	let myCallPosition = $derived(
@@ -87,6 +89,20 @@
 		positions;
 		showDmTracking;
 		if (initialized) updateDmTraceLayer(Date.now());
+	});
+
+	$effect(() => {
+		const newest = events[0];
+		if (!initialized || !newest || newest.type !== 'packet.received') return;
+		const payload = newest.data as PacketReceivedPayload;
+		if (payload.replay === true) return;
+		const packet = payload.packet;
+		if (!packet || packet.type !== 'msg') return;
+		const origin = (packet.src ?? '').split(',')[0].trim().toUpperCase();
+		if (!origin) return;
+		const pos = positions.find((p) => p.source.toUpperCase() === origin);
+		if (!pos) return;
+		msgPulseAt(pos.lon, pos.lat);
 	});
 
 	onMount(async () => {
@@ -233,7 +249,7 @@
 
 	$effect(() => {
 		const target = eventsState.mapFocusTarget;
-		if (!target || !initialized) return;
+		if (!target || !initialized || target.ts < mountedAt) return;
 		const view = map?.getView();
 		if (!view || !olContext.fromLonLat) return;
 		view.animate({
@@ -290,10 +306,50 @@
 		}, 5000);
 	}
 
+	function msgPulseAt(lon: number, lat: number) {
+		const { fromLonLat, Overlay } = olContext;
+		if (!map || !fromLonLat || !Overlay) return;
+
+		if (!document.getElementById('meshcom-pulse-kf')) {
+			const style = document.createElement('style');
+			style.id = 'meshcom-pulse-kf';
+			style.textContent = `
+				@keyframes meshcom-pulse {
+					0%   { transform: scale(1);   opacity: 0.9; }
+					100% { transform: scale(3.5); opacity: 0;   }
+				}`;
+			document.head.appendChild(style);
+		}
+
+		const el = document.createElement('div');
+		el.style.cssText = [
+			'width:28px', 'height:28px', 'border-radius:50%',
+			'background:rgba(239,68,68,0.30)',
+			'border:2px solid rgb(239,68,68)',
+			'animation:meshcom-pulse 0.7s ease-out 3',
+			'pointer-events:none'
+		].join(';');
+
+		const overlay = new Overlay({
+			element: el,
+			position: fromLonLat([lon, lat]),
+			positioning: 'center-center',
+			stopEvent: false
+		});
+		map.addOverlay(overlay);
+		activeMsgPulseOverlays.add(overlay);
+
+		setTimeout(() => {
+			map.removeOverlay(overlay);
+			activeMsgPulseOverlays.delete(overlay);
+		}, 2200);
+	}
+
 	onDestroy(() => {
 		if (tickerHandle !== null) clearInterval(tickerHandle);
 		if (dmTraceTickerHandle !== null) clearInterval(dmTraceTickerHandle);
 		if (activePulseOverlay) map?.removeOverlay(activePulseOverlay);
+		for (const overlay of activeMsgPulseOverlays) map?.removeOverlay(overlay);
 		map?.setTarget(undefined);
 	});
 
