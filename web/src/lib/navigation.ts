@@ -1,5 +1,6 @@
 import {
 	mdiAccessPoint,
+	mdiChartBar,
 	mdiInformationOutline,
 	mdiMapOutline,
 	mdiMessageTextOutline,
@@ -19,7 +20,8 @@ export const primaryNavRoutes: NavRoute[] = [
 	{ href: '/chat', icon: mdiMessageTextOutline, label: 'Chat' },
 	{ href: '/map', icon: mdiMapOutline, label: 'Map' },
 	{ href: '/nodes', icon: mdiAccessPoint, label: 'Nodes' },
-	{ href: '/traffic', icon: mdiWaveform, label: 'Traffic' }
+	{ href: '/traffic', icon: mdiWaveform, label: 'Traffic' },
+	{ href: '/statistics', icon: mdiChartBar, label: 'Statistics' }
 ];
 
 export const secondaryNavRoutes: NavRoute[] = [

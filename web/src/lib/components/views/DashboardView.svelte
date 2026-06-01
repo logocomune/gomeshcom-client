@@ -13,7 +13,8 @@
 		mdiEmailMultipleOutline,
 		mdiBroadcast,
 		mdiMessageTextOutline,
-		mdiPulse
+		mdiPulse,
+		mdiChartBar
 	} from '@mdi/js';
 	import type { ChatRecord } from '$lib/api/types';
 
@@ -119,7 +120,7 @@
 						</span>
 					{/if}
 					{#if connectionState.appVersion}
-						<span class="rounded-full bg-surface-soft px-2.5 py-0.5 font-mono text-[11px] text-ink-dim">
+						<span class="rounded-full bg-surface-soft px-2.5 py-0.5 font-mono text-[11px] text-ink-muted">
 							{connectionState.appVersion}
 						</span>
 					{/if}
@@ -128,7 +129,7 @@
 		</div>
 
 		<!-- Metric cards -->
-		<div class="grid grid-cols-3 gap-4">
+		<div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
 
 			<!-- Nodes -->
 			<button
@@ -195,11 +196,29 @@
 				</div>
 			</button>
 
+			<!-- Statistics -->
+			<button
+				type="button"
+				data-testid="dashboard-stats-card"
+				onclick={() => goto('/statistics')}
+				class="group relative overflow-hidden rounded-2xl border border-warm/20 bg-gradient-to-br from-surface to-surface-soft p-4 text-left transition-all hover:-translate-y-0.5 hover:border-lavender/60 hover:shadow-[0_8px_30px_rgb(167,139,250,0.12)]"
+			>
+				<div class="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-lavender/10 blur-2xl"></div>
+				<div class="rounded-xl bg-lavender/15 p-2 w-fit">
+					<span class="text-lavender"><MdiIcon path={mdiChartBar} size={24} /></span>
+				</div>
+				<div class="mt-3 font-mono text-4xl font-bold text-ink">—</div>
+				<div class="mt-1 text-xs uppercase tracking-widest text-ink-muted">Statistics</div>
+				<div class="absolute bottom-3 right-3 opacity-0 transition-opacity group-hover:opacity-100">
+					<span class="text-lavender"><MdiIcon path={mdiArrowRight} size={14} /></span>
+				</div>
+			</button>
+
 		</div>
 
 		<!-- Recent Messages -->
 		<div class="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-ink-muted">
-			<span class="text-ink-dim"><MdiIcon path={mdiMessageTextOutline} size={14} /></span>
+			<span class="text-ink-muted"><MdiIcon path={mdiMessageTextOutline} size={14} /></span>
 			<span>Recent Messages</span>
 			<span class="h-px flex-1 bg-ink-dim/20"></span>
 			<button
@@ -216,7 +235,7 @@
 			class="-mt-2 overflow-hidden rounded-2xl border border-ink-dim/15 bg-surface/50 backdrop-blur-sm"
 		>
 			{#if recentMessages.length === 0}
-				<div class="px-4 py-8 text-center text-xs text-ink-dim">No messages yet</div>
+				<div class="px-4 py-8 text-center text-xs text-ink-muted">No messages yet</div>
 			{:else}
 				<div class="divide-y divide-ink-dim/15">
 					{#each recentMessages as rec (rec.msg_id ?? rec.received_at + (rec.src ?? ''))}
@@ -228,7 +247,7 @@
 								<div class="text-sm font-medium text-ink">{originFrom(rec.src)}</div>
 								<div class="truncate text-xs text-ink-muted">{truncateMsg(rec.msg)}</div>
 							</div>
-							<span class="shrink-0 font-mono text-[10px] text-ink-dim">{timeAgo(rec.received_at)}</span>
+							<span class="shrink-0 font-mono text-[10px] text-ink-muted">{timeAgo(rec.received_at)}</span>
 						</div>
 					{/each}
 				</div>
@@ -237,7 +256,7 @@
 
 		<!-- Recent Traffic -->
 		<div class="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-ink-muted">
-			<span class="text-ink-dim"><MdiIcon path={mdiPulse} size={14} /></span>
+			<span class="text-ink-muted"><MdiIcon path={mdiPulse} size={14} /></span>
 			<span>Recent Traffic</span>
 			<span class="h-px flex-1 bg-ink-dim/20"></span>
 			<button
@@ -254,7 +273,7 @@
 			class="-mt-2 overflow-hidden rounded-2xl border border-ink-dim/15 bg-surface/50 backdrop-blur-sm"
 		>
 			{#if eventsState.events.length === 0}
-				<div class="px-4 py-8 text-center text-xs text-ink-dim">
+				<div class="px-4 py-8 text-center text-xs text-ink-muted">
 					No events yet — waiting for traffic…
 				</div>
 			{:else}
@@ -275,7 +294,7 @@
 							<span class="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase {kc.pill}">
 								{badge}
 							</span>
-							<span class="shrink-0 font-mono text-[10px] text-ink-dim">{timeAgo(event.receivedAt)}</span>
+							<span class="shrink-0 font-mono text-[10px] text-ink-muted">{timeAgo(event.receivedAt)}</span>
 						</div>
 					{/each}
 				</div>

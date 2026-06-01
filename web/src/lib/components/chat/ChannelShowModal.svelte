@@ -57,7 +57,6 @@
 		);
 	});
 
-	// Entries with full label for the selected chips display
 	const selectedEntries = $derived((): ListEntry[] => {
 		const byId = new Map(allEntries().map((e) => [e.id, e]));
 		return chatState.channelShowDraftChannels.map(
@@ -114,15 +113,15 @@
 
 <div class="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center p-4">
 	<div
-		class="pointer-events-auto flex w-full max-w-lg flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-2xl"
+		class="pointer-events-auto flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-ink-dim/20 bg-surface shadow-2xl"
 		style="max-height: 82vh"
 	>
 		<!-- Header -->
-		<div class="flex h-11 shrink-0 items-center justify-between border-b border-gray-700/60 px-4">
-			<span class="text-sm font-semibold text-gray-100">Visible channels</span>
+		<div class="flex h-11 shrink-0 items-center justify-between border-b border-ink-dim/20 px-4">
+			<span class="text-sm font-semibold text-ink">Visible channels</span>
 			<button
 				type="button"
-				class="flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
+				class="flex h-7 w-7 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
 				aria-label="Close"
 				onclick={() => (chatState.channelShowOpen = false)}
 			>
@@ -135,20 +134,20 @@
 			<div class="flex gap-2">
 				<button
 					type="button"
-					class="rounded border px-3 py-1.5 text-xs font-semibold transition-colors
+					class="rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors
 						{!isAllowlist
-						? 'border-blue-500/60 bg-blue-600/80 text-white'
-						: 'border-gray-700/60 text-gray-400 hover:text-gray-200'}"
+						? 'border-azure/60 bg-azure/80 text-base'
+						: 'border-ink-dim/30 text-ink-muted hover:text-ink'}"
 					onclick={() => (chatState.channelShowDraftMode = 'all')}
 				>
 					Show all
 				</button>
 				<button
 					type="button"
-					class="rounded border px-3 py-1.5 text-xs font-semibold transition-colors
+					class="rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors
 						{isAllowlist
-						? 'border-blue-500/60 bg-blue-600/80 text-white'
-						: 'border-gray-700/60 text-gray-400 hover:text-gray-200'}"
+						? 'border-azure/60 bg-azure/80 text-base'
+						: 'border-ink-dim/30 text-ink-muted hover:text-ink'}"
 					onclick={() => (chatState.channelShowDraftMode = 'allowlist')}
 				>
 					Allowlist
@@ -156,21 +155,21 @@
 			</div>
 
 			{#if !isAllowlist}
-				<p class="text-xs text-gray-500">All channels visible. Switch to Allowlist to pick which to show.</p>
+				<p class="text-xs text-ink-muted">All channels visible. Switch to Allowlist to pick which to show.</p>
 			{:else}
 				<!-- Selected chips -->
 				{#if selectedEntries().length > 0}
 					<div class="flex flex-wrap gap-1.5">
 						{#each selectedEntries() as entry (entry.id)}
 							<span
-								class="flex items-center gap-1 rounded-full border border-blue-500/60 bg-blue-600/40 pl-2 pr-1 py-0.5 text-xs text-white"
+								class="flex items-center gap-1 rounded-full border border-azure/60 bg-azure/40 pl-2 pr-1 py-0.5 text-xs text-ink"
 							>
 								<span class="leading-none">{entry.flag}</span>
 								<span class="max-w-[120px] truncate font-medium">{entry.name}</span>
-								<span class="font-mono text-blue-300">·{entry.id_display}</span>
+								<span class="font-mono text-azure">·{entry.id_display}</span>
 								<button
 									type="button"
-									class="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-blue-300 hover:text-white"
+									class="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-azure hover:text-ink"
 									aria-label="Remove {entry.name}"
 									onclick={() => removeSelected(entry.id)}
 								>
@@ -180,33 +179,32 @@
 						{/each}
 					</div>
 				{:else}
-					<p class="text-xs text-gray-500">No channels selected — all hidden. Pick from list below.</p>
+					<p class="text-xs text-ink-muted">No channels selected — all hidden. Pick from list below.</p>
 				{/if}
 
 				<!-- Search -->
 				<input
 					type="search"
-					class="w-full rounded border border-gray-700/60 bg-[#111827] px-3 py-1.5 text-xs text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500/60"
+					class="w-full rounded-lg border border-ink-dim/30 bg-base px-3 py-1.5 text-xs text-ink outline-none placeholder:text-ink-dim focus:border-azure/60"
 					placeholder="Search by name, ID or flag…"
 					bind:value={searchQuery}
 				/>
 
 				<!-- Scrollable list -->
-				<div class="min-h-0 overflow-y-auto rounded border border-gray-700/40" style="max-height: 260px">
+				<div class="min-h-0 overflow-y-auto rounded-lg border border-ink-dim/15" style="max-height: 260px">
 					{#each filteredEntries() as entry (entry.id)}
 						{@const selected = isSelected(entry.id)}
 						<button
 							type="button"
-							class="flex w-full items-center gap-3 border-b border-gray-700/30 px-3 py-2 text-left transition-colors last:border-b-0
+							class="flex w-full items-center gap-3 border-b border-ink-dim/15 px-3 py-2 text-left transition-colors last:border-b-0
 								{selected
-								? 'bg-blue-600/20 text-white'
-								: 'text-gray-300 hover:bg-gray-700/30'}"
+								? 'bg-azure/20 text-ink'
+								: 'text-ink-muted hover:bg-surface-hi'}"
 							onclick={() => toggleEntry(entry.id)}
 						>
-							<!-- Checkbox indicator -->
 							<span
 								class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border
-									{selected ? 'border-blue-500 bg-blue-500' : 'border-gray-600'}"
+									{selected ? 'border-azure bg-azure' : 'border-ink-dim/50'}"
 							>
 								{#if selected}
 									<svg viewBox="0 0 10 8" class="h-2 w-2 fill-white">
@@ -216,11 +214,11 @@
 							</span>
 							<span class="text-base leading-none">{entry.flag}</span>
 							<span class="flex-1 truncate text-xs">{entry.name}</span>
-							<span class="shrink-0 font-mono text-[11px] text-gray-500">{entry.id_display}</span>
+							<span class="shrink-0 font-mono text-[11px] text-ink-muted">{entry.id_display}</span>
 						</button>
 					{/each}
 					{#if filteredEntries().length === 0}
-						<p class="px-3 py-3 text-xs text-gray-600">No channels match "{searchQuery}"</p>
+						<p class="px-3 py-3 text-xs text-ink-muted">No channels match "{searchQuery}"</p>
 					{/if}
 				</div>
 
@@ -228,7 +226,7 @@
 				<div class="flex gap-2">
 					<input
 						type="text"
-						class="min-w-0 flex-1 rounded border border-gray-700/60 bg-[#111827] px-3 py-1.5 font-mono text-xs text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500/60"
+						class="min-w-0 flex-1 rounded-lg border border-ink-dim/30 bg-base px-3 py-1.5 font-mono text-xs text-ink outline-none placeholder:text-ink-dim focus:border-azure/60"
 						placeholder="Custom ID: * or 22299"
 						bind:value={chatState.channelShowDraftInput}
 						onkeydown={handleInputKeydown}
@@ -236,7 +234,7 @@
 					/>
 					<button
 						type="button"
-						class="flex items-center gap-1 rounded border border-gray-700/60 px-2 py-1.5 text-xs text-gray-400 hover:border-gray-500 hover:text-gray-200"
+						class="flex items-center gap-1 rounded-lg border border-ink-dim/30 px-2 py-1.5 text-xs text-ink-dim hover:border-ink-muted hover:text-ink"
 						onclick={handleAddInput}
 					>
 						<MdiIcon path={mdiPlus} size={13} />
@@ -245,23 +243,23 @@
 				</div>
 
 				{#if chatState.channelShowError}
-					<p class="text-xs text-red-400">{chatState.channelShowError}</p>
+					<p class="text-xs text-coral">{chatState.channelShowError}</p>
 				{/if}
 			{/if}
 		</div>
 
 		<!-- Footer -->
-		<div class="flex shrink-0 justify-end gap-2 border-t border-gray-700/60 px-4 py-3">
+		<div class="flex shrink-0 justify-end gap-2 border-t border-ink-dim/20 px-4 py-3">
 			<button
 				type="button"
-				class="rounded border border-gray-700/60 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200"
+				class="rounded-lg border border-ink-dim/30 px-3 py-1.5 text-xs text-ink-muted hover:text-ink"
 				onclick={() => (chatState.channelShowOpen = false)}
 			>
 				Cancel
 			</button>
 			<button
 				type="button"
-				class="rounded border border-blue-500/40 bg-blue-600/80 px-3 py-1.5 text-xs text-white hover:bg-blue-500 disabled:opacity-50"
+				class="rounded-lg border border-azure/40 bg-azure/80 px-3 py-1.5 text-xs text-base hover:bg-azure disabled:opacity-50"
 				disabled={chatState.channelShowSaving}
 				onclick={onConfirm}
 			>

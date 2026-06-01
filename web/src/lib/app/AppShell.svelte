@@ -28,7 +28,7 @@
 	<TxDisabledBanner />
 {/if}
 
-<main class="relative flex h-screen min-h-0 flex-col bg-[#111827] text-gray-100">
+<main class="relative flex h-screen min-h-0 flex-col bg-base text-ink">
 	<ConnectionOverlay state={connectionState.state} />
 
 	{#if app.authModalOpen}
@@ -85,21 +85,21 @@
 	{/if}
 
 	<header
-		class="flex h-12 shrink-0 items-center justify-between border-b border-gray-700/60 bg-[#2d3345] px-4"
+		class="flex h-12 shrink-0 items-center justify-between border-b border-ink-dim/20 bg-surface-soft px-4"
 	>
 		<div class="flex items-center gap-3">
 			<div class="flex items-center gap-2">
 				<img src={logo} alt="" class="h-7 w-7 rounded-md" />
-				<span class="font-mono text-sm font-bold tracking-wide text-blue-300">goMeshCom</span>
+				<span class="font-mono text-sm font-bold tracking-wide text-azure">goMeshCom</span>
 				<span
 					data-testid="status-dot"
 					class="md:hidden h-2 w-2 rounded-full {app.statusClass[connectionState.state]}"
 				></span>
 			</div>
-			<div class="hidden md:block h-4 w-px bg-gray-600"></div>
+			<div class="hidden md:block h-4 w-px bg-ink-dim"></div>
 			<div data-testid="status-pill" class="hidden md:flex items-center gap-2 text-xs">
 				<span class="h-2.5 w-2.5 rounded-full {app.statusClass[connectionState.state]}"></span>
-				<span class="font-medium text-gray-300">{app.statusText[connectionState.state]}</span>
+				<span class="font-medium text-ink-muted">{app.statusText[connectionState.state]}</span>
 			</div>
 		</div>
 
@@ -109,16 +109,16 @@
 
 		<div class="flex items-center gap-3">
 			<div
-				class="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 font-mono text-xs font-semibold text-blue-200"
+				class="rounded border border-azure/40 bg-azure/10 px-2 py-1 font-mono text-xs font-semibold text-azure"
 			>
 				{connectionState.stationCallsign || 'NO-CALL'}
 			</div>
-			<div data-testid="packet-counter" class="hidden md:block font-mono text-xs text-gray-400">
+			<div data-testid="packet-counter" class="hidden md:block font-mono text-xs text-ink-muted">
 				{eventsState.events.length} packets
 			</div>
 			<button
 				type="button"
-				class="flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-gray-500 hover:text-gray-200 md:hidden"
+				class="flex h-7 w-7 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-ink-muted hover:text-ink md:hidden"
 				aria-label="Open menu"
 				onclick={() => viewState.openDrawer()}
 			>
@@ -143,37 +143,32 @@
 		class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
 	>
 		<div
-			class="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-2xl"
+			class="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-ink-dim/20 bg-surface shadow-2xl"
 		>
-			<div class="flex h-12 shrink-0 items-center justify-between border-b border-gray-700/60 px-4">
+			<div class="flex h-12 shrink-0 items-center justify-between border-b border-ink-dim/20 px-4">
 				<div class="flex items-center gap-2">
 					<span
-						class="flex h-7 w-7 items-center justify-center rounded border {packetTone(
-							eventsState.rawEvent
-						)}"
+						class="flex h-7 w-7 items-center justify-center rounded-lg border {packetTone(eventsState.rawEvent)}"
 					>
 						<MdiIcon path={mdiForEvent(eventsState.rawEvent)} size={16} />
 					</span>
 					<div>
-						<div class="text-sm font-semibold text-gray-100">Formatted JSON</div>
-						<div class="font-mono text-[11px] text-gray-500">
+						<div class="text-sm font-semibold text-ink">Formatted JSON</div>
+						<div class="font-mono text-[11px] text-ink-muted">
 							{packetBadge(eventsState.rawEvent)} - {formatTime(eventsState.rawEvent.receivedAt)}
 						</div>
 					</div>
 				</div>
 				<button
 					type="button"
-					class="flex h-8 w-8 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
+					class="flex h-8 w-8 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
 					aria-label="Close"
 					onclick={() => (eventsState.rawEvent = null)}
 				>
 					<MdiIcon path={mdiClose} size={18} />
 				</button>
 			</div>
-			<pre
-				class="min-h-0 overflow-auto p-4 font-mono text-xs leading-relaxed text-gray-200">{eventJSON(
-					eventsState.rawEvent
-				)}</pre>
+			<pre class="min-h-0 overflow-auto p-4 font-mono text-xs leading-relaxed text-ink-muted">{eventJSON(eventsState.rawEvent)}</pre>
 		</div>
 	</div>
 {/if}
@@ -183,37 +178,32 @@
 		class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
 	>
 		<div
-			class="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-2xl"
+			class="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-ink-dim/20 bg-surface shadow-2xl"
 		>
-			<div class="flex h-12 shrink-0 items-center justify-between border-b border-gray-700/60 px-4">
+			<div class="flex h-12 shrink-0 items-center justify-between border-b border-ink-dim/20 px-4">
 				<div class="flex items-center gap-2">
 					<span
-						class="flex h-7 w-7 items-center justify-center rounded border border-blue-500/70 bg-blue-500/25 text-blue-200"
+						class="flex h-7 w-7 items-center justify-center rounded-lg border border-mint/70 bg-mint/20 text-mint"
 					>
 						<MdiIcon path={chatMdiIcon(chatState.rawChatRecord)} size={16} />
 					</span>
 					<div>
-						<div class="text-sm font-semibold text-gray-100">Chat Record JSON</div>
-						<div class="font-mono text-[11px] text-gray-500">
+						<div class="text-sm font-semibold text-ink">Chat Record JSON</div>
+						<div class="font-mono text-[11px] text-ink-muted">
 							msg - {formatTime(chatState.rawChatRecord.received_at)}
 						</div>
 					</div>
 				</div>
 				<button
 					type="button"
-					class="flex h-8 w-8 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
+					class="flex h-8 w-8 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
 					aria-label="Close"
 					onclick={() => (chatState.rawChatRecord = null)}
 				>
 					<MdiIcon path={mdiClose} size={18} />
 				</button>
 			</div>
-			<pre
-				class="min-h-0 overflow-auto p-4 font-mono text-xs leading-relaxed text-gray-200">{JSON.stringify(
-					chatState.rawChatRecord,
-					null,
-					2
-				)}</pre>
+			<pre class="min-h-0 overflow-auto p-4 font-mono text-xs leading-relaxed text-ink-muted">{JSON.stringify(chatState.rawChatRecord, null, 2)}</pre>
 		</div>
 	</div>
 {/if}
@@ -227,15 +217,15 @@
 	></button>
 	<div class="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center p-4">
 		<div
-			class="pointer-events-auto w-full max-w-sm rounded-md border border-gray-700/60 bg-[#212735] shadow-2xl"
+			class="pointer-events-auto w-full max-w-sm rounded-2xl border border-ink-dim/20 bg-surface shadow-2xl"
 		>
-			<div class="flex h-11 items-center justify-between border-b border-gray-700/60 px-4">
-				<span class="text-sm font-semibold text-gray-100">
+			<div class="flex h-11 items-center justify-between border-b border-ink-dim/20 px-4">
+				<span class="text-sm font-semibold text-ink">
 					{chatState.isBroadcastTarget ? 'Clear messages' : 'Delete conversation'}
 				</span>
 				<button
 					type="button"
-					class="flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
+					class="flex h-7 w-7 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
 					aria-label="Close"
 					onclick={() => (chatState.deleteConfirmOpen = false)}
 				>
@@ -243,27 +233,27 @@
 				</button>
 			</div>
 			<div class="p-4">
-				<p class="text-sm text-gray-300">
+				<p class="text-sm text-ink-muted">
 					{#if chatState.isBroadcastTarget}
-						Clear all messages in <span class="font-semibold text-white">Broadcast</span>?
+						Clear all messages in <span class="font-semibold text-ink">Broadcast</span>?
 					{:else}
-						Delete <span class="font-semibold text-white">{chatState.chatTarget.value}</span>?
+						Delete <span class="font-semibold text-ink">{chatState.chatTarget.value}</span>?
 					{/if}
 					This removes {chatState.displayChatRecords.length} message(s) from disk.
 				</p>
 				{#if chatState.deleteError}
-					<p class="mt-2 text-xs text-red-400">{chatState.deleteError}</p>
+					<p class="mt-2 text-xs text-coral">{chatState.deleteError}</p>
 				{/if}
 				<div class="mt-4 flex justify-end gap-2">
 					<button
 						type="button"
-						class="rounded border border-gray-700/60 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200"
+						class="rounded-lg border border-ink-dim/30 px-3 py-1.5 text-xs text-ink-muted hover:text-ink"
 						onclick={() => (chatState.deleteConfirmOpen = false)}
 						disabled={chatState.deleting}>Cancel</button
 					>
 					<button
 						type="button"
-						class="rounded border border-red-500/40 bg-red-600/80 px-3 py-1.5 text-xs text-white hover:bg-red-500 disabled:opacity-50"
+						class="rounded-lg border border-coral/40 bg-coral/80 px-3 py-1.5 text-xs text-base hover:bg-coral disabled:opacity-50"
 						onclick={() => void app.confirmDelete()}
 						disabled={chatState.deleting}
 					>
@@ -284,13 +274,13 @@
 	></button>
 	<div class="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center p-4">
 		<div
-			class="pointer-events-auto w-full max-w-sm rounded-md border border-gray-700/60 bg-[#212735] shadow-2xl"
+			class="pointer-events-auto w-full max-w-sm rounded-2xl border border-ink-dim/20 bg-surface shadow-2xl"
 		>
-			<div class="flex h-11 items-center justify-between border-b border-gray-700/60 px-4">
-				<span class="text-sm font-semibold text-gray-100">New Direct Message</span>
+			<div class="flex h-11 items-center justify-between border-b border-ink-dim/20 px-4">
+				<span class="text-sm font-semibold text-ink">New Direct Message</span>
 				<button
 					type="button"
-					class="flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
+					class="flex h-7 w-7 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
 					aria-label="Close"
 					onclick={() => (chatState.newDmOpen = false)}
 				>
@@ -298,7 +288,7 @@
 				</button>
 			</div>
 			<div class="p-4">
-				<label class="mb-1.5 block text-xs text-gray-400" for="new-dm-callsign">Callsign</label>
+				<label class="mb-1.5 block text-xs text-ink-muted" for="new-dm-callsign">Callsign</label>
 				<NodeCombobox
 					nodes={eventsState.mapPositions}
 					bind:value={chatState.newDmCallsign}
@@ -307,19 +297,19 @@
 					onValueChange={() => (chatState.newDmError = '')}
 				/>
 				{#if chatState.newDmError}
-					<p class="mt-1 text-xs text-red-400">{chatState.newDmError}</p>
+					<p class="mt-1 text-xs text-coral">{chatState.newDmError}</p>
 				{/if}
 				<div class="mt-3 flex justify-end gap-2">
 					<button
 						type="button"
-						class="rounded border border-gray-700/60 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200"
+						class="rounded-lg border border-ink-dim/30 px-3 py-1.5 text-xs text-ink-muted hover:text-ink"
 						onclick={() => (chatState.newDmOpen = false)}
 					>
 						Cancel
 					</button>
 					<button
 						type="button"
-						class="rounded border border-blue-500/40 bg-blue-600/80 px-3 py-1.5 text-xs text-white hover:bg-blue-500"
+						class="rounded-lg border border-azure/40 bg-azure/80 px-3 py-1.5 text-xs text-base hover:bg-azure"
 						onclick={() => app.confirmNewDm()}
 					>
 						Open Chat
@@ -343,13 +333,13 @@
 	></button>
 	<div class="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center p-4">
 		<div
-			class="pointer-events-auto w-full max-w-sm rounded-md border border-gray-700/60 bg-[#212735] shadow-2xl"
+			class="pointer-events-auto w-full max-w-sm rounded-2xl border border-ink-dim/20 bg-surface shadow-2xl"
 		>
-			<div class="flex h-11 items-center justify-between border-b border-gray-700/60 px-4">
-				<span class="text-sm font-semibold text-gray-100">Join Channel</span>
+			<div class="flex h-11 items-center justify-between border-b border-ink-dim/20 px-4">
+				<span class="text-sm font-semibold text-ink">Join Channel</span>
 				<button
 					type="button"
-					class="flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
+					class="flex h-7 w-7 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
 					aria-label="Close"
 					onclick={() => (chatState.newChannelOpen = false)}
 				>
@@ -357,7 +347,7 @@
 				</button>
 			</div>
 			<div class="p-4">
-				<label class="mb-1.5 block text-xs text-gray-400" for="new-channel-value">
+				<label class="mb-1.5 block text-xs text-ink-muted" for="new-channel-value">
 					Channel — <span class="font-mono">*</span> for broadcast, numeric for groups
 				</label>
 				<ChannelCombobox
@@ -367,19 +357,19 @@
 					onValueChange={() => (chatState.newChannelError = '')}
 				/>
 				{#if chatState.newChannelError}
-					<p class="mt-1 text-xs text-red-400">{chatState.newChannelError}</p>
+					<p class="mt-1 text-xs text-coral">{chatState.newChannelError}</p>
 				{/if}
 				<div class="mt-3 flex justify-end gap-2">
 					<button
 						type="button"
-						class="rounded border border-gray-700/60 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200"
+						class="rounded-lg border border-ink-dim/30 px-3 py-1.5 text-xs text-ink-muted hover:text-ink"
 						onclick={() => (chatState.newChannelOpen = false)}
 					>
 						Cancel
 					</button>
 					<button
 						type="button"
-						class="rounded border border-blue-500/40 bg-blue-600/80 px-3 py-1.5 text-xs text-white hover:bg-blue-500"
+						class="rounded-lg border border-azure/40 bg-azure/80 px-3 py-1.5 text-xs text-base hover:bg-azure"
 						onclick={() => void app.confirmNewChannel()}
 					>
 						Join

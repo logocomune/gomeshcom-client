@@ -128,7 +128,7 @@ func ConversationID(src, dst, myCall string) string {
 // land in the same file. Returns "" when the message should be silently
 // dropped (DM not involving myCall).
 func filenameForMsg(src, dst, myCall string) string {
-	if !isDM(dst) {
+	if !IsDM(dst) {
 		return filename(dst)
 	}
 	// DM path — no myCall configured: no filter, use dst as before.
@@ -166,7 +166,9 @@ func isNumeric(s string) bool {
 	return len(s) > 0
 }
 
-func isDM(dst string) bool {
+// IsDM reports whether dst is a direct-message destination (non-empty, not
+// broadcast "*", and not a numeric channel identifier).
+func IsDM(dst string) bool {
 	return dst != "" && dst != "*" && !isNumeric(dst)
 }
 

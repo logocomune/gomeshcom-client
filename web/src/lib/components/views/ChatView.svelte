@@ -45,7 +45,7 @@
 	<!-- Desktop: resizable sidebar list + thread side by side -->
 	<div class="flex min-h-0 flex-1 overflow-hidden">
 		<aside
-			class="shrink-0 border-r border-gray-700/60 overflow-hidden"
+			class="shrink-0 border-r border-ink-dim/20 overflow-hidden"
 			style="width: {chatState.chatListWidthPx}px"
 		>
 			<ChatList />
@@ -59,16 +59,16 @@
 			onpointerdown={startSidebarDrag}
 		>
 			<div
-				class="h-12 w-0.5 rounded-full bg-gray-700/60 transition-colors group-hover:bg-blue-500/60 group-active:bg-blue-500"
+				class="h-12 w-0.5 rounded-full bg-ink-dim/20 transition-colors group-hover:bg-azure/60 group-active:bg-azure"
 			></div>
 		</div>
-		<div class="flex min-h-0 flex-1 flex-col bg-[#212735]">
+		<div class="flex min-h-0 flex-1 flex-col bg-surface">
 			<ChatThread {ackIndex} {handleSend} />
 		</div>
 	</div>
 {:else}
 	<!-- Mobile: show list OR thread, full screen -->
-	<div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#1c2230]">
+	<div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-soft">
 		{#if showThread}
 			<ChatThread {ackIndex} {handleSend} showBack={true} onBack={closeThread} />
 		{:else}

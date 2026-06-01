@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.9.0]
+
+### Changed
+
+- **Statistics — channel table**: all DM contacts aggregated into a single "DM" row instead of one row per callsign. Public channel labels now show `CH. N - Name` (name resolved from KNOWN_GROUPS when available).
+
+- **Accessibility — text contrast**: replaced `text-ink-dim` with `text-ink-muted` on all readable text across 14 files (timestamps, labels, descriptions, empty states, metadata lines, section headers, form labels). `ink-dim` retained only for icon button idle states (non-text contrast, 3:1 threshold), `placeholder:` (WCAG exempt), decorative `·` separators, and small telemetry icon wrappers. Contrast for all readable text now ≥4.5:1 (AA) on all backgrounds.
+- **UI consistency — Map**: `+page.svelte`, `MapEventTicker`, and `MeshMapPanel` UI chrome migrated to design tokens. Map wrapper: `rounded-2xl`, `bg-surface`, `border-ink-dim/20`. Toolbar buttons: `bg-surface hover:bg-surface-hi text-ink`, inactive icons `text-ink-dim`. Status bars and tooltip: `bg-surface/90`/`bg-base`, `border-ink-dim/20`, `text-ink/ink-muted/ink-dim`. Ticker: `bg-base/80 border-ink-dim/20`, sender `text-ink`, message `text-ink-muted`. OL cluster bubble updated to azure token (`rgba(96,165,250,0.9)`); message pulse ring updated to coral token (`rgba(248,113,113,…)`).
+- **UI consistency — About & Credits**: both views migrated to design tokens. `bg-[#111827]`/`bg-[#1a2030]`/`bg-[#1c2230]` replaced with `bg-base`/`bg-surface`. All `gray-*`/`blue-*` replaced with `text-ink/ink-muted/ink-dim`, `text-azure`, `border-ink-dim/20`, `border-azure/30`. Card corners migrated to `rounded-2xl`. Link buttons use `bg-surface-hi hover:border-azure/50 hover:text-azure`.
+- **UI consistency — Chat**: all chat components migrated to design tokens. `ChatView`, `ChatList`, `ChatThread`, `ChannelShowModal`, `NodeCombobox`, `ChannelCombobox`, and `AppShell` modals (deleteConfirm, newDm, newChannel, rawEvent JSON viewers) now use `bg-surface/surface-soft/base`, `text-ink/ink-muted/ink-dim`, `border-ink-dim`, `text-azure/mint/coral/warm`. ACK indicators use `text-mint`; errors use `text-coral`; TX warning uses `text-warm`. All modal corners migrated to `rounded-2xl`. Header callsign badge uses `azure`. Pending spinner uses `border-azure`. Dead `ChatPanel.svelte` deleted.
+- **UI consistency — Traffic view**: `UdpStreamPanel` migrated to design tokens (`bg-surface`, `bg-surface-soft`, `text-ink/ink-muted/ink-dim`, `border-ink-dim`). Outer card now `rounded-2xl`. `packetTone` in `stream.ts` updated to use token colors (mint/azure/lavender/coral) so Traffic and Dashboard show identical colors for the same packet types. JSON button hover uses `azure` instead of raw blue.
+- **UI consistency**: Statistics view migrated to the shared design token system (`bg-surface`, `text-ink`, `text-azure/mint/lavender/warm/coral`). Card corners now `rounded-2xl`, section headers use `tracking-[0.2em]`, range buttons use `bg-warm` active state. `BarChart` axis labels use `var(--color-ink-dim)` instead of hardcoded hex. KPI colors now match chart series colors (DM=azure, DM ack=mint, Public=lavender, Telemetry=warm, Position=coral). Removed Errors KPI card; added type icons to remaining cards (reusing `mdiEmailOutline`, `mdiCheckCircleOutline`, `mdiEmailMultipleOutline`, `mdiBroadcast`, `mdiMapMarkerRadiusOutline`).
+- **Statistics auto-refresh**: data reloads every 60 s automatically; timer is cleared on component unmount.
+- **Dashboard Statistics card**: added a fourth metric card linking to `/statistics`, completing the cross-navigation set (Nodes / Unread / Events / Statistics).
+
+### Added
+
+- **Statistics page** (`/statistics`): new frontend page showing packet traffic heard by the node — KPI cards and a stacked bar chart (messages per hour by type: DM received, DM ack, public, telemetry, position) plus a distance histogram (position packets bucketed by km from own station). Range selector: 6 h / 24 h / 7 d / 30 d.
+- **`GET /api/stats?hours=`**: returns hourly aggregated counters. Default 24 h, max 720 h.
+- **`internal/stats` package**: in-memory hourly bucket store, flushed every minute via atomic write to `data/stats/stats.YYYYMMDDHH.json`. Prunes files older than `GOMESHCOM_STATS_RETENTION_DAYS` (default 30). Classifies packets from the event bus using existing `chatlog.IsDM` logic. Computes haversine distance for position packets when own station position is known.
+- **`message.delivered` bus event**: published on the SSE bus when an outgoing DM echo is confirmed, enabling DM-ack counting in the stats collector.
+- **Config option `GOMESHCOM_STATS_ENABLED`** (default `true`) and **`GOMESHCOM_STATS_RETENTION_DAYS`** (default `30`).
+- **`positions.Store.Get(callsign)`**: new thread-safe lookup by callsign.
+- **`chatlog.IsDM(dst)`**: exported for use in the stats collector without duplicating classification logic.
+
 ## [0.8.0]
 
 ### Added

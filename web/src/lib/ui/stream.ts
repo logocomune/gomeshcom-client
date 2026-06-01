@@ -42,11 +42,11 @@ function streamEventMatchesTerm(event: StreamEvent, term: string): boolean {
 
 export function packetTone(event: StreamEvent): string {
 	const badge = packetBadge(event);
-	if (badge === 'error') return 'border-red-500/70 bg-red-500/25 text-red-200';
-	if (badge === 'msg') return 'border-blue-500/70 bg-blue-500/25 text-blue-200';
-	if (badge === 'pos') return 'border-emerald-500/70 bg-emerald-500/25 text-emerald-200';
-	if (badge === 'tele') return 'border-purple-500/70 bg-purple-500/25 text-purple-200';
-	return 'border-gray-500/50 bg-gray-500/20 text-gray-200';
+	if (badge === 'error') return 'border-coral/70 bg-coral/20 text-coral';
+	if (badge === 'msg')   return 'border-mint/70 bg-mint/20 text-mint';
+	if (badge === 'pos')   return 'border-azure/70 bg-azure/20 text-azure';
+	if (badge === 'tele')  return 'border-lavender/70 bg-lavender/20 text-lavender';
+	return 'border-ink-dim/50 bg-ink-dim/20 text-ink-muted';
 }
 
 export function packetField(event: StreamEvent, key: string): string {

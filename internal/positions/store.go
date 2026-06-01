@@ -183,6 +183,16 @@ func (s *Store) TouchFromPacket(src string, rssi, snr *int, seenAt time.Time) bo
 	return changed
 }
 
+// Get returns the position record for the given callsign (case-sensitive, must
+// match the key stored during Update — typically upper-case). Returns false
+// when the callsign is not known.
+func (s *Store) Get(callsign string) (Record, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.records[callsign]
+	return r, ok
+}
+
 func (s *Store) Snapshot() map[string]Record {
 	s.mu.Lock()
 	defer s.mu.Unlock()

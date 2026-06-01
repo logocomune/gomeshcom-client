@@ -24,6 +24,7 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
+	"github.com/logocomune/gomeshcom-client/internal/stats"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 	"github.com/logocomune/gomeshcom-client/internal/webui"
 )
@@ -49,6 +50,7 @@ type Server struct {
 	chatLog     *chatlog.Logger
 	chatStatus  *chatstatus.Store
 	channelShow *channelshow.Store
+	statsStore  *stats.Store
 	bridge      messageSender
 	sendCache   *sendcache.Cache
 	outbox      *outbox.Outbox
@@ -63,6 +65,13 @@ type ServerOption func(*Server)
 func WithChannelShow(store *channelshow.Store) ServerOption {
 	return func(server *Server) {
 		server.channelShow = store
+	}
+}
+
+// WithStats attaches a stats store to the server, enabling the /api/stats endpoint.
+func WithStats(store *stats.Store) ServerOption {
+	return func(server *Server) {
+		server.statsStore = store
 	}
 }
 
@@ -107,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.getConversation), s))
 	mux.Handle("DELETE /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.deleteConversation), s))
 	mux.Handle("POST /api/chat/{conversation}/read", requireAuth(http.HandlerFunc(s.markConversationRead), s))
+	mux.Handle("GET /api/stats", requireAuth(http.HandlerFunc(s.listStats), s))
 	mux.Handle("/", spaHandler(webui.FS()))
 	handler := cacheHeadersMiddleware(mux)
 	if s.cfg.RequestLog.Enabled {
@@ -240,6 +250,48 @@ func (s *Server) listPositions(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.positions.Snapshot())
 }
 
+const (
+	defaultStatsHours = 24
+	maxStatsHours     = 720
+)
+
+func (s *Server) listStats(w http.ResponseWriter, r *http.Request) {
+	if s.statsStore == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"buckets": []stats.Bucket{}})
+		return
+	}
+
+	hours := defaultStatsHours
+	if h := r.URL.Query().Get("hours"); h != "" {
+		parsed, err := strconv.Atoi(h)
+		if err != nil || parsed <= 0 {
+			writeError(w, http.StatusBadRequest, "hours must be a positive integer")
+			return
+		}
+		if parsed > maxStatsHours {
+			parsed = maxStatsHours
+		}
+		hours = parsed
+	}
+
+	to := time.Now().UTC()
+	from := to.Add(-time.Duration(hours) * time.Hour)
+
+	buckets, err := s.statsStore.ReadRange(from, to)
+	if err != nil {
+		slog.Error("stats: read range failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"from":    from.Format(time.RFC3339),
+		"to":      to.Format(time.RFC3339),
+		"hours":   hours,
+		"buckets": buckets,
+	})
+}
+
 func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Destination string `json:"dst"`
@@ -314,7 +366,21 @@ func (s *Server) watchOutgoingEchoes(ctx context.Context) {
 					continue
 				}
 				if s.outbox != nil {
-					s.outbox.Confirm(message.Source, message.Destination, message.Message)
+					if s.outbox.Confirm(message.Source, message.Destination, message.Message) {
+						if s.bus != nil {
+							s.bus.Publish(events.Event{
+								Type: "message.delivered",
+								Data: chatlog.Record{
+									ReceivedAt:     time.Now().UTC(),
+									Src:            message.Source,
+									Dst:            message.Destination,
+									Msg:            message.Message,
+									Direction:      "outbound",
+									DeliveryStatus: "delivered",
+								},
+							})
+						}
+					}
 				}
 			}
 		}

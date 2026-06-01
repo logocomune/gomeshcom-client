@@ -55,19 +55,19 @@
 	}
 </script>
 
-<div class="flex h-full flex-col bg-[#1c2230]">
-	<div class="flex h-10 shrink-0 items-center border-b border-gray-700/60 px-3">
-		<span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Chats</span>
+<div class="flex h-full flex-col bg-surface-soft">
+	<div class="flex h-10 shrink-0 items-center border-b border-ink-dim/20 px-3">
+		<span class="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">Chats</span>
 	</div>
 
 	<div class="min-h-0 flex-1 overflow-y-auto">
 		<!-- Channels section -->
 		<div class="flex items-center justify-between px-3 py-1.5">
-			<span class="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Channels</span>
+			<span class="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">Channels</span>
 			<div class="flex items-center gap-1">
 				<button
 					type="button"
-					class="flex h-5 w-5 items-center justify-center rounded text-gray-500 hover:bg-gray-700/40 hover:text-gray-300"
+					class="flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-surface-hi hover:text-ink-muted"
 					title="Channel visibility settings"
 					onclick={() => chatState.openChannelShowModal()}
 				>
@@ -75,7 +75,7 @@
 				</button>
 				<button
 					type="button"
-					class="flex items-center gap-1 rounded bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-blue-500 active:bg-blue-700"
+					class="flex items-center gap-1 rounded bg-azure px-2 py-0.5 text-[10px] font-semibold text-base hover:bg-azure/90 active:bg-azure/80"
 					title="Join Channel"
 					onclick={() => {
 						chatState.newChannelValue = '';
@@ -98,14 +98,14 @@
 				{@const group = groupFor(conv)}
 				<button
 					type="button"
-					class="flex w-full items-center gap-3 border-b border-gray-700/30 px-3 py-3 text-left transition-colors
-						{active ? 'bg-blue-500/10' : 'hover:bg-gray-700/25'}"
+					class="flex w-full items-center gap-3 border-b border-ink-dim/15 px-3 py-3 text-left transition-colors
+						{active ? 'bg-azure/10' : 'hover:bg-surface-hi/60'}"
 					onclick={() => handleSelect(conv)}
 				>
 					<span class="relative shrink-0">
 						<span
 							class="flex h-9 w-9 items-center justify-center rounded-full border
-								{active ? 'border-blue-500/50 bg-blue-500/20 text-blue-300' : 'border-gray-700/60 bg-[#212735] text-gray-400'}"
+								{active ? 'border-azure/50 bg-azure/20 text-azure' : 'border-ink-dim/20 bg-surface text-ink-dim'}"
 						>
 							{#if group}
 								<span class="text-lg leading-none">{group.flag}</span>
@@ -114,22 +114,22 @@
 							{/if}
 						</span>
 						{#if count > 0}
-							<span class="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-bold text-white">
+							<span class="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-azure px-1 text-[10px] font-bold text-base">
 								{count > 99 ? '99+' : count}
 							</span>
 						{/if}
 					</span>
 					<div class="min-w-0 flex-1">
 						<div class="flex items-center justify-between gap-2">
-							<span class="truncate text-sm {count > 0 ? 'font-semibold text-white' : 'font-medium text-gray-200'}">
+							<span class="truncate text-sm {count > 0 ? 'font-semibold text-ink' : 'font-medium text-ink-muted'}">
 								{displayName(conv)}
 							</span>
 							{#if relTime}
-								<span class="shrink-0 text-[11px] text-gray-500">{relTime}</span>
+								<span class="shrink-0 text-[11px] text-ink-muted">{relTime}</span>
 							{/if}
 						</div>
 						<div class="flex items-center justify-between gap-2">
-							<span class="truncate text-xs text-gray-500">{preview || ' '}</span>
+							<span class="truncate text-xs text-ink-muted">{preview || ' '}</span>
 						</div>
 					</div>
 				</button>
@@ -137,11 +137,11 @@
 		{/if}
 
 		<!-- Direct Messages section -->
-		<div class="flex items-center justify-between border-t border-gray-700/60 px-3 py-1.5">
-			<span class="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Direct Messages</span>
+		<div class="flex items-center justify-between border-t border-ink-dim/20 px-3 py-1.5">
+			<span class="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">Direct Messages</span>
 			<button
 				type="button"
-				class="flex items-center gap-1 rounded bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-blue-500 active:bg-blue-700"
+				class="flex items-center gap-1 rounded bg-azure px-2 py-0.5 text-[10px] font-semibold text-base hover:bg-azure/90 active:bg-azure/80"
 				title="New Direct Message"
 				onclick={() => {
 					chatState.newDmCallsign = '';
@@ -162,34 +162,34 @@
 					{@const active = isActiveConv(conv)}
 					<button
 						type="button"
-						class="flex w-full items-center gap-3 border-b border-gray-700/30 px-3 py-3 text-left transition-colors
-							{active ? 'bg-blue-500/10' : 'hover:bg-gray-700/25'}"
+						class="flex w-full items-center gap-3 border-b border-ink-dim/15 px-3 py-3 text-left transition-colors
+							{active ? 'bg-azure/10' : 'hover:bg-surface-hi/60'}"
 						onclick={() => handleSelect(conv)}
 					>
 						<span class="relative shrink-0">
 							<span
 								class="block overflow-hidden rounded-full border
-									{active ? 'border-blue-500/50' : 'border-gray-700/60'}"
+									{active ? 'border-azure/50' : 'border-ink-dim/20'}"
 							>
 								<PixelAvatar seed={conv.label} size={36} />
 							</span>
 							{#if count > 0}
-								<span class="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-bold text-white">
+								<span class="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-azure px-1 text-[10px] font-bold text-base">
 									{count > 99 ? '99+' : count}
 								</span>
 							{/if}
 						</span>
 						<div class="min-w-0 flex-1">
 							<div class="flex items-center justify-between gap-2">
-								<span class="truncate text-sm {count > 0 ? 'font-semibold text-white' : 'font-medium text-gray-200'}">
+								<span class="truncate text-sm {count > 0 ? 'font-semibold text-ink' : 'font-medium text-ink-muted'}">
 									{conv.label}
 								</span>
 								{#if relTime}
-									<span class="shrink-0 text-[11px] text-gray-500">{relTime}</span>
+									<span class="shrink-0 text-[11px] text-ink-muted">{relTime}</span>
 								{/if}
 							</div>
 							<div class="flex items-center justify-between gap-2">
-								<span class="truncate text-xs text-gray-500">{preview || ' '}</span>
+								<span class="truncate text-xs text-ink-muted">{preview || ' '}</span>
 							</div>
 						</div>
 					</button>

@@ -91,7 +91,7 @@
 <div class="relative">
 	<input
 		id="new-channel-value"
-		class="w-full rounded border border-gray-700/60 bg-[#111827] px-3 py-2 font-mono text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500/60"
+		class="w-full rounded-lg border border-ink-dim/30 bg-base px-3 py-2 font-mono text-sm text-ink outline-none placeholder:text-ink-dim focus:border-azure/60"
 		placeholder="* or 222"
 		autocomplete="off"
 		bind:value
@@ -109,7 +109,7 @@
 
 	{#if open && filtered().length > 0}
 		<ul
-			class="absolute left-0 right-0 top-full z-50 mt-1 max-h-52 overflow-y-auto rounded border border-gray-700/60 bg-[#111827] py-1 shadow-xl"
+			class="absolute left-0 right-0 top-full z-50 mt-1 max-h-52 overflow-y-auto rounded-lg border border-ink-dim/20 bg-base py-1 shadow-xl"
 			role="listbox"
 		>
 			{#each filtered() as item, i}
@@ -118,13 +118,13 @@
 					role="option"
 					aria-selected={i === activeIndex}
 					class="flex cursor-pointer items-center gap-2 px-3 py-1.5 {i === activeIndex
-						? 'bg-blue-600/30 text-gray-100'
-						: 'text-gray-300 hover:bg-gray-700/40'}"
+						? 'bg-azure/30 text-ink'
+						: 'text-ink-muted hover:bg-surface-hi'}"
 					onmousedown={() => select(item)}
 				>
 					<span class="w-5 shrink-0 text-center text-base leading-none">{item.flag}</span>
 					<span class="w-14 shrink-0 font-mono text-sm">{item.label}</span>
-					<span class="truncate text-xs text-gray-500">{item.sublabel}</span>
+					<span class="truncate text-xs text-ink-muted">{item.sublabel}</span>
 				</li>
 			{/each}
 		</ul>

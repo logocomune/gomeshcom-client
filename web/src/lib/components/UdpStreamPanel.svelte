@@ -60,17 +60,17 @@
 
 <div
 	data-testid="udp-panel"
-	class="flex flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#212735] shadow-sm {fillHeight
+	class="flex flex-col overflow-hidden rounded-2xl border border-ink-dim/20 bg-surface shadow-sm {fillHeight
 		? 'flex-1 min-h-0'
 		: 'shrink-0 h-[80vh] md:h-auto md:min-h-[160px]'}"
 	style={!fillHeight && isDesktop ? `height: ${streamHeightPx}px` : ''}
 >
-	<div class="flex h-9 shrink-0 items-center justify-between border-b border-gray-700/60 px-3">
+	<div class="flex h-9 shrink-0 items-center justify-between border-b border-ink-dim/20 px-3">
 		<div class="flex items-center gap-2">
-			<span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+			<span class="text-[11px] font-semibold uppercase tracking-wider text-ink-muted"
 				>UDP stream</span
 			>
-			<span class="rounded bg-gray-700/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-500"
+			<span class="rounded bg-ink-dim/20 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted"
 				>/api/events</span
 			>
 		</div>
@@ -80,12 +80,12 @@
 					type="text"
 					bind:value={streamFilter}
 					placeholder="Filter…"
-					class="h-6 w-36 rounded border border-gray-700/60 bg-[#1c2230] py-0 pl-2 pr-6 text-[11px] text-gray-200 placeholder:text-gray-600 focus:border-blue-500/60 focus:outline-none"
+					class="h-6 w-36 rounded-lg border border-ink-dim/30 bg-surface-soft py-0 pl-2 pr-6 text-[11px] text-ink placeholder:text-ink-dim focus:border-azure/60 focus:outline-none"
 				/>
 				{#if streamFilter}
 					<button
 						type="button"
-						class="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200"
+						class="absolute right-1 top-1/2 -translate-y-1/2 text-ink-dim hover:text-ink"
 						aria-label="Clear filter"
 						onclick={() => (streamFilter = '')}
 					>
@@ -93,12 +93,12 @@
 					</button>
 				{/if}
 			</div>
-			<span class="font-mono text-[11px] text-gray-500">
+			<span class="font-mono text-[11px] text-ink-muted">
 				{filteredEvents.length}{streamFilter ? `/${events.length}` : ''}
 			</span>
 			<button
 				type="button"
-				class="flex h-6 w-6 items-center justify-center rounded border border-gray-700/60 text-gray-500 hover:border-red-500/50 hover:text-red-300"
+				class="flex h-6 w-6 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
 				aria-label="Clear UDP stream"
 				title="Clear UDP stream"
 				onclick={onClearEvents}
@@ -110,27 +110,27 @@
 
 	<div class="min-h-0 flex-1 overflow-auto">
 		{#if events.length === 0}
-			<div class="flex h-full items-center justify-center text-sm text-gray-500">
+			<div class="flex h-full items-center justify-center text-sm text-ink-muted">
 				Waiting for UDP packets
 			</div>
 		{:else if filteredEvents.length === 0}
-			<div class="flex h-full items-center justify-center text-sm text-gray-500">
+			<div class="flex h-full items-center justify-center text-sm text-ink-muted">
 				No results for "{streamFilter}"
 			</div>
 		{:else}
-			<div class="divide-y divide-gray-700/50">
+			<div class="divide-y divide-ink-dim/15">
 				{#each filteredEvents as event (event.id)}
 					<div
 						role="button"
 						tabindex="0"
-						class="grid w-full grid-cols-[3rem_1fr] md:grid-cols-[4.5rem_1fr_2rem] gap-2 md:gap-3 px-3 py-2 text-left hover:bg-white/[0.03] {selectedEvent?.id ===
+						class="grid w-full grid-cols-[3rem_1fr] md:grid-cols-[4.5rem_1fr_2rem] gap-2 md:gap-3 px-3 py-2 text-left hover:bg-surface-hi {selectedEvent?.id ===
 						event.id
-							? 'bg-white/[0.04]'
+							? 'bg-surface-hi'
 							: ''}"
 						onclick={() => selectEvent(event)}
 						onkeydown={(keyEvent) => handleRowKeydown(keyEvent, event)}
 					>
-						<div class="font-mono text-[10px] md:text-[11px] text-gray-500">
+						<div class="font-mono text-[10px] md:text-[11px] text-ink-muted">
 							{formatTime(event.receivedAt)}
 						</div>
 						<div class="min-w-0">
@@ -147,22 +147,22 @@
 									>
 										<MdiIcon path={mdiForEvent(event)} size={17} />
 									</span>
-									<span class="shrink-0 text-xs md:text-sm font-bold text-white"
+									<span class="shrink-0 text-xs md:text-sm font-bold text-ink"
 										>{route.origin}</span
 									>
 									{#if route.relays.length > 0}
-										<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
+										<span class="hidden md:inline shrink-0 text-[11px] text-ink-muted"
 											>(via {route.relays.join(', ')})</span
 										>
 									{/if}
-									<span class="hidden md:inline shrink-0 text-gray-500"
+									<span class="hidden md:inline shrink-0 text-ink-dim"
 										><MdiIcon path={mdiArrowRight} size={13} /></span
 									>
-									<span class="hidden md:inline shrink-0 text-sm text-gray-200"
+									<span class="hidden md:inline shrink-0 text-sm text-ink-muted"
 										>{route.destination}</span
 									>
-									<span class="mx-0.5 shrink-0 text-gray-400">·</span>
-									<span class="min-w-0 truncate italic text-xs md:text-sm text-white">"{text}"</span
+									<span class="mx-0.5 shrink-0 text-ink-dim">·</span>
+									<span class="min-w-0 truncate italic text-xs md:text-sm text-ink">"{text}"</span
 									>
 									{#if packet?.rssi != null || packet?.snr != null}
 										{@render QualityValues(packet)}
@@ -173,27 +173,27 @@
 								{@const source = splitSourcePath(packet?.src)}
 								<div class="flex min-w-0 items-center gap-1.5">
 									{@render EventIcon(event)}
-									<span class="shrink-0 text-xs md:text-sm font-bold text-white"
+									<span class="shrink-0 text-xs md:text-sm font-bold text-ink"
 										>{source.origin}</span
 									>
 									{#if source.relays.length > 0}
-										<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
+										<span class="hidden md:inline shrink-0 text-[11px] text-ink-muted"
 											>(via {source.relays.join(', ')})</span
 										>
 									{/if}
-									<span class="mx-0.5 shrink-0 text-gray-400">·</span>
+									<span class="mx-0.5 shrink-0 text-ink-dim">·</span>
 									<span class="flex min-w-0 items-center gap-2">
 										{#if packet?.batt != null}
-											<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200">
-												<span class="text-gray-500"><MdiIcon path={mdiBattery} size={12} /></span>
+											<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted">
+												<span class="text-ink-dim"><MdiIcon path={mdiBattery} size={12} /></span>
 												{packet.batt}%
 											</span>
 										{/if}
 										{#if packet?.temp1 != null}
 											<span
-												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
+												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted"
 											>
-												<span class="text-gray-500"
+												<span class="text-ink-dim"
 													><MdiIcon path={mdiThermometer} size={12} /></span
 												>
 												{packet.temp1}°C
@@ -201,9 +201,9 @@
 										{/if}
 										{#if packet?.hum != null}
 											<span
-												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
+												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted"
 											>
-												<span class="text-gray-500"
+												<span class="text-ink-dim"
 													><MdiIcon path={mdiWaterPercent} size={12} /></span
 												>
 												{packet.hum}%
@@ -211,9 +211,9 @@
 										{/if}
 										{#if packet?.qnh != null || packet?.qfe != null}
 											<span
-												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
+												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted"
 											>
-												<span class="text-gray-500"><MdiIcon path={mdiGauge} size={12} /></span>
+												<span class="text-ink-dim"><MdiIcon path={mdiGauge} size={12} /></span>
 												{packet.qnh ?? packet.qfe} hPa
 											</span>
 										{/if}
@@ -228,41 +228,41 @@
 								{@const hardware = hardwareHumanName(packet?.hw_id)}
 								<div class="flex min-w-0 items-center gap-1.5">
 									{@render EventIcon(event)}
-									<span class="shrink-0 text-xs md:text-sm font-bold text-white"
+									<span class="shrink-0 text-xs md:text-sm font-bold text-ink"
 										>{source.origin}</span
 									>
 									{#if source.relays.length > 0}
-										<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
+										<span class="hidden md:inline shrink-0 text-[11px] text-ink-muted"
 											>(via {source.relays.join(', ')})</span
 										>
 									{/if}
-									<span class="mx-0.5 shrink-0 text-gray-400">·</span>
+									<span class="mx-0.5 shrink-0 text-ink-dim">·</span>
 									<span class="flex min-w-0 items-center gap-2">
 										{#if packet?.lat != null && packet?.long != null}
-											<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200">
-												<span class="text-gray-500"
+											<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted">
+												<span class="text-ink-dim"
 													><MdiIcon path={mdiMapMarkerRadiusOutline} size={12} /></span
 												>
 												{packet.lat.toFixed(4)}, {packet.long.toFixed(4)}
 											</span>
 										{/if}
 										{#if packet?.alt != null}
-											<span class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
+											<span class="hidden md:inline shrink-0 font-mono text-[11px] text-ink-muted"
 												>{packet.alt} m</span
 											>
 										{/if}
 										{#if packet?.batt != null}
-											<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200">
-												<span class="text-gray-500"><MdiIcon path={mdiBattery} size={12} /></span>
+											<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted">
+												<span class="text-ink-dim"><MdiIcon path={mdiBattery} size={12} /></span>
 												{packet.batt}%
 											</span>
 										{/if}
 										{#if hardware}
 											<span
-												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200"
+												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted"
 												title="Hardware ID {packet?.hw_id}"
 											>
-												<span class="text-gray-500"><MdiIcon path={mdiChip} size={12} /></span>
+												<span class="text-ink-dim"><MdiIcon path={mdiChip} size={12} /></span>
 												{hardware}
 											</span>
 										{/if}
@@ -277,32 +277,32 @@
 								<div class="flex min-w-0 items-center gap-1.5">
 									{@render EventIcon(event)}
 									{#if packet}
-										<span class="shrink-0 text-xs md:text-sm font-bold text-white"
+										<span class="shrink-0 text-xs md:text-sm font-bold text-ink"
 											>{source.origin}</span
 										>
 										{#if source.relays.length > 0}
-											<span class="hidden md:inline shrink-0 text-[11px] text-gray-400"
+											<span class="hidden md:inline shrink-0 text-[11px] text-ink-muted"
 												>(via {source.relays.join(', ')})</span
 											>
 										{/if}
-										<span class="mx-0.5 shrink-0 text-gray-400">·</span>
+										<span class="mx-0.5 shrink-0 text-ink-dim">·</span>
 										<span class="flex min-w-0 items-center gap-2">
 											{#if packet.lat != null && packet.long != null}
-												<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200">
-													<span class="text-gray-500"
+												<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted">
+													<span class="text-ink-dim"
 														><MdiIcon path={mdiMapMarkerRadiusOutline} size={12} /></span
 													>
 													{packet.lat.toFixed(4)}, {packet.long.toFixed(4)}
 												</span>
 											{/if}
 											{#if packet.alt != null}
-												<span class="hidden md:inline shrink-0 font-mono text-[11px] text-gray-400"
+												<span class="hidden md:inline shrink-0 font-mono text-[11px] text-ink-muted"
 													>{packet.alt} m</span
 												>
 											{/if}
 											{#if packet.batt != null}
-												<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-200">
-													<span class="text-gray-500"><MdiIcon path={mdiBattery} size={12} /></span>
+												<span class="flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted">
+													<span class="text-ink-dim"><MdiIcon path={mdiBattery} size={12} /></span>
 													{packet.batt}%
 												</span>
 											{/if}
@@ -315,7 +315,7 @@
 											{/if}
 										</span>
 									{:else}
-										<span class="min-w-0 truncate text-sm text-gray-300">{eventSummary(event)}</span
+										<span class="min-w-0 truncate text-sm text-ink-muted">{eventSummary(event)}</span
 										>
 									{/if}
 									{#if packet?.rssi != null || packet?.snr != null}
@@ -326,7 +326,7 @@
 						</div>
 						<button
 							type="button"
-							class="hidden md:flex h-7 w-7 items-center justify-center rounded border border-gray-700/60 bg-[#1c2230] text-gray-400 hover:border-blue-500/50 hover:text-blue-300"
+							class="hidden md:flex h-7 w-7 items-center justify-center rounded-lg border border-ink-dim/30 bg-surface-soft text-ink-dim hover:border-azure/50 hover:text-azure"
 							title="Show JSON"
 							aria-label="Show JSON"
 							onclick={(clickEvent) => {
@@ -356,19 +356,19 @@
 	<span class="ml-auto flex shrink-0 items-center gap-2 pl-2">
 		{#if packet.rssi != null}
 			<span
-				class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
+				class="flex items-center gap-0.5 font-mono text-[10px] text-ink-muted"
 				title="RSSI — received signal strength (dBm)"
 			>
-				<span class="text-gray-300"><MdiIcon path={mdiSignalVariant} size={14} /></span>
+				<span class="text-ink-muted"><MdiIcon path={mdiSignalVariant} size={14} /></span>
 				{packet.rssi}
 			</span>
 		{/if}
 		{#if packet.snr != null}
 			<span
-				class="flex items-center gap-0.5 font-mono text-[10px] text-gray-300"
+				class="flex items-center gap-0.5 font-mono text-[10px] text-ink-muted"
 				title="SNR — signal-to-noise ratio (dB)"
 			>
-				<span class="text-gray-300"><MdiIcon path={mdiTune} size={14} /></span>
+				<span class="text-ink-muted"><MdiIcon path={mdiTune} size={14} /></span>
 				{packet.snr}
 			</span>
 		{/if}

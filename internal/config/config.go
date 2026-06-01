@@ -26,6 +26,7 @@ type Config struct {
 	MaxMessageLength int           `conf:"default:149,help:maximum outgoing UTF-8 message length"`
 	ReceiveLog       ReceiveLog
 	ChatLog          ChatLog
+	Stats            Stats
 	Send             Send
 	Forward          Forward
 	Auth             Auth
@@ -38,6 +39,13 @@ type ReceiveLog struct {
 	Path          string        `conf:"default:./data/raw,help:received UDP JSONL log directory"`
 	RetentionDays int           `conf:"default:365,help:number of daily received UDP log files to keep"`
 	ReplayWindow  time.Duration `conf:"default:1h,help:time window of received UDP packets replayed on SSE connect"`
+}
+
+// Stats configures the hourly statistics aggregator.
+type Stats struct {
+	Enabled       bool   `conf:"default:true,help:enable hourly packet statistics collection"`
+	Path          string `conf:"default:./data/stats/stats.json,help:path to the stats JSON file"`
+	RetentionDays int    `conf:"default:30,help:number of days of hourly buckets to retain"`
 }
 
 type ChatLog struct {

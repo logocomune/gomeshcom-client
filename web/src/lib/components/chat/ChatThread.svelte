@@ -7,7 +7,7 @@
 	import { cleanMessage, splitSourcePath } from '$lib/api/events';
 	import { resolveGroup } from '$lib/api/groups';
 	import { getSendComposerState } from '$lib/ui/send';
-	import { formatRtt, formatTime } from '$lib/ui/format';
+	import { formatRtt, formatChatTimestamp } from '$lib/ui/format';
 	import { chatIconTooltip, chatMdiIcon, chatRecordSeqId } from '$lib/ui/chat-records';
 	import {
 		mdiArrowLeft,
@@ -62,12 +62,12 @@
 
 <div data-testid="chat-panel" class="flex min-h-0 flex-1 flex-col">
 	<!-- Thread header -->
-	<div class="flex h-10 shrink-0 items-center justify-between border-b border-gray-700/60 px-3">
+	<div class="flex h-10 shrink-0 items-center justify-between border-b border-ink-dim/20 px-3">
 		<div class="flex min-w-0 flex-1 items-center gap-2">
 			{#if showBack}
 				<button
 					type="button"
-					class="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+					class="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-ink-muted hover:text-ink"
 					aria-label="Back to conversations"
 					onclick={onBack}
 				>
@@ -79,19 +79,19 @@
 				{#if group}
 					<span class="text-xl leading-none">{group.flag}</span>
 					<div>
-						<div class="text-sm font-semibold text-white">{group.note}</div>
-						<div class="text-[10px] text-gray-500">Group {group.group} · {group.prefix}</div>
+						<div class="text-sm font-semibold text-ink">{group.note}</div>
+						<div class="text-[10px] text-ink-muted">Group {group.group} · {group.prefix}</div>
 					</div>
 				{:else}
 					<div>
-						<div class="text-sm font-semibold text-white"># {chatTarget.value}</div>
-						<div class="text-[10px] text-gray-500">channel</div>
+						<div class="text-sm font-semibold text-ink"># {chatTarget.value}</div>
+						<div class="text-[10px] text-ink-muted">channel</div>
 					</div>
 				{/if}
 			{:else}
 				<div>
-					<div class="text-sm font-semibold text-white">{chatTarget.value}</div>
-					<div class="text-[10px] text-gray-500">
+					<div class="text-sm font-semibold text-ink">{chatTarget.value}</div>
+					<div class="text-[10px] text-ink-muted">
 						{chatTarget.kind === 'channel' ? 'channel' : 'direct'}
 					</div>
 				</div>
@@ -102,14 +102,14 @@
 				<span class="sr-only">Filter messages</span>
 				<input
 					type="search"
-					class="h-7 w-28 rounded border border-gray-700/60 bg-[#111827] px-2 text-xs text-gray-200 outline-none placeholder:text-gray-500 focus:border-blue-500/60 md:w-44"
+					class="h-7 w-28 rounded-lg border border-ink-dim/30 bg-base px-2 text-xs text-ink outline-none placeholder:text-ink-dim focus:border-azure/60 md:w-44"
 					bind:value={chatState.chatFilter}
 					placeholder="Filter"
 				/>
 			</label>
 			<button
 				type="button"
-				class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-gray-700/60 text-gray-400 hover:border-red-500/50 hover:text-red-400"
+				class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
 				aria-label={isBroadcastTarget ? 'Clear messages' : 'Delete conversation'}
 				title={isBroadcastTarget ? 'Clear messages' : 'Delete conversation'}
 				onclick={() => {
@@ -128,7 +128,7 @@
 	<!-- Message list -->
 	<div bind:this={chatScrollEl} class="min-h-0 flex-1 overflow-auto p-2">
 		{#if displayChatRecords.length === 0}
-			<div class="flex h-full items-center justify-center text-sm text-gray-500">
+			<div class="flex h-full items-center justify-center text-sm text-ink-muted">
 				{chatFilter.trim() === '' ? 'No messages in this chat' : 'No matching messages'}
 			</div>
 		{:else}
@@ -151,7 +151,7 @@
 						? new Date(bestAck.receivedAt).getTime() - new Date(record.received_at).getTime()
 						: -1}
 					<div
-						class="rounded border border-gray-700/60 bg-[#1c2230] p-2 md:p-3 transition-colors hover:border-gray-600/60"
+						class="rounded-xl border border-ink-dim/20 bg-surface-soft p-2 md:p-3 transition-colors hover:border-ink-dim/40"
 						title={record.delivery_status === 'pending'
 							? 'Pending'
 							: record.delivery_status === 'failed'
@@ -161,68 +161,63 @@
 						<div class="flex items-center justify-between gap-2 md:gap-3">
 							<div class="flex min-w-0 items-center gap-2">
 								<div class="min-w-0">
-									<div class="truncate text-xs md:text-sm font-semibold text-white">
+									<div class="truncate text-xs md:text-sm font-semibold text-ink">
 										{sourcePath.origin}
 									</div>
 								</div>
 							</div>
 							<div class="flex items-center gap-1.5">
-								<div class="font-mono text-[10px] md:text-[11px] text-gray-500">
-									{formatTime(record.received_at)}
+								<div class="font-mono text-[10px] md:text-[11px] text-ink-muted">
+									{formatChatTimestamp(record.received_at)}
 								</div>
 								{#if record.delivery_status === 'pending'}
 									<span
-										class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-400/30 border-t-blue-300"
-										style="width: 0.875rem; height: 0.875rem; border: 2px solid rgba(96, 165, 250, 0.3); border-top-color: rgb(147, 197, 253);"
+										class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-azure/30 border-t-azure"
 										title="Pending"
 									></span>
 								{:else if record.delivery_status === 'failed'}
-									<span class="text-[13px] font-bold text-red-400" title="Failed">✗</span>
+									<span class="text-[13px] font-bold text-coral" title="Failed">✗</span>
 								{:else if isSent}
 									{#if chatTarget.kind === 'contact'}
 										{#if sequenceId && rejectEntries.length > 0}
-											<span class="text-[13px] font-bold text-red-400" title="Rejected">✗</span>
+											<span class="text-[13px] font-bold text-coral" title="Rejected">✗</span>
 										{:else if sequenceId && gatewayAck}
 											<span
 												class="flex items-center gap-1"
 												title="Gateway delivered in {formatRtt(rttMs)}"
 											>
-												<span class="text-[13px] font-bold text-green-400">☁️✓</span>
-												<span class="font-mono text-[10px] text-green-600/80"
-													>{formatRtt(rttMs)}</span
-												>
+												<span class="text-[13px] font-bold text-mint">☁️✓</span>
+												<span class="font-mono text-[10px] text-mint/70">{formatRtt(rttMs)}</span>
 											</span>
 										{:else if sequenceId && loraAck}
 											<span
 												class="flex items-center gap-1"
 												title="Acknowledged in {formatRtt(rttMs)}"
 											>
-												<span class="text-[13px] font-bold text-green-400">✓✓</span>
-												<span class="font-mono text-[10px] text-green-600/80"
-													>{formatRtt(rttMs)}</span
-												>
+												<span class="text-[13px] font-bold text-mint">✓✓</span>
+												<span class="font-mono text-[10px] text-mint/70">{formatRtt(rttMs)}</span>
 											</span>
 										{:else}
-											<span class="text-[13px] text-gray-600" title="Sent, waiting for ACK">✓</span>
+											<span class="text-[13px] text-ink-muted" title="Sent, waiting for ACK">✓</span>
 										{/if}
 									{:else if sequenceId && gatewayAck}
 										<span
-											class="text-[13px] text-green-400"
+											class="text-[13px] text-mint"
 											title="Delivered via gateway ({gatewayAck.source})">☁️</span
 										>
 									{:else}
-										<span class="text-[13px] text-green-400" title="Node echo observed">☁️</span>
+										<span class="text-[13px] text-mint" title="Node echo observed">☁️</span>
 									{/if}
 								{/if}
 							</div>
 						</div>
 						<div
-							class="mt-2 rounded border border-gray-700/60 bg-[#111827] px-3 py-2 text-[11px] md:text-sm leading-relaxed text-gray-100"
+							class="mt-2 rounded-lg border border-ink-dim/20 bg-base px-3 py-2 text-[11px] md:text-sm leading-relaxed text-ink"
 						>
 							{cleanMessage(record.msg) || record.msg}
 						</div>
 						{#if isSent && chatTarget.kind === 'contact' && sequenceId && ackEntries.length > 0}
-							<div class="mt-1 space-y-0.5 font-mono text-[10px] text-green-600/70">
+							<div class="mt-1 space-y-0.5 font-mono text-[10px] text-mint/70">
 								{#each ackEntries as ackEntry, ackEntryIndex (ackEntry.ackSource + '-' + ackEntry.receivedAt + '-' + ackEntryIndex)}
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
 										<span>ack {ackEntry.ackSource}</span>
@@ -253,7 +248,7 @@
 						{/if}
 						{#if sourcePath.relays.length > 0 || (!isSent && (record.rssi != null || record.snr != null))}
 							<div
-								class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10px] text-gray-500 md:text-[11px]"
+								class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10px] text-ink-muted md:text-[11px]"
 							>
 								{#if sourcePath.relays.length > 0}
 									<span>via {sourcePath.relays.join(' → ')}</span>
@@ -279,12 +274,12 @@
 	</div>
 
 	<!-- Composer -->
-	<div class="shrink-0 border-t border-gray-700/60 p-2">
+	<div class="shrink-0 border-t border-ink-dim/20 p-2">
 		{#if sendError}
 			<div
-				class="mb-1.5 rounded px-2 py-1 text-xs {sendError.startsWith('Duplicate')
-					? 'bg-amber-900/40 text-amber-300'
-					: 'bg-red-900/40 text-red-300'}"
+				class="mb-1.5 rounded-lg px-2 py-1 text-xs {sendError.startsWith('Duplicate')
+					? 'bg-warm/15 text-warm'
+					: 'bg-coral/15 text-coral'}"
 			>
 				{sendError}
 			</div>
@@ -292,7 +287,7 @@
 		<div class="flex gap-2">
 			<div class="relative min-w-0 flex-1">
 				<input
-					class="h-10 w-full rounded border border-gray-700/60 bg-[#111827] px-3 text-sm text-gray-200 outline-none placeholder:text-gray-500 focus:border-blue-500/60"
+					class="h-10 w-full rounded-lg border border-ink-dim/30 bg-base px-3 text-sm text-ink outline-none placeholder:text-ink-dim focus:border-azure/60"
 					bind:this={messageInputEl}
 					bind:value={chatState.draftMessage}
 					placeholder="Type a message…"
@@ -303,22 +298,22 @@
 				<span
 					class="pointer-events-none absolute bottom-1.5 right-2 text-[10px] tabular-nums {draftMessage.length >=
 					140
-						? 'text-red-400'
-						: 'text-gray-600'}"
+						? 'text-coral'
+						: 'text-ink-muted'}"
 				>
 					{draftMessage.length}/149
 				</span>
 			</div>
 			<div class="flex flex-col items-center gap-1">
 				<button
-					class="h-10 rounded border border-gray-700/60 bg-blue-600/80 px-4 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+					class="h-10 rounded-lg border border-ink-dim/20 bg-azure/80 px-4 text-sm text-base hover:bg-azure disabled:cursor-not-allowed disabled:opacity-50"
 					disabled={!getSendComposerState({ draftMessage, sending, txDisabled }).canSend}
 					onclick={() => void handleSend()}
 				>
 					{getSendComposerState({ draftMessage, sending, txDisabled }).label}
 				</button>
 				{#if getSendComposerState({ draftMessage, sending, txDisabled }).hint}
-					<span class="text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+					<span class="text-[10px] font-semibold uppercase tracking-wide text-warm">
 						{getSendComposerState({ draftMessage, sending, txDisabled }).hint}
 					</span>
 				{/if}

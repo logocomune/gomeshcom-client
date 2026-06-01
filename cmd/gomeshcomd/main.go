@@ -25,6 +25,7 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
+	"github.com/logocomune/gomeshcom-client/internal/stats"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
@@ -87,6 +88,21 @@ func run() error {
 	}
 	go channelShow.Start(ctx)
 
+	var statsStore *stats.Store
+	if cfg.Stats.Enabled {
+		statsStore = stats.New(stats.Config{
+			Enabled:       true,
+			Path:          cfg.Stats.Path,
+			RetentionDays: cfg.Stats.RetentionDays,
+		})
+		if err := statsStore.Load(); err != nil {
+			return fmt.Errorf("load stats: %w", err)
+		}
+		go statsStore.Start(ctx)
+		collector := stats.NewCollector(statsStore, positionStore, cfg.MyCall)
+		go collector.Run(ctx, bus)
+	}
+
 	var fwd *udpforward.Forwarder
 	if cfg.Forward.Targets != "" {
 		targets, err := config.ParseForwardTargets(cfg.Forward.Targets)
@@ -108,7 +124,11 @@ func run() error {
 	}()
 
 	sc := sendcache.New(cfg.Send.DedupTTL)
-	apiServer := httpapi.NewServer(cfg, version, bus, positionStore, receiveLogger, chatLogger, bridge, sc, chatStatus, httpapi.WithChannelShow(channelShow))
+	serverOpts := []httpapi.ServerOption{httpapi.WithChannelShow(channelShow)}
+	if statsStore != nil {
+		serverOpts = append(serverOpts, httpapi.WithStats(statsStore))
+	}
+	apiServer := httpapi.NewServer(cfg, version, bus, positionStore, receiveLogger, chatLogger, bridge, sc, chatStatus, serverOpts...)
 	defer apiServer.Close()
 
 	server := &http.Server{
@@ -137,7 +157,7 @@ func run() error {
 }
 
 func ensureDataDirs(dataDir string) error {
-	for _, dir := range []string{"raw", "nodes", "chat"} {
+	for _, dir := range []string{"raw", "nodes", "chat", "stats"} {
 		path := filepath.Join(dataDir, dir)
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return fmt.Errorf("create data directory %s: %w", path, err)

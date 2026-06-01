@@ -37,19 +37,19 @@
 
 {#if recent.length > 0}
 	<div
-		class="hidden md:flex w-96 flex-col gap-0.5 rounded border border-gray-700 bg-black/70 px-2 py-1.5 text-[11px] shadow-md backdrop-blur-sm"
+		class="hidden md:flex w-96 flex-col gap-0.5 rounded-2xl border border-ink-dim/20 bg-base/80 px-2 py-1.5 text-[11px] shadow-md backdrop-blur-sm"
 	>
-		<span class="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400"
+		<span class="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted"
 			>Live stream</span
 		>
 		{#each recent as event (event.id)}
 			<button
 				type="button"
-				class="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-white/[0.06]"
+				class="flex min-w-0 items-center gap-1.5 rounded-lg px-1 py-0.5 text-left hover:bg-surface-hi/50"
 				onclick={() => focus(event)}
 			>
-				<span class="shrink-0 font-mono text-[10px] text-gray-200">
-					<span class="text-gray-400">{formatDate(event.receivedAt)}</span>
+				<span class="shrink-0 font-mono text-[10px] text-ink">
+					<span class="text-ink-muted">{formatDate(event.receivedAt)}</span>
 					{formatTime(event.receivedAt)}
 				</span>
 				<span
@@ -59,9 +59,9 @@
 					<MdiIcon path={mdiForEvent(event)} size={14} />
 				</span>
 				<span class="min-w-0 truncate">
-					<span class="font-bold text-white">{sender(event) || eventSummary(event)}</span>
+					<span class="font-bold text-ink">{sender(event) || eventSummary(event)}</span>
 					{#if isMessageEvent(event)}
-						<span class="text-gray-400"> · </span><span class="italic text-gray-300">"{messageText(event)}"</span>
+						<span class="text-ink-dim"> · </span><span class="italic text-ink-muted">"{messageText(event)}"</span>
 					{/if}
 				</span>
 			</button>

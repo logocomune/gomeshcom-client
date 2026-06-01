@@ -11,11 +11,11 @@
 
 <div
 	data-testid="map-panel"
-	class="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-gray-700/60 bg-[#151a24] shadow-sm"
+	class="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-ink-dim/20 bg-surface shadow-sm"
 >
-	<div class="flex h-9 shrink-0 items-center justify-between border-b border-gray-700/60 px-3">
-		<span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Map</span>
-		<span class="font-mono text-[11px] text-gray-500">{eventsState.mapPositions.length} nodes</span>
+	<div class="flex h-9 shrink-0 items-center justify-between border-b border-ink-dim/20 px-3">
+		<span class="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">Map</span>
+		<span class="font-mono text-[11px] text-ink-muted">{eventsState.mapPositions.length} nodes</span>
 	</div>
 	<div class="relative min-h-0 flex-1 overflow-hidden">
 		<MeshMapPanel

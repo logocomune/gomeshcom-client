@@ -21,20 +21,20 @@
 	let callsign = $derived(connectionState.stationCallsign || healthCallsign);
 </script>
 
-<div class="min-h-0 flex-1 overflow-y-auto bg-[#111827] px-4 py-8">
+<div class="min-h-0 flex-1 overflow-y-auto bg-base px-4 py-8">
 	<div class="mx-auto max-w-xl space-y-6">
-		<div class="rounded-md border border-blue-500/30 bg-blue-500/10 p-6">
-			<h1 class="font-mono text-2xl font-bold text-blue-300">goMeshCom</h1>
-			<p class="mt-1 text-sm text-gray-400">Web client for the MeshCom mesh radio network</p>
+		<div class="rounded-2xl border border-azure/30 bg-azure/5 p-6">
+			<h1 class="font-mono text-2xl font-bold text-azure">goMeshCom</h1>
+			<p class="mt-1 text-sm text-ink-muted">Web client for the MeshCom mesh radio network</p>
 			{#if version !== '…'}
-				<dl class="mt-4 grid gap-3 text-xs text-blue-400 sm:grid-cols-2">
+				<dl class="mt-4 grid gap-3 text-xs text-azure sm:grid-cols-2">
 					<div>
-						<dt class="text-blue-200/70">Version</dt>
+						<dt class="text-azure/70">Version</dt>
 						<dd class="font-mono">{version}</dd>
 					</div>
 					{#if callsign}
 						<div>
-							<dt class="text-blue-200/70">My call</dt>
+							<dt class="text-azure/70">My call</dt>
 							<dd class="font-mono">{callsign}</dd>
 						</div>
 					{/if}
@@ -42,16 +42,16 @@
 			{/if}
 		</div>
 
-		<div class="rounded-md border border-gray-700/60 bg-[#1a2030] p-5 space-y-3">
-			<h2 class="text-sm font-semibold text-gray-200">Bug Reports &amp; Improvements</h2>
-			<p class="text-xs text-gray-400">
+		<div class="rounded-2xl border border-ink-dim/20 bg-surface p-5 space-y-3">
+			<h2 class="text-sm font-semibold text-ink">Bug Reports &amp; Improvements</h2>
+			<p class="text-xs text-ink-muted">
 				Open an issue on GitHub to report a bug, request a feature, or suggest an improvement.
 			</p>
 			<a
 				href="https://github.com/logocomune/gomeshcom-client/issues"
 				target="_blank"
 				rel="noopener noreferrer"
-				class="inline-flex items-center gap-1.5 rounded border border-gray-600/60 bg-gray-700/40 px-3 py-1.5 text-xs text-gray-200 hover:border-blue-500/50 hover:text-blue-300"
+				class="inline-flex items-center gap-1.5 rounded-lg border border-ink-dim/30 bg-surface-hi px-3 py-1.5 text-xs text-ink hover:border-azure/50 hover:text-azure"
 			>
 				<svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
 					<path
@@ -62,33 +62,33 @@
 			</a>
 		</div>
 
-		<div class="rounded-md border border-gray-700/60 bg-[#1a2030] p-5 space-y-3">
-			<h2 class="text-sm font-semibold text-gray-200">Reference Repository</h2>
-			<p class="text-xs text-gray-400">Upstream codebase used as implementation reference.</p>
+		<div class="rounded-2xl border border-ink-dim/20 bg-surface p-5 space-y-3">
+			<h2 class="text-sm font-semibold text-ink">Reference Repository</h2>
+			<p class="text-xs text-ink-muted">Upstream codebase used as implementation reference.</p>
 			<a
 				href="https://github.com/logocomune/gomeshcom-client"
 				target="_blank"
 				rel="noopener noreferrer"
-				class="inline-flex items-center gap-1.5 rounded border border-gray-600/60 bg-gray-700/40 px-3 py-1.5 text-xs text-gray-200 hover:border-blue-500/50 hover:text-blue-300"
+				class="inline-flex items-center gap-1.5 rounded-lg border border-ink-dim/30 bg-surface-hi px-3 py-1.5 text-xs text-ink hover:border-azure/50 hover:text-azure"
 			>
 				github.com/logocomune/gomeshcom-client
 			</a>
 		</div>
 
-		<div class="rounded-md border border-gray-700/60 bg-[#1a2030] p-5 space-y-3">
-			<h2 class="text-sm font-semibold text-gray-200">Author &amp; Contact</h2>
-			<p class="text-xs text-gray-400">Developed by Alessandro (IU5PMP). For direct inquiries:</p>
+		<div class="rounded-2xl border border-ink-dim/20 bg-surface p-5 space-y-3">
+			<h2 class="text-sm font-semibold text-ink">Author &amp; Contact</h2>
+			<p class="text-xs text-ink-muted">Developed by Alessandro (IU5PMP). For direct inquiries:</p>
 			<a
 				href="mailto:alessandro.lucaferro@gmail.com"
-				class="font-mono text-xs text-blue-400 hover:text-blue-300"
+				class="font-mono text-xs text-azure hover:text-azure/80"
 			>
 				alessandro.lucaferro@gmail.com
 			</a>
 		</div>
 
-		<div class="rounded-md border border-gray-700/40 bg-[#1a2030] p-5">
-			<h2 class="text-sm font-semibold text-gray-200">Disclaimer</h2>
-			<p class="mt-2 text-xs leading-relaxed text-gray-500">
+		<div class="rounded-2xl border border-ink-dim/20 bg-surface p-5">
+			<h2 class="text-sm font-semibold text-ink">Disclaimer</h2>
+			<p class="mt-2 text-xs leading-relaxed text-ink-muted">
 				This software is provided "as is", without warranty of any kind. The author is not liable
 				for any damage arising from its use. Use of this software for radio communications is
 				subject to the regulations of your national telecommunications authority.

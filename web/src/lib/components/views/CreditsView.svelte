@@ -20,83 +20,83 @@
 	];
 </script>
 
-<div class="min-h-0 flex-1 overflow-y-auto bg-[#111827] px-4 py-8">
+<div class="min-h-0 flex-1 overflow-y-auto bg-base px-4 py-8">
 	<div class="mx-auto max-w-2xl">
 
-		<h1 class="mb-1 font-mono text-2xl font-bold text-blue-300">gomeshcom</h1>
-		<p class="mb-8 text-sm text-gray-400">
+		<h1 class="mb-1 font-mono text-2xl font-bold text-azure">gomeshcom</h1>
+		<p class="mb-8 text-sm text-ink-muted">
 			A MeshCom UDP gateway client — open-source software built on open-source shoulders.
 		</p>
 
-		<section class="mb-10 rounded-lg border border-blue-500/30 bg-blue-500/5 p-5">
-			<h2 class="mb-2 text-xs font-semibold uppercase tracking-wider text-blue-400">MeshCom Project</h2>
-			<p class="mb-3 text-sm text-gray-300">
-				This software interfaces with the <strong class="text-white">MeshCom</strong> LoRa mesh network
+		<section class="mb-10 rounded-2xl border border-azure/30 bg-azure/5 p-5">
+			<h2 class="mb-2 text-xs font-semibold uppercase tracking-wider text-azure">MeshCom Project</h2>
+			<p class="mb-3 text-sm text-ink-muted">
+				This software interfaces with the <strong class="text-ink">MeshCom</strong> LoRa mesh network
 				developed by OE1KBC and the Austrian amateur radio community (ÖVSV / ICSSW).
 			</p>
 			<a
 				href="https://icssw.org/en/meshcom/"
 				target="_blank"
 				rel="noopener noreferrer"
-				class="inline-flex items-center gap-1.5 rounded border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/20"
+				class="inline-flex items-center gap-1.5 rounded-lg border border-azure/40 bg-azure/10 px-3 py-1.5 text-xs font-medium text-azure hover:bg-azure/20"
 			>
 				icssw.org/en/meshcom ↗
 			</a>
 		</section>
 
 		<section class="mb-8">
-			<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Go backend libraries</h2>
+			<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">Go backend libraries</h2>
 			<div class="flex flex-col gap-2">
-				<div class="rounded border border-gray-700/60 bg-[#1c2230] px-4 py-3">
+				<div class="rounded-2xl border border-ink-dim/20 bg-surface px-4 py-3">
 					<div class="flex items-baseline justify-between gap-2">
 						<a href="https://go.dev" target="_blank" rel="noopener noreferrer"
-							class="font-mono text-sm font-semibold text-gray-200 hover:text-blue-300">Go</a>
-						<span class="shrink-0 text-xs text-gray-600">1.26 · BSD-3-Clause</span>
+							class="font-mono text-sm font-semibold text-ink hover:text-azure">Go</a>
+						<span class="shrink-0 text-xs text-ink-muted">1.26 · BSD-3-Clause</span>
 					</div>
-					<p class="mt-0.5 text-xs text-gray-500">Language runtime, standard library, toolchain</p>
+					<p class="mt-0.5 text-xs text-ink-muted">Language runtime, standard library, toolchain</p>
 				</div>
 				{#each goLibs as lib (lib.name)}
-					<div class="rounded border border-gray-700/60 bg-[#1c2230] px-4 py-3">
+					<div class="rounded-2xl border border-ink-dim/20 bg-surface px-4 py-3">
 						<div class="flex items-baseline justify-between gap-2">
 							<a href={lib.url} target="_blank" rel="noopener noreferrer"
-								class="font-mono text-sm font-semibold text-gray-200 hover:text-blue-300">{lib.name}</a>
-							<span class="shrink-0 text-xs text-gray-600">{lib.version} · {lib.license}</span>
+								class="font-mono text-sm font-semibold text-ink hover:text-azure">{lib.name}</a>
+							<span class="shrink-0 text-xs text-ink-muted">{lib.version} · {lib.license}</span>
 						</div>
-						<p class="mt-0.5 text-xs text-gray-500">{lib.desc}</p>
+						<p class="mt-0.5 text-xs text-ink-muted">{lib.desc}</p>
 					</div>
 				{/each}
 			</div>
 		</section>
 
 		<section class="mb-8">
-			<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Frontend libraries</h2>
+			<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">Frontend libraries</h2>
 			<div class="flex flex-col gap-2">
 				{#each jsLibs as lib (lib.name)}
-					<div class="rounded border border-gray-700/60 bg-[#1c2230] px-4 py-3">
+					<div class="rounded-2xl border border-ink-dim/20 bg-surface px-4 py-3">
 						<div class="flex items-baseline justify-between gap-2">
 							<a href={lib.url} target="_blank" rel="noopener noreferrer"
-								class="font-mono text-sm font-semibold text-gray-200 hover:text-blue-300">{lib.name}</a>
-							<span class="shrink-0 text-xs text-gray-600">{lib.version} · {lib.license}</span>
+								class="font-mono text-sm font-semibold text-ink hover:text-azure">{lib.name}</a>
+							<span class="shrink-0 text-xs text-ink-muted">{lib.version} · {lib.license}</span>
 						</div>
-						<p class="mt-0.5 text-xs text-gray-500">{lib.desc}</p>
+						<p class="mt-0.5 text-xs text-ink-muted">{lib.desc}</p>
 					</div>
 				{/each}
 			</div>
 		</section>
 
 		<section class="mb-8">
-			<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Map data</h2>
-			<div class="rounded border border-gray-700/60 bg-[#1c2230] px-4 py-3">
+			<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">Map data</h2>
+			<div class="rounded-2xl border border-ink-dim/20 bg-surface px-4 py-3">
 				<div class="flex items-baseline justify-between gap-2">
 					<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
-						class="font-mono text-sm font-semibold text-gray-200 hover:text-blue-300">OpenStreetMap</a>
-					<span class="shrink-0 text-xs text-gray-600">© OpenStreetMap contributors · ODbL</span>
+						class="font-mono text-sm font-semibold text-ink hover:text-azure">OpenStreetMap</a>
+					<span class="shrink-0 text-xs text-ink-muted">© OpenStreetMap contributors · ODbL</span>
 				</div>
-				<p class="mt-0.5 text-xs text-gray-500">Tile data and cartography used for the node map</p>
+				<p class="mt-0.5 text-xs text-ink-muted">Tile data and cartography used for the node map</p>
 			</div>
 		</section>
 
-		<p class="text-center text-xs text-gray-600">
+		<p class="text-center text-xs text-ink-muted">
 			gomeshcom is not affiliated with or endorsed by the MeshCom project or ÖVSV/ICSSW.
 		</p>
 	</div>

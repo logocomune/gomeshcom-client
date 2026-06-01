@@ -11,13 +11,13 @@
 {#if viewState.mobileDrawerOpen}
 	<button
 		type="button"
-		class="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm"
+		class="fixed inset-0 z-[1500] bg-black/60 backdrop-blur-sm"
 		aria-label="Close menu"
 		onclick={() => viewState.closeDrawer()}
 	></button>
 
 	<nav
-		class="fixed inset-y-0 left-0 z-[201] flex w-64 flex-col border-r border-gray-700/60 bg-[#1c2230] shadow-2xl"
+		class="fixed inset-y-0 left-0 z-[1501] flex w-64 flex-col border-r border-gray-700/60 bg-[#1c2230] shadow-2xl"
 		aria-label="Mobile navigation"
 	>
 		<div class="flex h-12 shrink-0 items-center justify-between border-b border-gray-700/60 px-4">

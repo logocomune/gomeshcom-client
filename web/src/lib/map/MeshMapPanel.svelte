@@ -66,7 +66,6 @@
 	let dmTraceTickerHandle: ReturnType<typeof setInterval> | null = null;
 	let activePulseOverlay: any = null;
 	const activeMsgPulseOverlays = new Set<any>();
-	const mountedAt = Date.now();
 
 	let visibleCount = $derived(positions.filter((p) => nodeFreshness(p, now) !== 'hidden').length);
 	let myCallPosition = $derived(
@@ -158,7 +157,7 @@
 			return new Style({
 				image: new CircleStyle({
 					radius,
-					fill: new Fill({ color: 'rgba(59,130,246,0.9)' }),
+					fill: new Fill({ color: 'rgba(96,165,250,0.9)' }),
 					stroke: new Stroke({ color: '#fff', width: 2 })
 				}),
 				text: new Text({
@@ -249,9 +248,10 @@
 
 	$effect(() => {
 		const target = eventsState.mapFocusTarget;
-		if (!target || !initialized || target.ts < mountedAt) return;
+		if (!target || !initialized) return;
 		const view = map?.getView();
 		if (!view || !olContext.fromLonLat) return;
+		eventsState.mapFocusTarget = null;
 		view.animate({
 			center: olContext.fromLonLat([target.lng, target.lat]),
 			zoom: 12,
@@ -324,8 +324,8 @@
 		const el = document.createElement('div');
 		el.style.cssText = [
 			'width:28px', 'height:28px', 'border-radius:50%',
-			'background:rgba(239,68,68,0.30)',
-			'border:2px solid rgb(239,68,68)',
+			'background:rgba(248,113,113,0.30)',
+			'border:2px solid rgb(248,113,113)',
 			'animation:meshcom-pulse 0.7s ease-out 3',
 			'pointer-events:none'
 		].join(';');
@@ -566,62 +566,62 @@
 	}
 </script>
 
-<div class="relative h-full w-full overflow-hidden bg-[#0d1017]">
+<div class="relative h-full w-full overflow-hidden bg-base">
 	<div bind:this={mapElement} class="h-full w-full"></div>
 
-	<div class="absolute left-2 top-2 z-[1000] flex flex-col rounded shadow-md">
+	<div class="absolute left-2 top-2 z-[1000] flex flex-col rounded-lg shadow-md">
 		<button
-			class="flex h-7 w-7 items-center justify-center rounded-t border-b border-gray-300 bg-white text-gray-800 hover:bg-gray-100"
+			class="flex h-7 w-7 items-center justify-center rounded-t border-b border-ink-dim/30 bg-surface text-ink hover:bg-surface-hi"
 			onclick={() => zoomBy(1)}
 		>
 			<MdiIcon path={mdiPlus} size={17} />
 		</button>
 		<button
-			class="flex h-7 w-7 items-center justify-center border-b border-gray-300 bg-white text-gray-800 hover:bg-gray-100"
+			class="flex h-7 w-7 items-center justify-center border-b border-ink-dim/30 bg-surface text-ink hover:bg-surface-hi"
 			onclick={() => zoomBy(-1)}
 		>
 			<MdiIcon path={mdiMinus} size={17} />
 		</button>
 		<button
-			class="flex h-7 w-7 items-center justify-center border-b border-gray-300 bg-white hover:bg-gray-100 {showMaidenhead
-				? 'text-gray-800'
-				: 'text-gray-400 opacity-70'}"
+			class="flex h-7 w-7 items-center justify-center border-b border-ink-dim/30 bg-surface hover:bg-surface-hi {showMaidenhead
+				? 'text-ink'
+				: 'text-ink-dim opacity-60'}"
 			title="Toggle Maidenhead grid"
 			onclick={toggleMaidenhead}
 		>
 			<MdiIcon path={showMaidenhead ? mdiGrid : mdiGridOff} size={16} />
 		</button>
 		<button
-			class="flex h-7 w-7 items-center justify-center border-b border-gray-300 bg-white hover:bg-gray-100 {showClustering
-				? 'text-gray-800'
-				: 'text-gray-400 opacity-70'}"
+			class="flex h-7 w-7 items-center justify-center border-b border-ink-dim/30 bg-surface hover:bg-surface-hi {showClustering
+				? 'text-ink'
+				: 'text-ink-dim opacity-60'}"
 			title="Toggle clustering"
 			onclick={toggleClustering}
 		>
 			<MdiIcon path={showClustering ? mdiLayersTriple : mdiLayersTripleOutline} size={16} />
 		</button>
 		<button
-			class="flex h-7 w-7 items-center justify-center border-b border-gray-300 bg-white hover:bg-gray-100 {showLabels
-				? 'text-gray-800'
-				: 'text-gray-400 opacity-70'}"
+			class="flex h-7 w-7 items-center justify-center border-b border-ink-dim/30 bg-surface hover:bg-surface-hi {showLabels
+				? 'text-ink'
+				: 'text-ink-dim opacity-60'}"
 			title="Toggle callsign labels"
 			onclick={toggleLabels}
 		>
 			<MdiIcon path={showLabels ? mdiTagText : mdiTagOff} size={16} />
 		</button>
 		<button
-			class="flex h-7 w-7 items-center justify-center border-b border-gray-300 bg-white hover:bg-gray-100 {showDmTracking
-				? 'text-gray-800'
-				: 'text-gray-400 opacity-70'}"
+			class="flex h-7 w-7 items-center justify-center border-b border-ink-dim/30 bg-surface hover:bg-surface-hi {showDmTracking
+				? 'text-ink'
+				: 'text-ink-dim opacity-60'}"
 			title="Toggle realtime DM tracking"
 			onclick={toggleDmTracking}
 		>
 			<MdiIcon path={mdiMapMarkerPath} size={16} />
 		</button>
 		<button
-			class="flex h-7 w-7 items-center justify-center rounded-b bg-white hover:bg-gray-100 {showRuler
-				? 'text-gray-800'
-				: 'text-gray-400 opacity-70'}"
+			class="flex h-7 w-7 items-center justify-center rounded-b bg-surface hover:bg-surface-hi {showRuler
+				? 'text-ink'
+				: 'text-ink-dim opacity-60'}"
 			title="Toggle ruler distances"
 			onclick={toggleRuler}
 		>
@@ -631,7 +631,7 @@
 
 	{#if myCallPosition}
 		<button
-			class="absolute right-2 top-2 z-[1000] rounded border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-800 shadow hover:bg-gray-100"
+			class="absolute right-2 top-2 z-[1000] rounded-lg border border-ink-dim/30 bg-surface px-2 py-1 text-xs font-semibold text-ink shadow hover:bg-surface-hi"
 			title="Center on {myCall}"
 			onclick={recenter}
 		>
@@ -642,19 +642,19 @@
 	{/if}
 
 	<div
-		class="absolute bottom-2 left-2 z-[1000] rounded border border-gray-700 bg-[#1e2330]/90 px-2 py-1 font-mono text-[11px] text-gray-200"
+		class="absolute bottom-2 left-2 z-[1000] rounded-lg border border-ink-dim/20 bg-surface/90 px-2 py-1 font-mono text-[11px] text-ink-muted"
 	>
 		{visibleCount} positions · OSM · Maidenhead
 	</div>
 
 	<div
-		class="absolute bottom-2 right-2 z-[1000] rounded border border-gray-700 bg-[#1e2330]/90 px-2 py-1 text-[10px] text-gray-300"
+		class="absolute bottom-2 right-2 z-[1000] rounded-lg border border-ink-dim/20 bg-surface/90 px-2 py-1 text-[10px] text-ink-muted"
 	>
 		© OpenStreetMap contributors
 	</div>
 
 	<div
 		bind:this={tooltipElement}
-		class="pointer-events-none absolute z-[2000] hidden min-w-[160px] whitespace-nowrap rounded border border-gray-700 bg-gray-950 px-3 py-2 text-[11px] leading-5 text-white shadow-md"
+		class="pointer-events-none absolute z-[2000] hidden min-w-[160px] whitespace-nowrap rounded-lg border border-ink-dim/20 bg-base px-3 py-2 text-[11px] leading-5 text-ink shadow-md"
 	></div>
 </div>
