@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { connectionState } from '$lib/stores/connection.svelte';
+	import { base } from '$app/paths';
 
 	let version = $state('…');
 	let healthCallsign = $state('');
@@ -32,12 +33,18 @@
 						<dt class="text-azure/70">Version</dt>
 						<dd class="font-mono">{version}</dd>
 					</div>
-					{#if callsign}
-						<div>
-							<dt class="text-azure/70">My call</dt>
-							<dd class="font-mono">{callsign}</dd>
-						</div>
-					{/if}
+					<div>
+						<dt class="text-azure/70">My call</dt>
+						<dd class="flex items-center gap-2">
+							<span class="font-mono">{callsign || '(unset)'}</span>
+							<a
+								href="{base}/settings"
+								class="rounded border border-ink-dim/30 px-1.5 py-0.5 text-xs text-ink-muted hover:border-azure/50 hover:text-azure"
+							>
+								Edit in Settings
+							</a>
+						</dd>
+					</div>
 				</dl>
 			{/if}
 		</div>

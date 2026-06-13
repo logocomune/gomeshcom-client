@@ -11,6 +11,8 @@ import {
 	splitSourcePath,
 	packetFromEvent
 } from './events';
+import type { DmScope } from './chat';
+import { baseCallFrom } from './chat';
 
 export type AckEntry = {
 	receivedAt: string;
@@ -32,18 +34,20 @@ export function ackEntriesForRecord(
 	ackIndex: AckIndex,
 	sequenceId: string | null,
 	record: ChatRecord,
-	stationCallsign: string
+	stationCallsign: string,
+	scope: DmScope = 'mycall'
 ): AckEntry[] {
-	return entriesForRecord(ackIndex.acked, sequenceId, record, stationCallsign);
+	return entriesForRecord(ackIndex.acked, sequenceId, record, stationCallsign, scope);
 }
 
 export function rejectEntriesForRecord(
 	ackIndex: AckIndex,
 	sequenceId: string | null,
 	record: ChatRecord,
-	stationCallsign: string
+	stationCallsign: string,
+	scope: DmScope = 'mycall'
 ): AckEntry[] {
-	return entriesForRecord(ackIndex.rejected, sequenceId, record, stationCallsign);
+	return entriesForRecord(ackIndex.rejected, sequenceId, record, stationCallsign, scope);
 }
 
 export function mergeAckIndexes(...indexes: AckIndex[]): AckIndex {
@@ -127,20 +131,32 @@ function entriesForRecord(
 	entriesBySequence: Map<string, AckEntry[]>,
 	sequenceId: string | null,
 	record: ChatRecord,
-	stationCallsign: string
+	stationCallsign: string,
+	scope: DmScope
 ): AckEntry[] {
 	if (!sequenceId) return [];
 	const entries = entriesBySequence.get(sequenceId) ?? [];
-	return entries.filter((entry) => entryMatchesRecord(entry, record, stationCallsign));
+	return entries.filter((entry) => entryMatchesRecord(entry, record, stationCallsign, scope));
 }
 
-function entryMatchesRecord(entry: AckEntry, record: ChatRecord, stationCallsign: string): boolean {
+function entryMatchesRecord(
+	entry: AckEntry,
+	record: ChatRecord,
+	stationCallsign: string,
+	scope: DmScope
+): boolean {
 	const destination = normalizeCallsign(record.dst);
 	if (destination && normalizeCallsign(entry.source) !== destination) return false;
 
 	const target = normalizeCallsign(entry.target);
 	const local = normalizeCallsign(stationCallsign);
-	if (target && local && target !== local) return false;
+	if (target && local) {
+		// In basecall scope compare base callsigns so that an ACK addressed to
+		// "IU5PMP-10" is matched against the active callsign "IU5PMP-1".
+		const targetBase = scope === 'basecall' ? baseCallFrom(target) : target;
+		const localBase = scope === 'basecall' ? baseCallFrom(local) : local;
+		if (targetBase !== localBase) return false;
+	}
 
 	return true;
 }

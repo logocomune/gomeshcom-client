@@ -36,10 +36,18 @@ func TestOutboxConfirmSuppressesFailure(t *testing.T) {
 		failed <- message
 	})
 
-	box.Register("QQ0QQ-1", "QQ1ABC-1", "hello", time.Now())
+	createdAt := time.Now()
+	box.Register("QQ0QQ-1", "QQ1ABC-1", "hello", createdAt)
 
-	if !box.Confirm("QQ0QQ-1,RELAY-1", "QQ1ABC-1", "hello") {
+	pending, ok := box.Confirm("QQ0QQ-1,RELAY-1", "QQ1ABC-1", "hello")
+	if !ok {
 		t.Fatal("Confirm returned false")
+	}
+	if pending.Destination != "QQ1ABC-1" {
+		t.Errorf("returned pending has wrong destination: %q", pending.Destination)
+	}
+	if pending.CreatedAt.IsZero() {
+		t.Error("returned pending has zero CreatedAt")
 	}
 
 	select {
@@ -53,13 +61,13 @@ func TestOutboxConfirmRequiresDestinationAndMessage(t *testing.T) {
 	box := New(time.Minute, nil)
 	box.Register("QQ0QQ-1", "QQ1ABC-1", "hello", time.Now())
 
-	if box.Confirm("QQ0QQ-1", "QQ1ABC-1", "different") {
+	if _, ok := box.Confirm("QQ0QQ-1", "QQ1ABC-1", "different"); ok {
 		t.Fatal("Confirm matched different message")
 	}
-	if box.Confirm("QQ0QQ-1", "QQ2ABC-1", "hello") {
+	if _, ok := box.Confirm("QQ0QQ-1", "QQ2ABC-1", "hello"); ok {
 		t.Fatal("Confirm matched different destination")
 	}
-	if !box.Confirm("QQ0QQ-1", "QQ1ABC-1", "hello") {
+	if _, ok := box.Confirm("QQ0QQ-1", "QQ1ABC-1", "hello"); !ok {
 		t.Fatal("Confirm did not match original message")
 	}
 }
@@ -79,7 +87,7 @@ func TestOutboxConfirmAcceptsNodeSequenceSuffix(t *testing.T) {
 
 			box.Register("QQ0QQ-1", "QQ1ABC-1", "hello", time.Now())
 
-			if !box.Confirm("QQ0QQ-1", "QQ1ABC-1", observed) {
+			if _, ok := box.Confirm("QQ0QQ-1", "QQ1ABC-1", observed); !ok {
 				t.Fatal("Confirm did not match node sequence suffix")
 			}
 
@@ -104,9 +112,39 @@ func TestOutboxConfirmRejectsMalformedNodeSequenceSuffix(t *testing.T) {
 			box := New(time.Minute, nil)
 			box.Register("QQ0QQ-1", "QQ1ABC-1", "hello", time.Now())
 
-			if box.Confirm("QQ0QQ-1", "QQ1ABC-1", observed) {
+			if _, ok := box.Confirm("QQ0QQ-1", "QQ1ABC-1", observed); ok {
 				t.Fatal("Confirm matched malformed node sequence suffix")
 			}
 		})
+	}
+}
+
+// TestOutboxConfirmReturnsPendingCreatedAt verifies that the returned
+// PendingMessage preserves the original CreatedAt for latency calculation.
+func TestOutboxConfirmReturnsPendingCreatedAt(t *testing.T) {
+	box := New(time.Minute, nil)
+	createdAt := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
+	box.Register("QQ0QQ-1", "QQ1ABC-1", "ping", createdAt)
+
+	pending, ok := box.Confirm("QQ0QQ-1", "QQ1ABC-1", "ping")
+	if !ok {
+		t.Fatal("Confirm returned false")
+	}
+	if !pending.CreatedAt.Equal(createdAt) {
+		t.Errorf("CreatedAt: want %v, got %v", createdAt, pending.CreatedAt)
+	}
+}
+
+// TestOutboxConfirmDedup verifies that a second Confirm for the same message
+// returns false (first ack wins).
+func TestOutboxConfirmDedup(t *testing.T) {
+	box := New(time.Minute, nil)
+	box.Register("QQ0QQ-1", "QQ1ABC-1", "hello", time.Now())
+
+	if _, ok := box.Confirm("QQ0QQ-1", "QQ1ABC-1", "hello"); !ok {
+		t.Fatal("first Confirm returned false")
+	}
+	if _, ok := box.Confirm("QQ0QQ-1", "QQ1ABC-1", "hello"); ok {
+		t.Fatal("second Confirm should return false (dedup)")
 	}
 }

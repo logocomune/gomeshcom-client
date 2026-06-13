@@ -18,6 +18,7 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/chatlog"
 	"github.com/logocomune/gomeshcom-client/internal/chatstatus"
 	"github.com/logocomune/gomeshcom-client/internal/config"
+	"github.com/logocomune/gomeshcom-client/internal/dmstats"
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/logfmt"
 	"github.com/logocomune/gomeshcom-client/internal/meshcom"
@@ -27,6 +28,12 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 )
+
+// staticCallsign is a test-only myCallSource returning a fixed callsign.
+// It satisfies chatlog.myCallSource (unexported interface) via structural typing.
+type staticCallsign string
+
+func (s staticCallsign) Current() string { return string(s) }
 
 // stubBridge is a fake messageSender for tests.
 type stubBridge struct {
@@ -274,7 +281,7 @@ func TestCreateMessagePersistsFailedWhenEchoMissing(t *testing.T) {
 	dir := t.TempDir()
 	cfg.ChatLog.Path = dir
 	bus := events.NewBus()
-	log := chatlog.New(dir, cfg.MyCall)
+	log := chatlog.New(dir, staticCallsign(cfg.MyCall))
 	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil, nil)
 	server.outbox = outbox.New(10*time.Millisecond, server.handleOutgoingTimeout)
 
@@ -291,7 +298,7 @@ func TestCreateMessagePersistsFailedWhenEchoMissing(t *testing.T) {
 	deadline := time.After(time.Second)
 	for len(records) == 0 {
 		var err error
-		records, err = log.ReadSince("DM_QQ1ABC-1", time.Time{})
+		records, err = log.ReadSince("DM_QQ0QQ_QQ1ABC-1", time.Time{})
 		if err != nil {
 			t.Fatalf("ReadSince: %v", err)
 		}
@@ -315,7 +322,7 @@ func TestCreateMessageDoesNotFailWhenEchoArrives(t *testing.T) {
 	dir := t.TempDir()
 	cfg.ChatLog.Path = dir
 	bus := events.NewBus()
-	log := chatlog.New(dir, cfg.MyCall)
+	log := chatlog.New(dir, staticCallsign(cfg.MyCall))
 	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil, nil)
 	server.outbox = outbox.New(30*time.Millisecond, server.handleOutgoingTimeout)
 
@@ -340,7 +347,7 @@ func TestCreateMessageDoesNotFailWhenEchoArrives(t *testing.T) {
 	})
 
 	time.Sleep(60 * time.Millisecond)
-	records, err := log.ReadSince("DM_QQ1ABC-1", time.Time{})
+	records, err := log.ReadSince("DM_QQ0QQ_QQ1ABC-1", time.Time{})
 	if err != nil {
 		t.Fatalf("ReadSince: %v", err)
 	}
@@ -426,6 +433,45 @@ func TestAuthSessionLifecycle(t *testing.T) {
 
 	if reuseRec.Code != http.StatusUnauthorized {
 		t.Fatalf("reused session status = %d, want %d", reuseRec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthSessionSurvivesServerRestart(t *testing.T) {
+	cfg := testConfig()
+	cfg.DataDir = t.TempDir()
+	cfg.Auth = config.Auth{
+		Username:   "admin",
+		Password:   "secret",
+		SessionTTL: time.Hour,
+		CookieName: "meshcom_session",
+	}
+
+	firstServer := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+	loginBody, err := json.Marshal(map[string]string{"username": "admin", "password": "secret"})
+	if err != nil {
+		t.Fatalf("marshal login body: %v", err)
+	}
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/session", bytes.NewReader(loginBody))
+	loginResponse := httptest.NewRecorder()
+	firstServer.Handler().ServeHTTP(loginResponse, loginRequest)
+	if loginResponse.Code != http.StatusNoContent {
+		t.Fatalf("login status = %d, want %d", loginResponse.Code, http.StatusNoContent)
+	}
+	cookies := loginResponse.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookie count = %d, want 1", len(cookies))
+	}
+	firstServer.Close()
+
+	restartedServer := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+	defer restartedServer.Close()
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	sessionRequest.AddCookie(cookies[0])
+	sessionResponse := httptest.NewRecorder()
+	restartedServer.Handler().ServeHTTP(sessionResponse, sessionRequest)
+
+	if sessionResponse.Code != http.StatusOK {
+		t.Fatalf("session status after restart = %d, want %d", sessionResponse.Code, http.StatusOK)
 	}
 }
 
@@ -577,7 +623,7 @@ func TestListPositions(t *testing.T) {
 
 func TestListConversations(t *testing.T) {
 	dir := t.TempDir()
-	log := chatlog.New(dir, "QQ0QQ-1")
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{
 		Destination: "*",
 		Message:     "hello",
@@ -604,7 +650,7 @@ func TestListConversations(t *testing.T) {
 
 func TestGetConversation(t *testing.T) {
 	dir := t.TempDir()
-	log := chatlog.New(dir, "QQ0QQ-1")
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{
 		Destination: "*",
 		Message:     "hello",
@@ -648,7 +694,7 @@ func TestGetConversationInvalid(t *testing.T) {
 
 func TestGetConversationWithHours(t *testing.T) {
 	dir := t.TempDir()
-	log := chatlog.New(dir, "QQ0QQ-1")
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
 
 	now := time.Now().UTC()
 	log.Append(meshcom.TextMessage{Destination: "*", Message: "recent"}, now.Add(-10*time.Minute))
@@ -687,7 +733,7 @@ func TestGetConversationWithHours(t *testing.T) {
 
 func TestGetConversationUsesThirtyDaysForDMDefault(t *testing.T) {
 	dir := t.TempDir()
-	log := chatlog.New(dir, "QQ0QQ-1")
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
 
 	now := time.Now().UTC()
 	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "dm recent"}, now.Add(-29*24*time.Hour))
@@ -700,8 +746,10 @@ func TestGetConversationUsesThirtyDaysForDMDefault(t *testing.T) {
 
 	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 
-	dmRequest := httptest.NewRequest(http.MethodGet, "/api/chat/DM_QQ1ABC-1", nil)
-	dmRequest.SetPathValue("conversation", "DM_QQ1ABC-1")
+	// mycall-scoped id: DM_<basecall(mycall)>-1_<peer> = DM_QQ0QQ-1_QQ1ABC-1
+	// FileIDForAPIID resolves to DM_QQ0QQ_QQ1ABC-1 (the actual file).
+	dmRequest := httptest.NewRequest(http.MethodGet, "/api/chat/DM_QQ0QQ-1_QQ1ABC-1", nil)
+	dmRequest.SetPathValue("conversation", "DM_QQ0QQ-1_QQ1ABC-1")
 	dmResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(dmResponse, dmRequest)
 
@@ -807,7 +855,7 @@ func TestStreamEventsSendsStationIdentity(t *testing.T) {
 func TestStreamEventsSendsStationIdentityTxDisabled(t *testing.T) {
 	cfg := testConfig()
 	cfg.MyCall = "QQ1ABC-7"
-	cfg.Send.DisableTx = true
+	cfg.DemoMode = true
 	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
 
 	body := streamBodyUntil(t, server, "event: station.identity")
@@ -984,7 +1032,7 @@ func TestStreamEventsRejectsInvalidReplayFromQuery(t *testing.T) {
 
 func TestDeleteConversation(t *testing.T) {
 	dir := t.TempDir()
-	log := chatlog.New(dir, "QQ0QQ-1")
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{Destination: "*", Message: "hello"}, testTime())
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
@@ -1020,7 +1068,7 @@ func TestDeleteConversationInvalidID(t *testing.T) {
 }
 
 func TestDeleteConversationMissingFile(t *testing.T) {
-	log := chatlog.New(t.TempDir(), "QQ0QQ-1")
+	log := chatlog.New(t.TempDir(), staticCallsign("QQ0QQ-1"))
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/api/chat/P_999", nil)
 	request.SetPathValue("conversation", "P_999")
@@ -1035,7 +1083,7 @@ func TestDeleteConversationMissingFile(t *testing.T) {
 
 func TestDeleteBroadcast(t *testing.T) {
 	dir := t.TempDir()
-	log := chatlog.New(dir, "QQ0QQ-1")
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{Destination: "*", Message: "test"}, testTime())
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
@@ -1080,7 +1128,7 @@ func TestServerClose(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Confirm that the message in outbox was NOT confirmed (still exists), because the watch goroutine was stopped.
-	if !server.outbox.Confirm("SRC", "DST", "HELLO") {
+	if _, ok := server.outbox.Confirm("SRC", "DST", "HELLO"); !ok {
 		t.Error("expected message to still be pending in outbox after Close()")
 	}
 }
@@ -1178,7 +1226,7 @@ func newTestChatStatus(t *testing.T) *chatstatus.Store {
 
 func TestDeleteConversationRemovesChatStatusEntry(t *testing.T) {
 	chatDir := t.TempDir()
-	log := chatlog.New(chatDir, "QQ0QQ-1")
+	log := chatlog.New(chatDir, staticCallsign("QQ0QQ-1"))
 	cs := newTestChatStatus(t)
 
 	// Pre-populate the status entry.
@@ -1202,7 +1250,7 @@ func TestDeleteConversationRemovesChatStatusEntry(t *testing.T) {
 
 func TestMarkConversationRead(t *testing.T) {
 	chatDir := t.TempDir()
-	log := chatlog.New(chatDir, "QQ0QQ-1")
+	log := chatlog.New(chatDir, staticCallsign("QQ0QQ-1"))
 	cs := newTestChatStatus(t)
 
 	cs.RecordIncoming("P_broadcast", time.Now(), "test")
@@ -1261,7 +1309,7 @@ func TestMarkConversationReadRequiresAuth(t *testing.T) {
 
 func TestGetConversationDoesNotAlterUnreadCount(t *testing.T) {
 	chatDir := t.TempDir()
-	log := chatlog.New(chatDir, "QQ0QQ-1")
+	log := chatlog.New(chatDir, staticCallsign("QQ0QQ-1"))
 	cs := newTestChatStatus(t)
 
 	cs.RecordIncoming("P_broadcast", time.Now(), "test")
@@ -1353,4 +1401,295 @@ func TestRequestLogUsesXForwardedForWhenCFHeaderMissing(t *testing.T) {
 	if !strings.Contains(logBuffer.String(), "caller_ip=198.51.100.42") {
 		t.Fatalf("request log = %q, want X-Forwarded-For IP", logBuffer.String())
 	}
+}
+
+// ---- scope-aware API tests --------------------------------------------------
+
+func TestListConversationsMycallScope(t *testing.T) {
+	dir := t.TempDir()
+	// testConfig().MyCall = "QQ0QQ-1", basecall = "QQ0QQ"
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	// Write a DM from peer to us: file lands in DM_QQ0QQ_QQ1ABC-1.jsonl
+	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "hi"}, testTime())
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/list?scope=mycall", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body []chatlog.Conversation
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body) != 1 {
+		t.Fatalf("expected 1 conversation, got %d", len(body))
+	}
+	// mycall scope: id must use full SSID form DM_QQ0QQ-1_QQ1ABC-1
+	if body[0].ID != "DM_QQ0QQ-1_QQ1ABC-1" {
+		t.Errorf("ID = %q, want DM_QQ0QQ-1_QQ1ABC-1", body[0].ID)
+	}
+}
+
+func TestListConversationsBasecallScope(t *testing.T) {
+	dir := t.TempDir()
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "hi"}, testTime())
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/list?scope=basecall", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body []chatlog.Conversation
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body) != 1 {
+		t.Fatalf("expected 1 conversation, got %d", len(body))
+	}
+	// basecall scope: id keeps file id form DM_QQ0QQ_QQ1ABC-1
+	if body[0].ID != "DM_QQ0QQ_QQ1ABC-1" {
+		t.Errorf("ID = %q, want DM_QQ0QQ_QQ1ABC-1", body[0].ID)
+	}
+}
+
+func TestListConversationsMycallScopeExcludesOtherSSID(t *testing.T) {
+	dir := t.TempDir()
+	// Write a DM from peer to QQ0QQ-2, landing in the shared DM_QQ0QQ_QQ1ABC-1.jsonl.
+	logOther := chatlog.New(dir, staticCallsign("QQ0QQ-2"))
+	logOther.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-2", Message: "hi"}, testTime())
+
+	// Server is configured as QQ0QQ-1 — a different SSID sharing the same basecall.
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, logOther, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/list?scope=mycall", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body []chatlog.Conversation
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, conv := range body {
+		if strings.HasPrefix(conv.ID, "DM_") {
+			t.Errorf("mycall scope returned DM conversation %q — file has no records for QQ0QQ-1", conv.ID)
+		}
+	}
+}
+
+func TestGetConversationMycallScopeFiltersRecords(t *testing.T) {
+	dir := t.TempDir()
+	// testConfig().MyCall = "QQ0QQ-1"
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	now := time.Now().UTC()
+	// Both messages land in DM_QQ0QQ_QQ1ABC-1.jsonl (basecall file).
+	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "to ssid-1"}, now.Add(-time.Minute))
+	// Simulate a record from peer to a different device of ours (QQ0QQ-2).
+	// We write directly via the chatlog to bypass filter.
+	logOther := chatlog.New(dir, staticCallsign("QQ0QQ-2"))
+	logOther.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-2", Message: "to ssid-2"}, now)
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
+
+	// mycall scope with our SSID: only QQ0QQ-1 records
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/DM_QQ0QQ-1_QQ1ABC-1?scope=mycall", nil)
+	req.SetPathValue("conversation", "DM_QQ0QQ-1_QQ1ABC-1")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var records []chatlog.Record
+	if err := json.Unmarshal(rec.Body.Bytes(), &records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, r := range records {
+		if r.Dst == "QQ0QQ-2" {
+			t.Errorf("mycall scope returned record addressed to QQ0QQ-2: %+v", r)
+		}
+	}
+	if len(records) == 0 {
+		t.Error("expected at least one record for QQ0QQ-1")
+	}
+}
+
+func TestGetConversationBasecallScopeReturnsAll(t *testing.T) {
+	dir := t.TempDir()
+	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	now := time.Now().UTC()
+	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "hi1"}, now.Add(-2*time.Minute))
+
+	// Write a second record directly to the same basecall file from a different SSID logger.
+	logOther := chatlog.New(dir, staticCallsign("QQ0QQ-2"))
+	logOther.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-2", Message: "hi2"}, now.Add(-time.Minute))
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
+
+	// basecall scope: returns all records from the shared file
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/DM_QQ0QQ_QQ1ABC-1?scope=basecall", nil)
+	req.SetPathValue("conversation", "DM_QQ0QQ_QQ1ABC-1")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var records []chatlog.Record
+	if err := json.Unmarshal(rec.Body.Bytes(), &records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) != 2 {
+		t.Errorf("basecall scope: expected 2 records, got %d", len(records))
+	}
+}
+
+func TestMarkConversationReadBasecallScope(t *testing.T) {
+	chatDir := t.TempDir()
+	log := chatlog.New(chatDir, staticCallsign("QQ0QQ-1"))
+	cs := newTestChatStatus(t)
+
+	// Two per-SSID status keys for the same peer.
+	cs.RecordIncoming("DM_QQ0QQ-1_QQ1ABC-1", time.Now(), "msg1")
+	cs.RecordIncoming("DM_QQ0QQ-2_QQ1ABC-1", time.Now(), "msg2")
+
+	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, cs)
+
+	// basecall scope markRead on basecall-form id
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/DM_QQ0QQ_QQ1ABC-1/read?scope=basecall", nil)
+	req.SetPathValue("conversation", "DM_QQ0QQ_QQ1ABC-1")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+
+	snap := cs.Snapshot()
+	if e, ok := snap["DM_QQ0QQ-1_QQ1ABC-1"]; !ok || e.UnreadCount != 0 {
+		t.Errorf("DM_QQ0QQ-1_QQ1ABC-1 UnreadCount = %v, want 0", snap["DM_QQ0QQ-1_QQ1ABC-1"])
+	}
+	if e, ok := snap["DM_QQ0QQ-2_QQ1ABC-1"]; !ok || e.UnreadCount != 0 {
+		t.Errorf("DM_QQ0QQ-2_QQ1ABC-1 UnreadCount = %v, want 0", snap["DM_QQ0QQ-2_QQ1ABC-1"])
+	}
+}
+
+// TestListDMStats verifies the /api/stats/dm endpoint: nil store returns empty
+// map; after a send + ack echo the full/base entries are populated correctly.
+func TestListDMStats(t *testing.T) {
+	t.Run("nil store returns empty object", func(t *testing.T) {
+		server := NewServer(testConfig(), "v0.0.0-test", nil, nil, nil, nil, nil, nil, nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/stats/dm", nil)
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		var body map[string]dmStatsEntry
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(body) != 0 {
+			t.Errorf("expected empty map, got %v", body)
+		}
+	})
+
+	t.Run("records sent and ack via echo", func(t *testing.T) {
+		cfg := testConfig()
+		bus := events.NewBus()
+		dmStore := dmstats.New("")
+
+		server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, nil, &stubBridge{}, nil, nil,
+			WithDMStats(dmStore),
+		)
+		// Override the outbox with a longer TTL so the pending message is not
+		// expired before the echo arrives.
+		server.outbox = outbox.New(5*time.Second, server.handleOutgoingTimeout)
+
+		// Send a DM to QQ1ABC-1 (has SSID).
+		sendBody := []byte(`{"dst":"QQ1ABC-1","msg":"hello"}`)
+		sendReq := httptest.NewRequest(http.MethodPost, "/api/messages", bytes.NewReader(sendBody))
+		sendRec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(sendRec, sendReq)
+		if sendRec.Code != http.StatusAccepted {
+			t.Fatalf("send status = %d, want 202", sendRec.Code)
+		}
+
+		// Wait at least 1ms so the latency calculation produces a non-zero value.
+		time.Sleep(2 * time.Millisecond)
+
+		// Simulate the echo packet that triggers ack.
+		bus.Publish(events.Event{
+			Type: "packet.received",
+			Data: map[string]any{
+				"packet": meshcom.TextMessage{
+					Source:      cfg.MyCall,
+					Destination: "QQ1ABC-1",
+					Message:     "hello",
+				},
+			},
+		})
+
+		// Wait for watchOutgoingEchoes goroutine to process the event.
+		deadline := time.After(time.Second)
+		for {
+			snap := dmStore.Snapshot()
+			if snap["QQ1ABC-1"].Ack > 0 {
+				break
+			}
+			select {
+			case <-deadline:
+				t.Fatal("ack not recorded in dmstats within 1s")
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+
+		// Query the endpoint.
+		req := httptest.NewRequest(http.MethodGet, "/api/stats/dm", nil)
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+
+		var body map[string]dmStatsEntry
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+
+		// Full entry: QQ1ABC-1 — sent=1, ack=1.
+		full, ok := body["QQ1ABC-1"]
+		if !ok {
+			t.Fatalf("missing QQ1ABC-1 in response: %v", body)
+		}
+		if full.Sent != 1 {
+			t.Errorf("QQ1ABC-1 sent: want 1, got %d", full.Sent)
+		}
+		if full.Ack != 1 {
+			t.Errorf("QQ1ABC-1 ack: want 1, got %d", full.Ack)
+		}
+
+		// Base entry: QQ1ABC — sent=1, ack=1.
+		base, ok := body["QQ1ABC"]
+		if !ok {
+			t.Fatalf("missing QQ1ABC base entry in response: %v", body)
+		}
+		if base.Sent != 1 {
+			t.Errorf("QQ1ABC sent: want 1, got %d", base.Sent)
+		}
+		if base.Ack != 1 {
+			t.Errorf("QQ1ABC ack: want 1, got %d", base.Ack)
+		}
+	})
 }

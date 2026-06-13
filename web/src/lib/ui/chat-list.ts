@@ -1,4 +1,4 @@
-import type { ChatRecord, Conversation } from '$lib/api/types';
+import type { ChatRecord, ChatStatusEntry, Conversation } from '$lib/api/types';
 import { cleanMessage } from '$lib/api/events';
 
 const PREVIEW_MAX = 40;
@@ -12,6 +12,14 @@ export function conversationPreview(records: ChatRecord[]): string {
 	const last = records.at(-1);
 	if (!last) return '';
 	return previewText(last.msg);
+}
+
+export function latestPreview(records: ChatRecord[], status: ChatStatusEntry | undefined): string {
+	const lastRec = records.at(-1);
+	const statusTs = status?.lastMsgReceived ?? '';
+	if (lastRec && lastRec.received_at > statusTs) return previewText(lastRec.msg);
+	if (status?.lastMsg != null) return previewText(status.lastMsg);
+	return lastRec ? previewText(lastRec.msg) : '';
 }
 
 export function sortByRecency(conversations: Conversation[]): Conversation[] {

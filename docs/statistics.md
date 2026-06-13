@@ -47,7 +47,7 @@ On every periodic flush (every minute), buckets older than `GOMESHCOM_STATS_RETE
 
 ## Distance histogram
 
-Computed using the Haversine great-circle distance between the sender's last reported position and the own station's position (callsign `GOMESHCOM_MY_CALL`). If the own station has no known position, the distance field is omitted and the histogram is empty.
+Computed using the Haversine great-circle distance between the sender's last reported position and the own station's position. The own station is the active runtime callsign, initially loaded from `GOMESHCOM_MY_CALL` or the persisted `data/configs/station.json` value. If the own station has no known position, the distance field is omitted and the histogram is empty.
 
 Bucket width: 5 km. Bins above 100 km are merged into `100+`.
 

@@ -24,7 +24,7 @@ func FuzzConfigLoad(f *testing.F) {
 		// Use a temporary data dir to avoid side effects
 		os.Setenv("GOMESHCOM_DATA_DIR", t.TempDir())
 
-		_, _, _ = Load("fuzz")
+		_, _, _, _ = Load("fuzz")
 	})
 }
 

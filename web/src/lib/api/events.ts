@@ -344,10 +344,10 @@ export function splitSourcePath(source?: string): { origin: string; relays: stri
 
 export function messageKind(message?: string): { kind: string; label: string; icon: string } {
 	const text = message ?? '';
-	// ACK format: "ack571", ":ack571", or "CALLSIGN :ack571"
-	if (/(?:^|\s):?ack\d+/i.test(text)) return { kind: 'ack', label: 'ACK', icon: '✓' };
-	// REJ format: "rej571", ":rej571", or "CALLSIGN :rej571"
-	if (/(?:^|\s):?rej\d+/i.test(text)) return { kind: 'reject', label: 'Reject', icon: '!' };
+	// ACK format: "ack571", ":ack571", "CALLSIGN :ack571", or "CALLSIGN:ack571" (no space)
+	if (/(?:^|[:\s])ack\d+/i.test(text)) return { kind: 'ack', label: 'ACK', icon: '✓' };
+	// REJ format: "rej571", ":rej571", "CALLSIGN :rej571", or "CALLSIGN:rej571" (no space)
+	if (/(?:^|[:\s])rej\d+/i.test(text)) return { kind: 'reject', label: 'Reject', icon: '!' };
 	if (text.startsWith('{CET}')) return { kind: 'time', label: 'Network time', icon: '◷' };
 	if (text.startsWith('{SET}')) return { kind: 'config', label: 'Config', icon: '⚙' };
 	return { kind: 'message', label: 'Message', icon: '✉' };
@@ -378,14 +378,14 @@ export function msgSeqId(packet: MeshcomPacket | null): string | null {
 }
 
 export function ackSeqId(packet: MeshcomPacket | null): string | null {
-	// Handles: "ack571", ":ack571", "QQ5PMP-1 :ack571"
-	const match = (packet?.msg ?? '').match(/(?:^|\s):?ack(\d+)/i);
+	// Handles: "ack571", ":ack571", "QQ5PMP-1 :ack571", "QQ5PMP-1:ack571" (no space)
+	const match = (packet?.msg ?? '').match(/(?:^|[:\s])ack(\d+)/i);
 	return match?.[1] ?? null;
 }
 
 export function rejSeqId(packet: MeshcomPacket | null): string | null {
-	// Handles: "rej571", ":rej571", "QQ5PMP-1 :rej571"
-	const match = (packet?.msg ?? '').match(/(?:^|\s):?rej(\d+)/i);
+	// Handles: "rej571", ":rej571", "QQ5PMP-1 :rej571", "QQ5PMP-1:rej571" (no space)
+	const match = (packet?.msg ?? '').match(/(?:^|[:\s])rej(\d+)/i);
 	return match?.[1] ?? null;
 }
 

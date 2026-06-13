@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
-	import { chatRecordKey } from '$lib/api/chat';
+	import { chatRecordKey, baseCallFrom } from '$lib/api/chat';
 	import type { AckIndex } from '$lib/api/acks';
 	import { ackEntriesForRecord, rejectEntriesForRecord } from '$lib/api/acks';
 	import { cleanMessage, splitSourcePath } from '$lib/api/events';
@@ -18,6 +18,8 @@
 	} from '@mdi/js';
 	import { chatState } from '$lib/stores/chat.svelte';
 	import { connectionState } from '$lib/stores/connection.svelte';
+	import { fetchDMStats } from '$lib/api/dmstats';
+	import type { DmStatsEntry } from '$lib/api/dmstats';
 
 	interface Props {
 		ackIndex: AckIndex;
@@ -58,6 +60,63 @@
 	let sending = $derived(chatState.sending);
 	let sendError = $derived(chatState.sendError);
 	let chatFilter = $derived(chatState.chatFilter);
+
+	let dmStats = $state<DmStatsEntry | null>(null);
+
+	$effect(() => {
+		const target = chatState.chatTarget;
+		if (target.kind !== 'contact') {
+			dmStats = null;
+			return;
+		}
+		const callsign = target.value.toUpperCase();
+		fetchDMStats()
+			.then((data) => {
+				dmStats = data[callsign] ?? null;
+			})
+			.catch(() => {
+				dmStats = null;
+			});
+	});
+
+	let avgAckRttMs = $derived((): number => {
+		const dmScope = chatState.dmScope;
+		const station = stationCallsign ?? '';
+		if (!station) return 0;
+		let totalMs = 0;
+		let count = 0;
+		for (const record of displayChatRecords) {
+			const origin = splitSourcePath(record.src).origin;
+			const isSent =
+				dmScope === 'basecall'
+					? baseCallFrom(origin) === baseCallFrom(station)
+					: origin === station;
+			if (!isSent) continue;
+			const sequenceId = chatRecordSeqId(record);
+			if (!sequenceId) continue;
+			const entries = ackEntriesForRecord(ackIndex, sequenceId, record, station, dmScope);
+			const bestAck =
+				entries.find((e) => e.ackSource === 'gateway') ??
+				entries.find((e) => e.ackSource === 'lora');
+			if (!bestAck) continue;
+			const rtt = new Date(bestAck.receivedAt).getTime() - new Date(record.received_at).getTime();
+			if (rtt > 0) {
+				totalMs += rtt;
+				count++;
+			}
+		}
+		return count > 0 ? Math.round(totalMs / count) : 0;
+	});
+
+	let dmStatsLabel = $derived((): string => {
+		if (!dmStats || dmStats.sent === 0) return '';
+		const pct = Math.round((dmStats.ack / dmStats.sent) * 100);
+		const avg = avgAckRttMs();
+		const avgStr = avg > 0 ? formatRtt(avg) : '';
+		return avgStr
+			? `sent: ${dmStats.sent} · ack: ${pct}% · avg: ${avgStr}`
+			: `sent: ${dmStats.sent} · ack: ${pct}%`;
+	});
 </script>
 
 <div data-testid="chat-panel" class="flex min-h-0 flex-1 flex-col">
@@ -92,7 +151,9 @@
 				<div>
 					<div class="text-sm font-semibold text-ink">{chatTarget.value}</div>
 					<div class="text-[10px] text-ink-muted">
-						{chatTarget.kind === 'channel' ? 'channel' : 'direct'}
+						{chatTarget.kind === 'channel' ? 'channel' : 'direct'}{dmStatsLabel()
+							? ` · ${dmStatsLabel()}`
+							: ''}
 					</div>
 				</div>
 			{/if}
@@ -135,14 +196,25 @@
 			<div class="space-y-2">
 				{#each displayChatRecords as record (chatRecordKey(record))}
 					{@const sourcePath = splitSourcePath(record.src)}
-					{@const isSent = sourcePath.origin === stationCallsign}
+					{@const dmScope = chatState.dmScope}
+					{@const isSent =
+						dmScope === 'basecall'
+							? baseCallFrom(sourcePath.origin) === baseCallFrom(stationCallsign)
+							: sourcePath.origin === stationCallsign}
 					{@const sequenceId = isSent ? chatRecordSeqId(record) : null}
-					{@const ackEntries = ackEntriesForRecord(ackIndex, sequenceId, record, stationCallsign)}
+					{@const ackEntries = ackEntriesForRecord(
+						ackIndex,
+						sequenceId,
+						record,
+						stationCallsign,
+						dmScope
+					)}
 					{@const rejectEntries = rejectEntriesForRecord(
 						ackIndex,
 						sequenceId,
 						record,
-						stationCallsign
+						stationCallsign,
+						dmScope
 					)}
 					{@const gatewayAck = ackEntries.find((entry) => entry.ackSource === 'gateway') ?? null}
 					{@const loraAck = ackEntries.find((entry) => entry.ackSource === 'lora') ?? null}
@@ -198,7 +270,8 @@
 												<span class="font-mono text-[10px] text-mint/70">{formatRtt(rttMs)}</span>
 											</span>
 										{:else}
-											<span class="text-[13px] text-ink-muted" title="Sent, waiting for ACK">✓</span>
+											<span class="text-[13px] text-ink-muted" title="Sent, waiting for ACK">✓</span
+											>
 										{/if}
 									{:else if sequenceId && gatewayAck}
 										<span

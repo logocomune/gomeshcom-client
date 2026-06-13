@@ -5,7 +5,8 @@ import {
 	deleteConversation,
 	sendMessage,
 	destinationFor,
-	SendError
+	SendError,
+	type DmScope
 } from '$lib/api/chat';
 import { updateChannelShow } from '$lib/api/channelShow';
 import { buildAckIndex, buildAckIndexFromChatRecords, mergeAckIndexes } from '$lib/api/acks';
@@ -65,7 +66,8 @@ export class AppController {
 			handleSend: () => controller.handleSend(),
 			openDeleteConfirm: () => controller.openDeleteConfirm(),
 			openNewDm: () => controller.openNewDm(),
-			openNewChannel: () => controller.openNewChannel()
+			openNewChannel: () => controller.openNewChannel(),
+			changeDmScope: (scope) => controller.changeDmScope(scope)
 		};
 	}
 
@@ -91,7 +93,7 @@ export class AppController {
 		const id = chatState.currentConvId;
 		if (!chatState.conversationsLoaded) return;
 		if (!chatState.fetchedConvIds.has(id)) {
-			fetchHistory(id, chatState.historyHours)
+			fetchHistory(id, chatState.historyHours, chatState.dmScope)
 				.then((records) => {
 					chatState.mergeHistory(id, records);
 					void chatState.markCurrentRead(id);
@@ -103,8 +105,19 @@ export class AppController {
 	}
 
 	async reloadProtectedData() {
-		const conversations = await fetchConversations();
+		const conversations = await fetchConversations(chatState.dmScope);
 		chatState.setConversations(conversations);
+	}
+
+	async changeDmScope(scope: DmScope) {
+		chatState.setDmScope(scope);
+		try {
+			const conversations = await fetchConversations(scope);
+			chatState.setConversations(conversations, true);
+			this.loadCurrentConversationHistory();
+		} catch {
+			// handled by unauthorized listener
+		}
 	}
 
 	handleUnauthorized() {

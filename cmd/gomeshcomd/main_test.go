@@ -16,7 +16,7 @@ func TestEnsureDataDirs(t *testing.T) {
 		t.Fatalf("ensureDataDirs() error = %v", err)
 	}
 
-	for _, dir := range []string{"raw", "nodes"} {
+	for _, dir := range []string{"raw", "nodes", "chat", "stats", "configs"} {
 		info, err := os.Stat(filepath.Join(dataDir, dir))
 		if err != nil {
 			t.Fatalf("stat %s: %v", dir, err)
@@ -39,7 +39,7 @@ func TestStartupBanner(t *testing.T) {
 		MyCall:        "QQ1ABC-1",
 	}
 
-	banner := startupBanner(cfg)
+	banner := startupBanner(cfg, cfg.MyCall)
 	wants := []string{
 		"GOMESHCOMD",
 		"MeshCom UDP Link Terminal",
@@ -67,7 +67,7 @@ func TestStartupBannerAutoDetectNode(t *testing.T) {
 		MyCall:        "QQ1ABC-1",
 	}
 
-	banner := startupBanner(cfg)
+	banner := startupBanner(cfg, cfg.MyCall)
 	if !strings.Contains(banner, "NODE     (auto-detect from incoming UDP)") {
 		t.Fatalf("startup banner missing auto-detect message:\n%s", banner)
 	}
@@ -80,7 +80,7 @@ func TestStartupBannerRowsStayBoxed(t *testing.T) {
 		NodeAddr:      "192.168.0.2:1799",
 	}
 
-	rows := strings.Split(strings.TrimSuffix(startupBanner(cfg), "\n"), "\n")
+	rows := strings.Split(strings.TrimSuffix(startupBanner(cfg, cfg.MyCall), "\n"), "\n")
 	if len(rows) == 0 {
 		t.Fatal("startup banner is empty")
 	}
@@ -100,7 +100,7 @@ func TestStartupBannerShowsUnsetMyCallHint(t *testing.T) {
 		NodeAddr:      "192.168.0.2:1799",
 	}
 
-	banner := startupBanner(cfg)
+	banner := startupBanner(cfg, cfg.MyCall)
 	wants := []string{
 		"MYCALL   (unset)",
 		"DMs      hidden until MyCall set",

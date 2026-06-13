@@ -8,6 +8,8 @@ import {
 	eventSummary,
 	freshnessDeltasFromEvent,
 	msgSeqId,
+	ackSeqId,
+	rejSeqId,
 	messageKind,
 	mergeMapPositions,
 	positionFromEvent,
@@ -114,7 +116,7 @@ describe('event helpers', () => {
 	});
 
 	it('splits relay path and detects system messages', () => {
-		expect.assertions(4);
+		expect.assertions(12);
 
 		expect(splitSourcePath('QQ1XAR-32,QQ5AKT-10,QQ5CND-10')).toEqual({
 			origin: 'QQ1XAR-32',
@@ -126,6 +128,15 @@ describe('event helpers', () => {
 			icon: '◷'
 		});
 		expect(messageKind('ack123').kind).toBe('ack');
+		expect(messageKind(':ack123').kind).toBe('ack');
+		expect(messageKind('QQ5PMP-1 :ack123').kind).toBe('ack');
+		// regression: no-space format "CALLSIGN:ackNNN" from real nodes
+		expect(messageKind('IU5PMP-10:ack353').kind).toBe('ack');
+		expect(messageKind('IU5PMP-10:rej353').kind).toBe('reject');
+		expect(ackSeqId({ msg: 'IU5PMP-10:ack353' })).toBe('353');
+		expect(ackSeqId({ msg: 'ack571' })).toBe('571');
+		expect(ackSeqId({ msg: 'QQ5PMP-1 :ack571' })).toBe('571');
+		expect(rejSeqId({ msg: 'IU5PMP-10:rej99' })).toBe('99');
 		expect(msgSeqId({ msg: 'hello {123}' })).toBe('123');
 	});
 
@@ -611,7 +622,11 @@ describe('connectEvents auth flow', () => {
 		});
 
 		const payload = {
-			P_broadcast: { lastMsgReceived: '2026-05-24T10:00:00Z', lastRead: '2026-05-24T09:55:00Z', unreadCount: 3 }
+			P_broadcast: {
+				lastMsgReceived: '2026-05-24T10:00:00Z',
+				lastRead: '2026-05-24T09:55:00Z',
+				unreadCount: 3
+			}
 		};
 		activeSource?.emit('chatstatus.snapshot', payload);
 
@@ -647,8 +662,16 @@ describe('connectEvents auth flow', () => {
 		// The malformed test: confirm no throws propagate.
 		expect(() => {
 			const badEvent = new MessageEvent('chatstatus.snapshot', { data: '{not valid' });
-			for (const listener of (activeSource as unknown as { listeners: Map<string, Array<(e: MessageEvent<string>) => void>> })?.listeners?.get('chatstatus.snapshot') ?? []) {
-				try { listener(badEvent); } catch { /* ok — we just want no unhandled throw */ }
+			for (const listener of (
+				activeSource as unknown as {
+					listeners: Map<string, Array<(e: MessageEvent<string>) => void>>;
+				}
+			)?.listeners?.get('chatstatus.snapshot') ?? []) {
+				try {
+					listener(badEvent);
+				} catch {
+					/* ok — we just want no unhandled throw */
+				}
 			}
 		}).not.toThrow();
 

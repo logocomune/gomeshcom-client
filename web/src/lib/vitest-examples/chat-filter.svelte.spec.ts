@@ -29,7 +29,7 @@ describe('chat message filter', () => {
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL) => {
 				const url = String(input);
-				if (url.endsWith('/api/chat/list')) return jsonResponse(conversations);
+				if (url.includes('/api/chat/list')) return jsonResponse(conversations);
 				if (url.includes('/api/chat/P_broadcast')) return jsonResponse(records);
 				return jsonResponse({});
 			})

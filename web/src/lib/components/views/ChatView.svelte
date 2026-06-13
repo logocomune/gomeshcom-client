@@ -23,6 +23,16 @@
 		showThread = false;
 	}
 
+	// Auto-switch to thread on mobile when a conversation is selected externally (e.g. Add DM modal)
+	let lastTargetKey = chatState.chatTarget.value;
+	$effect(() => {
+		const target = chatState.chatTarget.value;
+		if (!isDesktop && target !== lastTargetKey) {
+			lastTargetKey = target;
+			showThread = true;
+		}
+	});
+
 	function startSidebarDrag(e: PointerEvent) {
 		e.preventDefault();
 		const startX = e.clientX;

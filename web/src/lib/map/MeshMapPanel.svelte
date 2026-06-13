@@ -41,8 +41,9 @@
 	let {
 		positions = [],
 		myCall = '',
-		events = []
-	}: { positions?: MapPosition[]; myCall?: string; events?: StreamEvent[] } = $props();
+		events = [],
+		dmTracking = $bindable(false)
+	}: { positions?: MapPosition[]; myCall?: string; events?: StreamEvent[]; dmTracking?: boolean } = $props();
 
 	let mapElement: HTMLDivElement;
 	let tooltipElement: HTMLDivElement;
@@ -67,7 +68,7 @@
 	let activePulseOverlay: any = null;
 	const activeMsgPulseOverlays = new Set<any>();
 
-	let visibleCount = $derived(positions.filter((p) => nodeFreshness(p, now) !== 'hidden').length);
+
 	let myCallPosition = $derived(
 		myCall !== ''
 			? (positions.find((p) => p.source.toUpperCase() === myCall.toUpperCase()) ?? null)
@@ -96,13 +97,36 @@
 		const payload = newest.data as PacketReceivedPayload;
 		if (payload.replay === true) return;
 		const packet = payload.packet;
-		if (!packet || packet.type !== 'msg') return;
-		const origin = (packet.src ?? '').split(',')[0].trim().toUpperCase();
+		if (!packet) return;
+
+		const hops = (packet.src ?? '').split(',').map((h) => h.trim().toUpperCase()).filter(Boolean);
+		const origin = hops[0];
 		if (!origin) return;
-		const pos = positions.find((p) => p.source.toUpperCase() === origin);
-		if (!pos) return;
-		msgPulseAt(pos.lon, pos.lat);
+
+		const color = packetPulseColor(packet);
+		if (color) {
+			const pos = positions.find((p) => p.source.toUpperCase() === origin);
+			if (pos) eventPulseAt(pos.lon, pos.lat, color);
+		}
+
+		for (const relay of hops.slice(1)) {
+			const rpos = positions.find((p) => p.source.toUpperCase() === relay);
+			if (rpos) eventPulseAt(rpos.lon, rpos.lat, '#facc15', 2000);
+		}
 	});
+
+	function packetPulseColor(packet: NonNullable<PacketReceivedPayload['packet']>): string | null {
+		const type = packet.type ?? '';
+		if (type === 'pos') return '#34d399';
+		if (type === 'tele') return '#f97316';
+		if (type !== 'msg') return null;
+		const dst = (packet.dst ?? '').trim();
+		if (dst === '*') return '#f59e0b';
+		if (dst === '' || /^\d+$/.test(dst)) return null;
+		if (/^\{(?:CET|SET)\}/.test(packet.msg ?? '')) return null;
+		if (/(?:^|\s):?ack\d+/i.test(packet.msg ?? '')) return '#a855f7';
+		return '#38bdf8';
+	}
 
 	onMount(async () => {
 		const [
@@ -306,7 +330,7 @@
 		}, 5000);
 	}
 
-	function msgPulseAt(lon: number, lat: number) {
+	function eventPulseAt(lon: number, lat: number, hexColor: string, durationMs = 5000) {
 		const { fromLonLat, Overlay } = olContext;
 		if (!map || !fromLonLat || !Overlay) return;
 
@@ -321,12 +345,13 @@
 			document.head.appendChild(style);
 		}
 
+		const cycles = Math.max(1, Math.round(durationMs / 1000));
 		const el = document.createElement('div');
 		el.style.cssText = [
 			'width:28px', 'height:28px', 'border-radius:50%',
-			'background:rgba(248,113,113,0.30)',
-			'border:2px solid rgb(248,113,113)',
-			'animation:meshcom-pulse 0.7s ease-out 3',
+			`background:${hexColor}4d`,
+			`border:2px solid ${hexColor}`,
+			`animation:meshcom-pulse 1s ease-out ${cycles}`,
 			'pointer-events:none'
 		].join(';');
 
@@ -342,7 +367,7 @@
 		setTimeout(() => {
 			map.removeOverlay(overlay);
 			activeMsgPulseOverlays.delete(overlay);
-		}, 2200);
+		}, durationMs);
 	}
 
 	onDestroy(() => {
@@ -395,6 +420,7 @@
 		const dmTrackingStr = localStorage.getItem(STORAGE_DM_TRACKING);
 		if (dmTrackingStr !== null) {
 			showDmTracking = dmTrackingStr === 'true';
+			dmTracking = showDmTracking;
 		}
 	}
 
@@ -542,6 +568,7 @@
 
 	function toggleDmTracking() {
 		showDmTracking = !showDmTracking;
+		dmTracking = showDmTracking;
 		updateDmTraceLayer(Date.now());
 		saveMapState();
 	}
@@ -640,12 +667,6 @@
 			>
 		</button>
 	{/if}
-
-	<div
-		class="absolute bottom-2 left-2 z-[1000] rounded-lg border border-ink-dim/20 bg-surface/90 px-2 py-1 font-mono text-[11px] text-ink-muted"
-	>
-		{visibleCount} positions · OSM · Maidenhead
-	</div>
 
 	<div
 		class="absolute bottom-2 right-2 z-[1000] rounded-lg border border-ink-dim/20 bg-surface/90 px-2 py-1 text-[10px] text-ink-muted"

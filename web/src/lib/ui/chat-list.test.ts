@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatRecord, Conversation } from '$lib/api/types';
-import { conversationPreview, sortByRecency, formatRelativeTime } from './chat-list';
+import type { ChatRecord, ChatStatusEntry, Conversation } from '$lib/api/types';
+import { conversationPreview, latestPreview, sortByRecency, formatRelativeTime } from './chat-list';
 
 function makeRecord(msg: string, received_at = '2026-01-01T00:00:00Z'): ChatRecord {
 	return { msg, received_at };
@@ -8,6 +8,10 @@ function makeRecord(msg: string, received_at = '2026-01-01T00:00:00Z'): ChatReco
 
 function makeConv(id: string, last_seen: string): Conversation {
 	return { id, kind: 'channel', label: id, last_seen, size: 0 };
+}
+
+function makeStatus(lastMsgReceived: string, lastMsg: string): ChatStatusEntry {
+	return { lastMsgReceived, lastRead: '', unreadCount: 0, lastMsg };
 }
 
 describe('conversationPreview', () => {
@@ -35,6 +39,38 @@ describe('conversationPreview', () => {
 	});
 });
 
+
+describe('latestPreview', () => {
+	it('returns empty string when no history and no status', () => {
+		expect(latestPreview([], undefined)).toBe('');
+	});
+
+	it('returns status lastMsg when no history loaded', () => {
+		const status = makeStatus('2026-01-01T10:00:00Z', 'received msg');
+		expect(latestPreview([], status)).toBe('received msg');
+	});
+
+	it('shows sent message when newer than last received', () => {
+		const status = makeStatus('2026-01-01T09:00:00Z', 'received msg');
+		const records = [
+			makeRecord('received msg', '2026-01-01T09:00:00Z'),
+			makeRecord('sent msg', '2026-01-01T10:00:00Z')
+		];
+		expect(latestPreview(records, status)).toBe('sent msg');
+	});
+
+	it('shows received message from status when it is the latest', () => {
+		const status = makeStatus('2026-01-01T11:00:00Z', 'latest received');
+		const records = [makeRecord('older sent', '2026-01-01T10:00:00Z')];
+		expect(latestPreview(records, status)).toBe('latest received');
+	});
+
+	it('uses history fallback when status has no lastMsg', () => {
+		const status: ChatStatusEntry = { lastMsgReceived: '', lastRead: '', unreadCount: 0 };
+		const records = [makeRecord('only in history', '2026-01-01T10:00:00Z')];
+		expect(latestPreview(records, status)).toBe('only in history');
+	});
+});
 
 describe('sortByRecency', () => {
 	it('sorts conversations newest first', () => {

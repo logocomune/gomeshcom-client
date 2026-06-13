@@ -92,6 +92,7 @@ When authentication is enabled:
 - unauthenticated API and SSE requests return `401 Unauthorized`
 - the browser UI opens a sign-in modal
 - successful login creates an HTTP-only session cookie
+- active sessions survive server restarts until their configured TTL expires
 
 Keep the browser on the same origin as the Go server, for example:
 
@@ -120,7 +121,7 @@ All options are available via environment variable or CLI flag using the `GOMESH
 
 | Variable | Default | Description |
 |---|---|---|
-| `GOMESHCOM_MY_CALL` | `QQ0XX-1` | **Required.** Your station callsign, for example `IU5PMP-1` or `QQ1ABC-1`. Non-`IU5PMP` prefixes are rewritten to `QQ`. |
+| `GOMESHCOM_MY_CALL` | `QQ0XX-1` | Startup station callsign default, for example `IU5PMP-1` or `QQ1ABC-1`. Input is trimmed and uppercased. The active callsign can also be changed at runtime from the web UI and is persisted under `data/configs/station.json`. |
 | `GOMESHCOM_NODE_ADDR` | *(empty)* | Node UDP address. When empty, it is learned from the first incoming UDP packet. When set, it is used as-is and auto-detect is disabled. |
 | `GOMESHCOM_HTTP_ADDR` | `127.0.0.1:8080` | HTTP listen address |
 | `GOMESHCOM_UDP_LISTEN_ADDR` | `0.0.0.0:1799` | UDP listen address |

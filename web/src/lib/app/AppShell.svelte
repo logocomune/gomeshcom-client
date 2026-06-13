@@ -20,6 +20,7 @@
 	import NodeCombobox from '$lib/components/NodeCombobox.svelte';
 	import ChannelCombobox from '$lib/components/ChannelCombobox.svelte';
 	import ChannelShowModal from '$lib/components/chat/ChannelShowModal.svelte';
+	import DmToastContainer from '$lib/components/DmToastContainer.svelte';
 
 	let { app, children }: { app: AppController; children: Snippet } = $props();
 </script>
@@ -136,6 +137,7 @@
 	</div>
 
 	<MobileDrawer />
+	<DmToastContainer />
 </main>
 
 {#if eventsState.rawEvent}
@@ -148,7 +150,9 @@
 			<div class="flex h-12 shrink-0 items-center justify-between border-b border-ink-dim/20 px-4">
 				<div class="flex items-center gap-2">
 					<span
-						class="flex h-7 w-7 items-center justify-center rounded-lg border {packetTone(eventsState.rawEvent)}"
+						class="flex h-7 w-7 items-center justify-center rounded-lg border {packetTone(
+							eventsState.rawEvent
+						)}"
 					>
 						<MdiIcon path={mdiForEvent(eventsState.rawEvent)} size={16} />
 					</span>
@@ -168,7 +172,10 @@
 					<MdiIcon path={mdiClose} size={18} />
 				</button>
 			</div>
-			<pre class="min-h-0 overflow-auto p-4 font-mono text-xs leading-relaxed text-ink-muted">{eventJSON(eventsState.rawEvent)}</pre>
+			<pre
+				class="min-h-0 overflow-auto p-4 font-mono text-xs leading-relaxed text-ink-muted">{eventJSON(
+					eventsState.rawEvent
+				)}</pre>
 		</div>
 	</div>
 {/if}
@@ -203,7 +210,12 @@
 					<MdiIcon path={mdiClose} size={18} />
 				</button>
 			</div>
-			<pre class="min-h-0 overflow-auto p-4 font-mono text-xs leading-relaxed text-ink-muted">{JSON.stringify(chatState.rawChatRecord, null, 2)}</pre>
+			<pre
+				class="min-h-0 overflow-auto p-4 font-mono text-xs leading-relaxed text-ink-muted">{JSON.stringify(
+					chatState.rawChatRecord,
+					null,
+					2
+				)}</pre>
 		</div>
 	</div>
 {/if}

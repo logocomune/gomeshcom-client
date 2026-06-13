@@ -20,10 +20,18 @@ tags:
     description: Persisted MeshCom node positions
   - name: Events
     description: Server-Sent Events stream
+  - name: Station
+    description: Runtime station identity (active callsign)
   - name: Channels
     description: Frontend channel visibility preferences
   - name: Chat
     description: Disk-backed chat history
+  - name: Stats
+    description: Hourly packet statistics
+  - name: Config
+    description: Runtime daemon configuration (read and partial update)
+  - name: Admin
+    description: Daemon lifecycle control (restart, shutdown)
 paths:
   /api/session:
     get:
@@ -369,11 +377,101 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/adm/configs/my-call:
+    get:
+      tags: [Station]
+      summary: Return the active station callsign
+      description: |
+        Returns the runtime station identity including the active callsign,
+        daemon version, TX-disabled flag, and number of active forward targets.
+        The callsign reflects any runtime update made via PUT — it is not
+        necessarily the value of `GOMESHCOM_MY_CALL`.
+      operationId: getMyCall
+      responses:
+        "200":
+          description: Current station identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StationIdentity"
+              example:
+                callsign: IU5PMP-1
+                version: v0.9.0
+                txDisabled: false
+                forwardTargetCount: 0
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags: [Station]
+      summary: Update the active station callsign at runtime
+      description: |
+        Replaces the active station callsign without restarting the daemon.
+        The new value is normalized (trim + uppercase), validated against the
+        pattern `^[A-Z0-9]{3,10}(?:-[0-9]{1,2})?$`, and persisted synchronously
+        to `data/configs/station.json` before responding.
+
+        On success the backend publishes a `station.identity` SSE event so all
+        connected clients update immediately. DM file routing, echo suppression,
+        and outbox source reflect the new callsign from the next message
+        processed.
+
+        The persisted value wins over `GOMESHCOM_MY_CALL` at the next startup.
+      operationId: updateMyCall
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMyCallRequest"
+            example:
+              callsign: IU5PMP-2
+      responses:
+        "200":
+          description: Callsign updated and persisted. SSE broadcast triggered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StationIdentity"
+        "400":
+          description: Invalid JSON or callsign does not match the allowed pattern.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Callsign accepted but persistence to disk failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/chat/list:
     get:
       tags: [Chat]
       summary: List discovered chat conversations
       operationId: listConversations
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          description: |
+            Filtering scope for DM conversations.
+            - `mycall` (default): include only DMs where the my-side record matches the active full callsign-with-SSID. Conversation IDs are returned in `DM_<mycall-ssid>_<peer>` form.
+            - `basecall`: include all DMs sharing the operator base callsign. Conversation IDs are returned in `DM_<basecall>_<peer>` form.
+          schema:
+            type: string
+            enum: [mycall, basecall]
+            default: mycall
       responses:
         "200":
           description: Conversation list sorted by last seen descending.
@@ -398,21 +496,39 @@ paths:
         - name: conversation
           in: path
           required: true
-          description: Conversation ID. Accepted forms are `P_broadcast`, `P_<channel>`, and `DM_<CALLSIGN>`.
+          description: |
+            Conversation ID. Accepted forms:
+            - `P_broadcast` — global broadcast channel
+            - `P_<channel>` — numeric channel (e.g. `P_262`)
+            - `DM_<mycall-ssid>_<peer>` — direct message in mycall scope (e.g. `DM_IU5PMP-1_IK5FCK-10`)
+            - `DM_<basecall>_<peer>` — direct message in basecall scope (e.g. `DM_IU5PMP_IK5FCK-10`)
           schema:
             type: string
-            pattern: "^(\\*|\\d+)$"
+            pattern: "^[A-Za-z0-9_*-]([A-Za-z0-9_*-]*[A-Za-z0-9_*-])?$"
           examples:
             broadcast:
               value: P_broadcast
             channel:
               value: P_262
-            direct:
-              value: DM_QQ1ABC-7
+            direct_mycall:
+              value: DM_IU5PMP-1_IK5FCK-10
+            direct_basecall:
+              value: DM_IU5PMP_IK5FCK-10
+        - name: scope
+          in: query
+          required: false
+          description: |
+            Filtering scope for DM conversations.
+            - `mycall` (default): filter records to those where the my-side callsign matches the active full SSID.
+            - `basecall`: return all records from the shared basecall file without SSID filtering.
+          schema:
+            type: string
+            enum: [mycall, basecall]
+            default: mycall
         - name: hours
           in: query
           required: false
-          description: History window in hours. Defaults to server config for `P_broadcast`/`P_<channel>` and to 30 days for `DM_<CALLSIGN>`. Capped by server config.
+          description: History window in hours. Defaults to server config for `P_broadcast`/`P_<channel>` and to 30 days for DM conversations. Capped by server config.
           schema:
             type: number
             format: double
@@ -452,10 +568,10 @@ paths:
         - name: conversation
           in: path
           required: true
-          description: Conversation ID.
+          description: Conversation ID. Accepted forms are `P_broadcast`, `P_<channel>`, and `DM_<CALLSIGN>_<PEER>`.
           schema:
             type: string
-            pattern: "^(\\*|\\d+)$"
+            pattern: "^(P_broadcast|P_\\d+|DM_[A-Z0-9_-]+)$"
       responses:
         "204":
           description: Conversation deleted successfully.
@@ -491,17 +607,17 @@ paths:
         - name: conversation
           in: path
           required: true
-          description: Conversation ID. Accepted forms are `P_broadcast`, `P_<channel>`, and `DM_<CALLSIGN>`.
+          description: Conversation ID. Accepted forms are `P_broadcast`, `P_<channel>`, and `DM_<CALLSIGN>_<PEER>`.
           schema:
             type: string
-            pattern: "^(\\*|\\d+)$"
+            pattern: "^(P_broadcast|P_\\d+|DM_[A-Z0-9_-]+)$"
           examples:
             broadcast:
               value: P_broadcast
             channel:
               value: P_262
             direct:
-              value: DM_QQ1ABC-7
+              value: DM_IU5PMP-1_QQ1ABC-7
       responses:
         "204":
           description: Conversation marked as read.
@@ -517,8 +633,294 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/stats:
+    get:
+      tags: [Stats]
+      summary: Return hourly packet statistics
+      description: |
+        Returns aggregated hourly packet counters for the configured window.
+        Default window is 24 hours; maximum is 720 hours (30 days).
+        The `hours` query parameter is silently capped to the maximum.
+      operationId: listStats
+      parameters:
+        - name: hours
+          in: query
+          required: false
+          description: Window in hours. Default 24, max 720.
+          schema:
+            type: integer
+            minimum: 1
+            default: 24
+      responses:
+        "200":
+          description: Statistics response with hourly buckets sorted ascending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+              examples:
+                typical:
+                  value:
+                    from: "2026-06-12T10:00:00Z"
+                    to: "2026-06-13T10:00:00Z"
+                    hours: 24
+                    buckets:
+                      - hour: 1749808800
+                        dm: 2
+                        dm_ack: 1
+                        public: 5
+                        telemetry: 3
+                        position: 8
+                        errors: 0
+                        total: 19
+        "400":
+          description: Invalid `hours` parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Statistics store read failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/stats/dm:
+    get:
+      tags: [Stats]
+      summary: Return per-callsign DM delivery statistics
+      description: |
+        Returns a map of callsign → `{sent, ack}` counters accumulated since
+        daemon start (persisted across restarts if the DM stats store is
+        configured). Returns an empty object when the store is not configured.
+      operationId: listDMStats
+      responses:
+        "200":
+          description: Map keyed by peer callsign.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/DMStatsEntry"
+              examples:
+                typical:
+                  value:
+                    IK5FCK-10:
+                      sent: 4
+                      ack: 3
+                    QQ1ABC-1:
+                      sent: 1
+                      ack: 0
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/config:
+    get:
+      tags: [Config]
+      summary: Return the current daemon configuration
+      description: |
+        Returns the full effective configuration including which fields are
+        currently overridden by environment variables and which require a restart
+        to take effect. The `auth.password` value is always masked as `"****"`.
+
+        Returns `403` when demo mode is active.
+      operationId: getConfig
+      responses:
+        "200":
+          description: Current effective configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Config API disabled in demo mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags: [Config]
+      summary: Partially update the daemon configuration
+      description: |
+        Merges the supplied fields onto the current effective configuration.
+        Omitted fields are left unchanged. Duration values are Go duration
+        strings (e.g. `"40s"`, `"2h"`).
+
+        Fields currently managed by environment variables cannot be changed via
+        this endpoint and return `409`. Fields that require a daemon restart are
+        flagged in the response via `requires_restart: true`.
+
+        On success the updated configuration is written to the TOML config file
+        (if `WithTomlPath` is configured); a changed callsign also triggers an
+        immediate `station.identity` SSE broadcast.
+
+        Returns `403` when demo mode is active.
+      operationId: updateConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigUpdateRequest"
+            examples:
+              changeLogLevel:
+                value:
+                  log_level: debug
+              changeChatWindow:
+                value:
+                  chat_log:
+                    history_window: "48h"
+      responses:
+        "200":
+          description: Updated configuration and restart flag.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigUpdateResponse"
+        "400":
+          description: Invalid JSON or invalid field value (e.g. bad duration string).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Config API disabled in demo mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Field is locked by an environment variable and cannot be changed at runtime.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: TOML persistence failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/restart:
+    post:
+      tags: [Admin]
+      summary: Restart the daemon process
+      description: |
+        Triggers a daemon restart. Responds immediately with `200` so the client
+        can receive the confirmation before the process exits, then performs the
+        restart after a 500 ms delay.
+
+        Returns `501` when no restart callback has been registered (i.e. the
+        binary was not started with restart support).
+      operationId: restartDaemon
+      responses:
+        "200":
+          description: Restart triggered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaemonActionResponse"
+              examples:
+                restarting:
+                  value:
+                    status: restarting
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Restart not configured.
+
+  /api/shutdown:
+    post:
+      tags: [Admin]
+      summary: Shut down the daemon process
+      description: |
+        Triggers a graceful daemon shutdown. Responds immediately with `200` so
+        the client can receive the confirmation before the process exits, then
+        shuts down after a 500 ms delay.
+
+        Returns `501` when no shutdown callback has been registered.
+      operationId: shutdownDaemon
+      responses:
+        "200":
+          description: Shutdown triggered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaemonActionResponse"
+              examples:
+                shuttingDown:
+                  value:
+                    status: shutting down
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Shutdown not configured.
+
 components:
   schemas:
+    StationIdentity:
+      type: object
+      required: [callsign]
+      properties:
+        callsign:
+          type: string
+          description: Active station callsign (normalized, uppercase).
+          example: IU5PMP-1
+        version:
+          type: string
+          description: Daemon version string.
+          example: v0.9.0
+        txDisabled:
+          type: boolean
+          description: True when dry-run TX mode is active.
+          example: false
+        forwardTargetCount:
+          type: integer
+          description: Number of active UDP forward targets.
+          example: 0
+    UpdateMyCallRequest:
+      type: object
+      required: [callsign]
+      properties:
+        callsign:
+          type: string
+          description: |
+            New callsign. Trimmed and uppercased before validation.
+            Must match `^[A-Z0-9]{3,10}(?:-[0-9]{1,2})?$`.
+          example: IU5PMP-2
     SessionStatus:
       type: object
       required: [required, authenticated]
@@ -896,3 +1298,388 @@ components:
           lastMsgReceived: "2026-05-24T08:30:00Z"
           lastRead: "2026-05-24T08:30:00Z"
           unreadCount: 0
+
+    StatsBucket:
+      type: object
+      required: [hour, dm, dm_ack, public, telemetry, position, errors, total]
+      description: Aggregated packet counters for a single UTC hour.
+      properties:
+        hour:
+          type: integer
+          format: int64
+          description: UTC hour as Unix timestamp (start of the hour).
+          example: 1749808800
+        dm:
+          type: integer
+          description: Inbound direct messages received.
+          example: 2
+        dm_ack:
+          type: integer
+          description: DM acknowledgements received.
+          example: 1
+        public:
+          type: integer
+          description: Public (broadcast/channel) messages received.
+          example: 5
+        telemetry:
+          type: integer
+          description: Telemetry packets received.
+          example: 3
+        position:
+          type: integer
+          description: Position packets received.
+          example: 8
+        errors:
+          type: integer
+          description: Packets that failed to parse.
+          example: 0
+        total:
+          type: integer
+          description: Total packets received (all types).
+          example: 19
+        distance_km:
+          type: object
+          description: Per-callsign distance in km at time of last position packet.
+          additionalProperties:
+            type: integer
+          example:
+            IU5PMP-1: 12
+        channels:
+          type: object
+          description: |
+            Per-channel/per-DM message counts.
+            Keys: `broadcast`, `ch:<N>` for public channels, `dm:<CALLSIGN>` for DMs.
+          additionalProperties:
+            type: integer
+          example:
+            broadcast: 5
+            "ch:262": 2
+            "dm:IK5FCK-10": 3
+
+    StatsResponse:
+      type: object
+      required: [from, to, hours, buckets]
+      properties:
+        from:
+          type: string
+          format: date-time
+          description: Start of the requested window (UTC).
+          example: "2026-06-12T10:00:00Z"
+        to:
+          type: string
+          format: date-time
+          description: End of the requested window (UTC).
+          example: "2026-06-13T10:00:00Z"
+        hours:
+          type: integer
+          description: Effective window duration in hours.
+          example: 24
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatsBucket"
+
+    DMStatsEntry:
+      type: object
+      required: [sent, ack]
+      description: DM delivery counters for a single peer callsign.
+      properties:
+        sent:
+          type: integer
+          description: Number of DMs sent to this peer.
+          example: 4
+        ack:
+          type: integer
+          description: Number of those DMs that received an acknowledgement.
+          example: 3
+
+    ConfigFieldMeta:
+      type: object
+      required: [value, env_override, requires_restart]
+      description: A single configuration field with its metadata.
+      properties:
+        value:
+          description: Current effective value of the field.
+        env_override:
+          type: boolean
+          description: True when this field is currently managed by an environment variable and cannot be changed via the API.
+          example: false
+        requires_restart:
+          type: boolean
+          description: True when changing this field requires a daemon restart to take effect.
+          example: true
+
+    ConfigServerInfo:
+      type: object
+      required: [version, started_at, uptime_seconds]
+      properties:
+        version:
+          type: string
+          description: Daemon version string.
+          example: v0.9.0
+        started_at:
+          type: string
+          format: date-time
+          description: Time the daemon started (UTC).
+          example: "2026-06-13T08:00:00Z"
+        uptime_seconds:
+          type: integer
+          format: int64
+          description: Seconds since daemon start.
+          example: 7200
+
+    ConfigReceiveLogSection:
+      type: object
+      required: [enabled, path, retention_days, replay_window]
+      properties:
+        enabled:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        path:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        retention_days:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        replay_window:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
+    ConfigStatsSection:
+      type: object
+      required: [enabled, path, retention_days]
+      properties:
+        enabled:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        path:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        retention_days:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
+    ConfigChatLogSection:
+      type: object
+      required: [path, history_window, max_history_window]
+      properties:
+        path:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        history_window:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        max_history_window:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
+    ConfigSendSection:
+      type: object
+      required: [dedup_ttl]
+      properties:
+        dedup_ttl:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
+    ConfigForwardSection:
+      type: object
+      required: [targets]
+      properties:
+        targets:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
+    ConfigAuthSection:
+      type: object
+      required: [username, password, session_ttl, cookie_name]
+      description: Authentication configuration. `password.value` is always `"****"`.
+      properties:
+        username:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        password:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        session_ttl:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        cookie_name:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
+    ConfigRequestLogSection:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
+    ConfigResponse:
+      type: object
+      required:
+        - server
+        - http_addr
+        - udp_listen_addr
+        - node_addr
+        - my_call
+        - data_dir
+        - max_message_length
+        - log_level
+        - receive_log
+        - stats
+        - chat_log
+        - send
+        - forward
+        - auth
+        - request_log
+      properties:
+        server:
+          $ref: "#/components/schemas/ConfigServerInfo"
+        http_addr:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        udp_listen_addr:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        node_addr:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        my_call:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        data_dir:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        max_message_length:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        log_level:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        receive_log:
+          $ref: "#/components/schemas/ConfigReceiveLogSection"
+        stats:
+          $ref: "#/components/schemas/ConfigStatsSection"
+        chat_log:
+          $ref: "#/components/schemas/ConfigChatLogSection"
+        send:
+          $ref: "#/components/schemas/ConfigSendSection"
+        forward:
+          $ref: "#/components/schemas/ConfigForwardSection"
+        auth:
+          $ref: "#/components/schemas/ConfigAuthSection"
+        request_log:
+          $ref: "#/components/schemas/ConfigRequestLogSection"
+
+    ConfigUpdateReceiveLog:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        path:
+          type: string
+        retention_days:
+          type: integer
+        replay_window:
+          type: string
+          description: Go duration string, e.g. `"2h"`.
+          example: "2h"
+
+    ConfigUpdateStats:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        path:
+          type: string
+        retention_days:
+          type: integer
+
+    ConfigUpdateChatLog:
+      type: object
+      properties:
+        path:
+          type: string
+        history_window:
+          type: string
+          description: Go duration string, e.g. `"48h"`.
+          example: "48h"
+        max_history_window:
+          type: string
+          description: Go duration string, e.g. `"720h"`.
+          example: "720h"
+
+    ConfigUpdateSend:
+      type: object
+      properties:
+        dedup_ttl:
+          type: string
+          description: Go duration string, e.g. `"30s"`.
+          example: "30s"
+
+    ConfigUpdateForward:
+      type: object
+      properties:
+        targets:
+          type: string
+          description: Comma-separated list of UDP forward targets (host:port).
+          example: "192.168.0.5:1799,10.0.0.1:1799"
+
+    ConfigUpdateAuth:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        session_ttl:
+          type: string
+          description: Go duration string, e.g. `"24h"`.
+          example: "24h"
+        cookie_name:
+          type: string
+          example: meshcom_session
+
+    ConfigUpdateRequestLog:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+
+    ConfigUpdateRequest:
+      type: object
+      description: |
+        Partial configuration update. Omitted fields are left unchanged.
+        Duration values are Go duration strings (e.g. `"40s"`, `"2h"`).
+        Fields managed by environment variables return `409` if present.
+      properties:
+        http_addr:
+          type: string
+          example: "0.0.0.0:8080"
+        udp_listen_addr:
+          type: string
+          example: "0.0.0.0:1799"
+        node_addr:
+          type: string
+          example: "192.168.0.2:1799"
+        my_call:
+          type: string
+          example: IU5PMP-1
+        max_message_length:
+          type: integer
+          example: 160
+        log_level:
+          type: string
+          enum: [debug, info, warn, error]
+          example: info
+        receive_log:
+          $ref: "#/components/schemas/ConfigUpdateReceiveLog"
+        stats:
+          $ref: "#/components/schemas/ConfigUpdateStats"
+        chat_log:
+          $ref: "#/components/schemas/ConfigUpdateChatLog"
+        send:
+          $ref: "#/components/schemas/ConfigUpdateSend"
+        forward:
+          $ref: "#/components/schemas/ConfigUpdateForward"
+        auth:
+          $ref: "#/components/schemas/ConfigUpdateAuth"
+        request_log:
+          $ref: "#/components/schemas/ConfigUpdateRequestLog"
+
+    ConfigUpdateResponse:
+      type: object
+      required: [config, requires_restart]
+      properties:
+        config:
+          $ref: "#/components/schemas/ConfigResponse"
+        requires_restart:
+          type: boolean
+          description: True when at least one changed field requires a daemon restart to take effect.
+          example: false
+
+    DaemonActionResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [restarting, "shutting down"]
+          example: restarting

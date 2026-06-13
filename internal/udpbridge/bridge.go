@@ -24,6 +24,12 @@ type chatStatusTracker interface {
 	RecordIncoming(convID string, ts time.Time, msg string)
 }
 
+// myCallSource provides the live local callsign. *station.Identity satisfies
+// this interface; a static wrapper may be used in tests.
+type myCallSource interface {
+	Current() string
+}
+
 type Bridge struct {
 	listenAddr      string
 	nodeAddr        string // explicit config; "" means auto-detect
@@ -32,13 +38,13 @@ type Bridge struct {
 	logger          *receivelog.Logger
 	chatLog         *chatlog.Logger
 	chatStatus      chatStatusTracker
-	myCall          string
+	identity        myCallSource
 	positions       *positions.Store
 	disableTx       bool
 	forwarder       *udpforward.Forwarder
 }
 
-func NewBridge(listenAddr, nodeAddr string, bus *events.Bus, logger *receivelog.Logger, chatLog *chatlog.Logger, positionStore *positions.Store, disableTx bool, forwarder *udpforward.Forwarder, myCall string, chatStatus chatStatusTracker) *Bridge {
+func NewBridge(listenAddr, nodeAddr string, bus *events.Bus, logger *receivelog.Logger, chatLog *chatlog.Logger, positionStore *positions.Store, disableTx bool, forwarder *udpforward.Forwarder, identity myCallSource, chatStatus chatStatusTracker) *Bridge {
 	return &Bridge{
 		listenAddr: listenAddr,
 		nodeAddr:   nodeAddr,
@@ -46,11 +52,19 @@ func NewBridge(listenAddr, nodeAddr string, bus *events.Bus, logger *receivelog.
 		logger:     logger,
 		chatLog:    chatLog,
 		chatStatus: chatStatus,
-		myCall:     strings.ToUpper(myCall),
+		identity:   identity,
 		positions:  positionStore,
 		disableTx:  disableTx,
 		forwarder:  forwarder,
 	}
+}
+
+// myCall returns the current local callsign, or "" if no identity is configured.
+func (b *Bridge) myCall() string {
+	if b.identity == nil {
+		return ""
+	}
+	return b.identity.Current()
 }
 
 func (b *Bridge) Listen(ctx context.Context) error {
@@ -172,11 +186,14 @@ func (b *Bridge) logChatMessage(msg meshcom.TextMessage, receivedAt time.Time) {
 		slog.Error("chat log write failed", "error", err)
 	}
 	if b.chatStatus != nil {
+		myCall := b.myCall()
 		origin := strings.ToUpper(strings.SplitN(msg.Source, ",", 2)[0])
-		if origin != b.myCall {
-			convID := chatlog.ConversationID(msg.Source, msg.Destination, b.myCall)
-			if convID != "" {
-				b.chatStatus.RecordIncoming(convID, receivedAt, msg.Message)
+		// Skip our own echoes: compare by basecall so device-switch echoes are
+		// also suppressed (e.g. IU5PMP-2 echo filtered when running as IU5PMP-1).
+		if chatlog.BaseCall(origin) != chatlog.BaseCall(myCall) {
+			statusKey := chatlog.StatusKey(msg.Source, msg.Destination, myCall)
+			if statusKey != "" {
+				b.chatStatus.RecordIncoming(statusKey, receivedAt, msg.Message)
 			}
 		}
 	}

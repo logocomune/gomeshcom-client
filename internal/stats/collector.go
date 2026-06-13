@@ -17,20 +17,34 @@ type positionGetter interface {
 	Get(callsign string) (positions.Record, bool)
 }
 
-// Collector subscribes to the event bus and records packet statistics.
-type Collector struct {
-	store  *Store
-	pos    positionGetter
-	myCall string
+// myCallSource provides the live local callsign. *station.Identity satisfies
+// this interface; a static wrapper may be used in tests.
+type myCallSource interface {
+	Current() string
 }
 
-// NewCollector builds a Collector. myCall must be the upper-case local callsign.
-func NewCollector(store *Store, posStore positionGetter, myCall string) *Collector {
+// Collector subscribes to the event bus and records packet statistics.
+type Collector struct {
+	store    *Store
+	pos      positionGetter
+	identity myCallSource
+}
+
+// NewCollector builds a Collector. identity provides the live local callsign.
+func NewCollector(store *Store, posStore positionGetter, identity myCallSource) *Collector {
 	return &Collector{
-		store:  store,
-		pos:    posStore,
-		myCall: strings.ToUpper(myCall),
+		store:    store,
+		pos:      posStore,
+		identity: identity,
 	}
+}
+
+// myCall returns the current local callsign, or "" if no identity is configured.
+func (c *Collector) myCall() string {
+	if c.identity == nil {
+		return ""
+	}
+	return c.identity.Current()
 }
 
 // Run subscribes to bus and processes events until ctx is cancelled.
@@ -82,8 +96,8 @@ func (c *Collector) handlePacket(ev events.Event) {
 		}
 	case meshcom.Position:
 		var distPtr *float64
-		if c.myCall != "" {
-			if own, ok := c.pos.Get(c.myCall); ok && own.Latitude != 0 && own.Longitude != 0 {
+		if myCall := c.myCall(); myCall != "" {
+			if own, ok := c.pos.Get(myCall); ok && own.Latitude != 0 && own.Longitude != 0 {
 				d := HaversineKm(own.Latitude, own.Longitude, typed.Latitude, typed.Longitude)
 				distPtr = &d
 			}

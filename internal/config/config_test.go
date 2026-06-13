@@ -20,7 +20,7 @@ func TestLoadAllowsEmptyNodeAddr(t *testing.T) {
 	t.Setenv("GOMESHCOM_MAX_MESSAGE_LENGTH", "149")
 	t.Setenv("GOMESHCOM_LOG_LEVEL", "info")
 
-	cfg, _, err := Load("test")
+	cfg, _, _, err := Load("test")
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -46,7 +46,7 @@ func TestLoadRequestLogEnabled(t *testing.T) {
 	t.Setenv("GOMESHCOM_LOG_LEVEL", "info")
 	t.Setenv("GOMESHCOM_REQUEST_LOG_ENABLED", "true")
 
-	cfg, _, err := Load("test")
+	cfg, _, _, err := Load("test")
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -71,7 +71,7 @@ func TestLoadNormalizesMyCallPrefix(t *testing.T) {
 	t.Setenv("GOMESHCOM_MAX_MESSAGE_LENGTH", "149")
 	t.Setenv("GOMESHCOM_LOG_LEVEL", "info")
 
-	cfg, _, err := Load("test")
+	cfg, _, _, err := Load("test")
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -223,19 +223,6 @@ func TestValidate(t *testing.T) {
 				MyCall:           "QQ1ABC-1",
 				DataDir:          "./data",
 				MaxMessageLength: 0,
-				LogLevel:         "info",
-			},
-			wantErr: true,
-		},
-		"invalid send delay": {
-			cfg: Config{
-				HTTPAddr:         "127.0.0.1:8080",
-				UDPListenAddr:    "0.0.0.0:1799",
-				NodeAddr:         "192.168.0.2:1799",
-				MyCall:           "QQ1ABC-1",
-				DataDir:          "./data",
-				SendDelay:        -1,
-				MaxMessageLength: 149,
 				LogLevel:         "info",
 			},
 			wantErr: true,

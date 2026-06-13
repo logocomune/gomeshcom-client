@@ -60,21 +60,50 @@
 
 		<ul class="flex flex-col gap-0.5 p-2">
 			{#each secondaryNavRoutes as item}
-				{@const active = isRouteActive(page.url.pathname, item.href, base)}
-				<li>
-					<a
-						href={routeHref(item.href, base)}
-						class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors
-							{active
-							? 'bg-blue-500/20 text-blue-300'
-							: 'text-gray-400 hover:bg-gray-700/40 hover:text-gray-200'}"
-						onclick={() => viewState.closeDrawer()}
-						aria-current={active ? 'page' : undefined}
-					>
-						<MdiIcon path={item.icon} size={18} />
-						<span>{item.label}</span>
-					</a>
-				</li>
+				{#if item.children}
+					<li>
+						<div
+							class="px-3 pt-2.5 pb-0.5 text-xs font-semibold uppercase tracking-wider text-gray-500"
+						>
+							{item.label}
+						</div>
+						<ul class="flex flex-col gap-0.5">
+							{#each item.children as child}
+								{@const childActive = page.url.pathname === routeHref(child.href, base)}
+								<li>
+									<a
+										href={routeHref(child.href, base)}
+										class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors
+											{childActive
+											? 'bg-blue-500/20 text-blue-300'
+											: 'text-gray-400 hover:bg-gray-700/40 hover:text-gray-200'}"
+										onclick={() => viewState.closeDrawer()}
+										aria-current={childActive ? 'page' : undefined}
+									>
+										<MdiIcon path={child.icon} size={16} />
+										<span>{child.label}</span>
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</li>
+				{:else}
+					{@const active = isRouteActive(page.url.pathname, item.href, base)}
+					<li>
+						<a
+							href={routeHref(item.href, base)}
+							class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors
+								{active
+								? 'bg-blue-500/20 text-blue-300'
+								: 'text-gray-400 hover:bg-gray-700/40 hover:text-gray-200'}"
+							onclick={() => viewState.closeDrawer()}
+							aria-current={active ? 'page' : undefined}
+						>
+							<MdiIcon path={item.icon} size={18} />
+							<span>{item.label}</span>
+						</a>
+					</li>
+				{/if}
 			{/each}
 		</ul>
 	</nav>

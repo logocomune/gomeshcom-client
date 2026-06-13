@@ -1,7 +1,7 @@
 import type { PacketReceivedPayload, StreamEvent } from '$lib/api/types';
 import type { MapPosition } from './types';
 
-export const DM_TRACE_TTL_MS = 45_000;
+export const DM_TRACE_TTL_MS = 75_000;
 
 export type DmTraceSegment = {
 	from: MapPosition;

@@ -3,11 +3,15 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -16,13 +20,47 @@ import (
 
 var errUnauthorized = errors.New("unauthorized")
 
+type persistedSessions struct {
+	Sessions map[string]time.Time `json:"sessions"`
+}
+
 type sessionStore struct {
 	mu       sync.Mutex
+	path     string
 	sessions map[string]time.Time
 }
 
-func newSessionStore() *sessionStore {
-	return &sessionStore{sessions: make(map[string]time.Time)}
+func newSessionStore(path string) *sessionStore {
+	store := &sessionStore{
+		path:     path,
+		sessions: make(map[string]time.Time),
+	}
+	store.load()
+	return store
+}
+
+func (s *sessionStore) load() {
+	if s.path == "" {
+		return
+	}
+
+	file, err := os.Open(s.path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	var persisted persistedSessions
+	if err := json.NewDecoder(file).Decode(&persisted); err != nil {
+		return
+	}
+
+	now := time.Now().UTC()
+	for tokenHash, expiresAt := range persisted.Sessions {
+		if expiresAt.After(now) {
+			s.sessions[tokenHash] = expiresAt
+		}
+	}
 }
 
 func (s *sessionStore) create(ttl time.Duration) (string, time.Time, error) {
@@ -33,9 +71,15 @@ func (s *sessionStore) create(ttl time.Duration) (string, time.Time, error) {
 
 	token := hex.EncodeToString(raw[:])
 	expiresAt := time.Now().UTC().Add(ttl)
+	hash := hashSessionToken(token)
 
 	s.mu.Lock()
-	s.sessions[token] = expiresAt
+	s.sessions[hash] = expiresAt
+	if err := s.persistLocked(); err != nil {
+		delete(s.sessions, hash)
+		s.mu.Unlock()
+		return "", time.Time{}, err
+	}
 	s.mu.Unlock()
 
 	return token, expiresAt, nil
@@ -47,38 +91,108 @@ func (s *sessionStore) valid(token string) bool {
 	}
 
 	now := time.Now().UTC()
+	hash := hashSessionToken(token)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	expiresAt, ok := s.sessions[token]
+	expiresAt, ok := s.sessions[hash]
 	if !ok {
 		return false
 	}
 	if !expiresAt.After(now) {
-		delete(s.sessions, token)
+		delete(s.sessions, hash)
+		_ = s.persistLocked()
 		return false
 	}
 	return true
 }
 
-func (s *sessionStore) delete(token string) {
+func (s *sessionStore) delete(token string) error {
 	if token == "" {
-		return
+		return nil
 	}
+
+	hash := hashSessionToken(token)
 	s.mu.Lock()
-	delete(s.sessions, token)
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+
+	expiresAt, exists := s.sessions[hash]
+	if !exists {
+		return nil
+	}
+	delete(s.sessions, hash)
+	if err := s.persistLocked(); err != nil {
+		s.sessions[hash] = expiresAt
+		return err
+	}
+	return nil
 }
 
 func (s *sessionStore) evictExpired() {
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for token, expiresAt := range s.sessions {
+
+	changed := false
+	for tokenHash, expiresAt := range s.sessions {
 		if !expiresAt.After(now) {
-			delete(s.sessions, token)
+			delete(s.sessions, tokenHash)
+			changed = true
 		}
 	}
+	if changed {
+		_ = s.persistLocked()
+	}
+}
+
+func (s *sessionStore) persistLocked() error {
+	if s.path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return fmt.Errorf("create session directory: %w", err)
+	}
+
+	tmpPath := s.path + ".tmp"
+	temp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("create temporary session file: %w", err)
+	}
+
+	cleanup := func() {
+		_ = temp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	encoder := json.NewEncoder(temp)
+	if err := encoder.Encode(persistedSessions{Sessions: s.sessions}); err != nil {
+		cleanup()
+		return fmt.Errorf("encode sessions: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("sync sessions: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close sessions: %w", err)
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("replace sessions: %w", err)
+	}
+	return nil
+}
+
+func sessionPersistencePath(dataDir string) string {
+	if dataDir == "" {
+		return ""
+	}
+	return filepath.Join(dataDir, "http-sessions.json")
+}
+
+func hashSessionToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
 
 const sessionEvictInterval = 5 * time.Minute
@@ -188,7 +302,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	if authEnabled(s.cfg) {
 		if cookie, err := r.Cookie(s.cfg.Auth.CookieName); err == nil && s.sessions != nil {
-			s.sessions.delete(cookie.Value)
+			if err := s.sessions.delete(cookie.Value); err != nil {
+				writeError(w, http.StatusInternalServerError, "delete session")
+				return
+			}
 		}
 		http.SetCookie(w, &http.Cookie{
 			Name:     s.cfg.Auth.CookieName,

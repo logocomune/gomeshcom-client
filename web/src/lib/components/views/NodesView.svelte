@@ -1,8 +1,14 @@
 <script lang="ts">
-	import { mdiSortAscending, mdiSortDescending, mdiMapMarkerOutline } from '@mdi/js';
+	import {
+		mdiSortAscending,
+		mdiSortDescending,
+		mdiMapMarkerOutline,
+		mdiChatOutline
+	} from '@mdi/js';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import { eventsState } from '$lib/stores/events.svelte';
 	import { connectionState } from '$lib/stores/connection.svelte';
+	import { chatState } from '$lib/stores/chat.svelte';
 	import { goto } from '$app/navigation';
 	import type { MapPosition } from '$lib/map/types';
 	import { calculateDistanceKm } from '$lib/map/ruler';
@@ -13,6 +19,8 @@
 	let sortKey = $state<SortKey>('lastHeard');
 	let sortDir = $state<SortDir>('desc');
 	let filterText = $state('');
+	let recentOnly = $state(true);
+	const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 	interface NodeRow {
 		callsign: string;
@@ -35,23 +43,63 @@
 			: null
 	);
 
-	let rows = $derived(buildRows(eventsState.mapPositions, myPosition));
+	let rows = $derived(
+		buildRows(eventsState.mapPositions, myPosition, connectionState.stationCallsign)
+	);
 
-	function buildRows(positions: MapPosition[], origin: MapPosition | null): NodeRow[] {
-		return positions.map((pos) => ({
-			callsign: pos.id,
-			lastHeard: pos.lastSeen ?? '',
-			hops: pos.via?.length ?? 0,
-			rssi: pos.rssi ? pos.rssi : null,
-			snr: pos.snr ? pos.snr : null,
-			lat: pos.lat,
-			lng: pos.lon,
-			sourcePath: pos.via ? pos.via.join(' → ') : '',
-			distanceKm:
-				origin != null && pos.lat != null && pos.lon != null
-					? calculateDistanceKm(origin.lat, origin.lon, pos.lat, pos.lon)
-					: null
-		}));
+	function buildRows(
+		positions: MapPosition[],
+		origin: MapPosition | null,
+		myCallsign: string
+	): NodeRow[] {
+		const posMap = new Map(positions.map((p) => [p.id.toUpperCase(), p]));
+
+		return positions
+			.filter((pos) => pos.id.toUpperCase() !== myCallsign.toUpperCase())
+			.map((pos) => {
+				const distanceKm =
+					origin != null && pos.lat != null && pos.lon != null
+						? calculateDistanceKm(origin.lat, origin.lon, pos.lat, pos.lon)
+						: null;
+
+				const viaCallsigns = pos.via ?? [];
+				const parts: string[] = [pos.id, ...viaCallsigns];
+
+				// Cumulative path distance: sum of each segment IU1ABC→HOP1→…→myPos.
+				// If any node along the path lacks a known position, skip the suffix.
+				let pathDistKm: number | null = null;
+				if (viaCallsigns.length > 0 && origin != null && origin.lat != null && origin.lon != null) {
+					const hopNodes: Array<{ lat: number | null; lon: number | null } | null> = [
+						pos,
+						...viaCallsigns.map((cs) => posMap.get(cs.toUpperCase()) ?? null),
+						origin
+					];
+					const allKnown = hopNodes.every((n) => n != null && n.lat != null && n.lon != null);
+					if (allKnown) {
+						pathDistKm = 0;
+						for (let i = 0; i < hopNodes.length - 1; i++) {
+							const a = hopNodes[i]!;
+							const b = hopNodes[i + 1]!;
+							pathDistKm += calculateDistanceKm(a.lat!, a.lon!, b.lat!, b.lon!);
+						}
+					}
+				}
+
+				const distSuffix = pathDistKm != null ? ` [${formatDist(pathDistKm)}]` : '';
+				const sourcePath = parts.join(' → ') + distSuffix;
+
+				return {
+					callsign: pos.id,
+					lastHeard: pos.lastSeen ?? '',
+					hops: viaCallsigns.length,
+					rssi: pos.rssi ? pos.rssi : null,
+					snr: pos.snr ? pos.snr : null,
+					lat: pos.lat,
+					lng: pos.lon,
+					sourcePath,
+					distanceKm
+				};
+			});
 	}
 
 	function formatDist(km: number): string {
@@ -60,9 +108,16 @@
 	}
 
 	let filtered = $derived(
-		filterText.trim() === ''
-			? rows
-			: rows.filter((r) => r.callsign.toUpperCase().includes(filterText.trim().toUpperCase()))
+		rows.filter((r) => {
+			if (recentOnly && r.lastHeard && Date.now() - new Date(r.lastHeard).getTime() > THREE_DAYS_MS)
+				return false;
+			if (
+				filterText.trim() !== '' &&
+				!r.callsign.toUpperCase().includes(filterText.trim().toUpperCase())
+			)
+				return false;
+			return true;
+		})
 	);
 
 	let sorted = $derived(
@@ -124,6 +179,11 @@
 		eventsState.focusOnNode(row.callsign, row.lat, row.lng);
 		void goto('/map');
 	}
+
+	function openChat(row: NodeRow) {
+		chatState.selectContact(row.callsign);
+		void goto('/chat');
+	}
 </script>
 
 <div class="flex h-full flex-col">
@@ -133,6 +193,10 @@
 	>
 		<span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Nodes</span>
 		<div class="flex items-center gap-2">
+			<label class="flex cursor-pointer items-center gap-1.5 text-[11px] text-gray-400 select-none">
+				<input type="checkbox" class="accent-blue-500" bind:checked={recentOnly} />
+				last 3d
+			</label>
 			<input
 				type="search"
 				class="h-6 w-36 rounded border border-gray-700/60 bg-[#111827] px-2 text-xs text-gray-200 outline-none placeholder:text-gray-500 focus:border-blue-500/60"
@@ -151,12 +215,14 @@
 		</div>
 	{:else}
 		<div class="min-h-0 flex-1 overflow-auto">
-			<table class="w-full min-w-[680px] border-collapse text-xs">
+			<table class="w-full min-w-[480px] border-collapse text-xs">
 				<thead class="sticky top-0 bg-[#1c2230]">
 					<tr class="border-b border-gray-700/60">
-						{#each [{ key: 'callsign', label: 'Callsign' }, { key: 'lastHeard', label: 'Last Heard' }, { key: 'rssi', label: 'RSSI' }, { key: 'snr', label: 'SNR' }, { key: 'hops', label: 'Hops' }, { key: 'distance', label: 'Distance' }] as col (col.key)}
+						{#each [{ key: 'callsign', label: 'Callsign', smOnly: false }, { key: 'lastHeard', label: 'Last Heard', smOnly: false }, { key: 'rssi', label: 'RSSI', smOnly: true }, { key: 'snr', label: 'SNR', smOnly: true }, { key: 'hops', label: 'Hops', smOnly: false }, { key: 'distance', label: 'Distance', smOnly: false }] as col (col.key)}
 							<th
-								class="cursor-pointer select-none px-3 py-2 text-left font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300"
+								class="cursor-pointer select-none px-3 py-2 text-left font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300 {col.smOnly
+									? 'hidden sm:table-cell'
+									: ''}"
 								onclick={() => toggleSort(col.key as SortKey)}
 							>
 								<span class="flex items-center gap-1">
@@ -189,14 +255,14 @@
 							<td class="px-3 py-2 text-gray-400">
 								{formatHeard(row.lastHeard)}
 							</td>
-							<td class="px-3 py-2 font-mono text-gray-400">
+							<td class="hidden px-3 py-2 font-mono text-gray-400 sm:table-cell">
 								{row.rssi != null ? `${row.rssi} dBm` : '—'}
 							</td>
-							<td class="px-3 py-2 font-mono text-gray-400">
+							<td class="hidden px-3 py-2 font-mono text-gray-400 sm:table-cell">
 								{row.snr != null ? row.snr : '—'}
 							</td>
 							<td class="px-3 py-2">
-								{#if row.hops === 0}
+								{#if row.hops === 0 && row.lastHeard && Date.now() - new Date(row.lastHeard).getTime() < 2 * 60 * 60 * 1000}
 									<span class="font-semibold text-emerald-400">direct</span>
 								{:else}
 									<span class="text-gray-400">{row.hops}</span>
@@ -209,17 +275,28 @@
 								{row.sourcePath || '—'}
 							</td>
 							<td class="px-3 py-2">
-								{#if row.lat != null && row.lng != null}
+								<div class="flex items-center gap-1">
+									{#if row.lat != null && row.lng != null}
+										<button
+											type="button"
+											class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+											title="Show on map"
+											onclick={() => focusOnMap(row)}
+										>
+											<MdiIcon path={mdiMapMarkerOutline} size={13} />
+											Map
+										</button>
+									{/if}
 									<button
 										type="button"
-										class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
-										title="Show on map"
-										onclick={() => focusOnMap(row)}
+										class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+										title="Open DM chat"
+										onclick={() => openChat(row)}
 									>
-										<MdiIcon path={mdiMapMarkerOutline} size={13} />
-										Map
+										<MdiIcon path={mdiChatOutline} size={13} />
+										Chat
 									</button>
-								{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}

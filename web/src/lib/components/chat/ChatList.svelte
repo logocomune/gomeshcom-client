@@ -3,9 +3,9 @@
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import PixelAvatar from '$lib/components/PixelAvatar.svelte';
 	import { chatState } from '$lib/stores/chat.svelte';
-	import { conversationIdFor } from '$lib/api/chat';
+	import { getAppContext } from '$lib/app/app-context';
 	import { resolveGroup, type MeshcomGroup } from '$lib/api/groups';
-	import { sortByRecency, previewText, conversationPreview, formatRelativeTime } from '$lib/ui/chat-list';
+	import { sortByRecency, latestPreview, formatRelativeTime } from '$lib/ui/chat-list';
 	import type { Conversation } from '$lib/api/types';
 
 	interface Props {
@@ -13,6 +13,8 @@
 	}
 
 	let { onSelectConversation }: Props = $props();
+
+	const app = getAppContext();
 
 	let channels = $derived(
 		sortByRecency(chatState.visibleConversations.filter((c) => c.kind !== 'dm'))
@@ -48,10 +50,7 @@
 	}
 
 	function isActiveConv(conv: Conversation): boolean {
-		if (conv.kind === 'dm') {
-			return conv.id === conversationIdFor({ kind: 'contact', value: chatState.chatTarget.value });
-		}
-		return conv.id === conversationIdFor({ kind: 'channel', value: chatState.chatTarget.value });
+		return conv.id === chatState.currentConvId;
 	}
 </script>
 
@@ -90,9 +89,8 @@
 		</div>
 		{#if channels.length > 0}
 			{#each channels as conv (conv.id)}
-				{@const statusMsg = chatState.chatStatus[conv.id]?.lastMsg}
-				{@const preview = statusMsg != null ? previewText(statusMsg) : conversationPreview(chatState.chatHistory[conv.id] ?? [])}
-				{@const count = chatState.chatStatus[conv.id]?.unreadCount ?? 0}
+				{@const preview = latestPreview(chatState.chatHistory[conv.id] ?? [], chatState.effectiveChatStatus[conv.id])}
+				{@const count = chatState.effectiveChatStatus[conv.id]?.unreadCount ?? 0}
 				{@const relTime = formatRelativeTime(conv.last_seen)}
 				{@const active = isActiveConv(conv)}
 				{@const group = groupFor(conv)}
@@ -139,25 +137,41 @@
 		<!-- Direct Messages section -->
 		<div class="flex items-center justify-between border-t border-ink-dim/20 px-3 py-1.5">
 			<span class="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">Direct Messages</span>
-			<button
-				type="button"
-				class="flex items-center gap-1 rounded bg-azure px-2 py-0.5 text-[10px] font-semibold text-base hover:bg-azure/90 active:bg-azure/80"
-				title="New Direct Message"
-				onclick={() => {
-					chatState.newDmCallsign = '';
-					chatState.newDmError = '';
-					chatState.newDmOpen = true;
-				}}
-			>
-				<MdiIcon path={mdiPlus} size={12} />
-				Add DM
-			</button>
+			<div class="flex items-center gap-2">
+				<!-- Scope toggle: My = mycall only, All = basecall (all devices) -->
+				<div class="flex overflow-hidden rounded border border-ink-dim/20 text-[10px] font-semibold">
+					<button
+						type="button"
+						class="px-1.5 py-0.5 transition-colors {chatState.dmScope === 'mycall' ? 'bg-azure text-base' : 'text-ink-muted hover:text-ink'}"
+						title="My callsign only"
+						onclick={() => app.changeDmScope('mycall')}
+					>My</button>
+					<button
+						type="button"
+						class="px-1.5 py-0.5 transition-colors {chatState.dmScope === 'basecall' ? 'bg-azure text-base' : 'text-ink-muted hover:text-ink'}"
+						title="All devices (basecall)"
+						onclick={() => app.changeDmScope('basecall')}
+					>All</button>
+				</div>
+				<button
+					type="button"
+					class="flex items-center gap-1 rounded bg-azure px-2 py-0.5 text-[10px] font-semibold text-base hover:bg-azure/90 active:bg-azure/80"
+					title="New Direct Message"
+					onclick={() => {
+						chatState.newDmCallsign = '';
+						chatState.newDmError = '';
+						chatState.newDmOpen = true;
+					}}
+				>
+					<MdiIcon path={mdiPlus} size={12} />
+					Add DM
+				</button>
+			</div>
 		</div>
 		{#if dms.length > 0}
 				{#each dms as conv (conv.id)}
-					{@const statusMsg = chatState.chatStatus[conv.id]?.lastMsg}
-					{@const preview = statusMsg != null ? previewText(statusMsg) : conversationPreview(chatState.chatHistory[conv.id] ?? [])}
-					{@const count = chatState.chatStatus[conv.id]?.unreadCount ?? 0}
+					{@const preview = latestPreview(chatState.chatHistory[conv.id] ?? [], chatState.effectiveChatStatus[conv.id])}
+					{@const count = chatState.effectiveChatStatus[conv.id]?.unreadCount ?? 0}
 					{@const relTime = formatRelativeTime(conv.last_seen)}
 					{@const active = isActiveConv(conv)}
 					<button

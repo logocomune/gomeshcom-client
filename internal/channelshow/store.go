@@ -44,7 +44,7 @@ func New(path string) (*Store, error) {
 }
 
 func DefaultPath(dataDir string) string {
-	return filepath.Join(dataDir, "channel_show.json")
+	return filepath.Join(dataDir, "configs", "channel_show.json")
 }
 
 func DefaultConfig() Config {

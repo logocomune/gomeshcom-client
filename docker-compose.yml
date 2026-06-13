@@ -24,6 +24,9 @@ services:
       - GOMESHCOM_UDP_LISTEN_ADDR=0.0.0.0:1799
       # Set log verbosity (debug, info, warn, error)
       - GOMESHCOM_LOG_LEVEL=info
+      # Signal to the app that it is running inside a container.
+      # POST /api/restart will exit cleanly and let the restart policy relaunch.
+      - RUNNING_IN_DOCKER=1
 
 volumes:
   gomeshcom-data:

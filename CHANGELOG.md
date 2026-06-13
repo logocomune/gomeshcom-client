@@ -2,6 +2,114 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.10.0]
+
+### Added
+
+- **Demo mode** (`demo_mode = false` top-level TOML, env `GOMESHCOM_DEMO_MODE`): when enabled, TX is disabled and the config API (`GET /api/config`, `PUT /api/config`) returns HTTP 403. The settings page shows a "Demo mode active" banner instead of the form. Replaces the former `[send] disable_tx` option.
+
+- **DM stats in chat header**: when opening a direct message conversation, the header subtitle shows cumulative sent count and ACK percentage for that contact. It also shows average round-trip time when matching messages and ACK events are available in the loaded chat history (e.g. `direct · sent: 12 · ack: 83% · avg: 420ms`). Counters are fetched from `GET /api/stats/dm` when the conversation is selected and hidden when no messages have been sent yet.
+
+- **DM statistics per callsign** (`GET /api/stats/dm`): tracks cumulative sent and ACK counters for each DM destination callsign. For destinations with a numeric SSID (e.g. `CALL-1`), both the full entry (`CALL-1`) and the base callsign (`CALL`) are updated. The first ACK for each message is counted; subsequent echoes of the same message are ignored by outbox deduplication. Counters are persisted to `data/stats/dm_stats.json` and survive restarts.
+
+- **Process control endpoints**: `POST /api/restart` gracefully shuts down the HTTP server and UDP bridge, then either exits the process (Docker — container restart policy relaunches) or re-executes the same binary with identical args/env (standalone). `POST /api/shutdown` stops the daemon without restarting. Both require auth when auth is enabled. SIGHUP triggers the restart sequence without hitting the HTTP endpoint. Container detection uses `RUNNING_IN_DOCKER=1` env var (set in Dockerfile and docker-compose) with `/.dockerenv` / `/proc/1/cgroup` as a Linux fallback.
+
+- **Interface settings page** (`/settings/ui`): stores browser-local UI preferences and provides direct-message sound and toast controls. Incoming DM notifications can play a two-tone alert and show a dismissible sender toast.
+
+- **Nodes view — Chat button**: each node row now has a "Chat" button alongside "Map". Clicking it selects the node as DM target and navigates to `/chat`, opening the thread directly.
+
+- **HTTP gzip compression middleware**: eligible API and static responses are transparently compressed when the client advertises `Accept-Encoding: gzip`. SSE (`/api/events`), range requests, already-encoded responses, non-compressible content types, and responses below 1 KiB bypass compression. `Content-Encoding: gzip` and `Vary: Accept-Encoding` headers are set when active. `Content-Length` is removed to allow chunked transfer. Controlled via `[compression]` TOML section (`enabled`, `minimum_size`) and `GOMESHCOM_COMPRESSION_*` env vars.
+
+- **TOML configuration file** (`data/configs/gomeshcomd.toml`): all config fields now persist in a human-readable, commented TOML file. Load order is `built-in defaults < TOML file < env vars`. A missing file is written with defaults on first startup; an invalid file causes startup to fail with a clear error. Dependency `github.com/pelletier/go-toml/v2` added.
+
+- **`GET /api/config`**: returns the effective configuration as a typed JSON response with `env_override` and `requires_restart` metadata per field. `auth.password` is always masked. Response now includes a `server` object with `version`, `started_at` (RFC 3339), and `uptime_seconds` fields.
+
+- **`PUT /api/config`**: accepts a partial JSON patch, validates it, persists atomically to the TOML file, and returns the updated effective config. `my_call` changes apply live via `station.Identity.Update` and broadcast an SSE `station.identity` event. Fields managed by env vars return 409 Conflict. Duration fields are strings (e.g. `"40s"`).
+
+- **Settings page** (`/settings` route): new UI page showing all configuration fields with `env` and `restart` badges. Editable fields save via `PUT /api/config`. Live-apply fields (my_call, log_level, send options) take effect immediately.
+
+- **Settings — About card**: System tab now shows a read-only "About" card with server version, start timestamp, and uptime (formatted as `Xd Xh Xm Xs`). Values are sourced from the `server` object returned by `GET /api/config`.
+
+- **HTTP response compression analysis**: added `docs/todos/10_http_response_compression.md`, defining gzip coverage for eligible API/static responses, mandatory SSE exclusion, negotiation, tests, benchmarks, and alternative algorithms.
+
+- **Runtime `my_call` change** (`GET`/`PUT /api/adm/configs/my-call`): the active station callsign can now be updated at runtime without restarting the daemon. The new value is validated, persisted synchronously to `data/configs/station.json` before responding, and broadcast via the existing `station.identity` SSE event to all connected clients.
+
+- **`internal/station` package**: concurrency-safe runtime identity component. `Identity.Current()` provides the live callsign; `Identity.Update()` normalizes, validates, and persists the change. Persisted value wins over the `GOMESHCOM_MY_CALL` config default on startup.
+
+- **`internal/callsign` package**: shared callsign normalization (`Normalize`) and validation (`IsValid`, `Pattern`) extracted from the config loader. Fuzz-tested.
+
+- **About-page callsign editor**: the "My call" field in the About view now shows an inline Edit button. Saving the form calls `PUT /api/adm/configs/my-call`; all DM classification, the header callsign display, and outbox source update live via SSE.
+
+- **Frontend DM scope toggle**: chat list shows a "My / All" toggle in the Direct Messages section. "My" (default, mycall scope) shows only conversations addressed to the active SSID; "All" (basecall scope) aggregates all devices sharing the same base callsign. Switching scope refetches conversations and current history from the server.
+
+- **Frontend scope-aware `chatStatus`**: SSE `chatstatus.snapshot` keys (always full-SSID) are aggregated in basecall scope — `unreadCount` = max, `lastMsgReceived`/`lastMsg` = most recent across all SSID entries for each peer.
+
+- **`?scope=` param on frontend API calls**: `fetchConversations`, `fetchHistory`, and `markConversationRead` pass the active scope; `markConversationRead` in basecall scope zeroes all per-SSID unread counts.
+
+- **`baseCallFrom` / `dmPeerFromId` helpers** exported from `$lib/api/chat` for scope-aware id construction and peer extraction.
+
+- **DM scope-aware API**: `?scope=mycall` (default) and `?scope=basecall` query param on `GET /api/chat/list` and `GET /api/chat/{conversation}`. In `mycall` scope the list returns SSID-specific conversation ids (`DM_<mycall>_<peer>`) and filters records to those addressed to/from the active callsign. In `basecall` scope it returns the shared basecall file id (`DM_<basecall>_<peer>`) and all records. `POST /api/chat/{conversation}/read?scope=basecall` marks all per-SSID status keys for the peer as read.
+
+- **`chatlog.BaseCall`**: exported helper that strips numeric SSID suffix (`IU5PMP-1` → `IU5PMP`).
+
+- **`chatlog.StatusKey`**: returns the full-SSID-namespaced `msg_idx.json` key for a message, enabling per-device read tracking while history is shared.
+
+- **`chatlog.FileIDForAPIID`, `chatlog.DMPeer`, `chatlog.RecordMatchesSSID`, `chatlog.Sanitize`**: exported helpers for scope-aware API plumbing.
+
+- **`internal/legacymigrate` package** (temporary, removal planned): one-shot startup migration that renames legacy `DM_<peer>.jsonl` files to `DM_<basecall(mycall)>_<peer>.jsonl`, migrates `msg_idx.json` keys to the full-SSID form, and moves `data/channel_show.json` to `data/configs/channel_show.json`. Idempotent.
+
+### Changed
+
+- **Interface settings hidden from nav**: `/settings/ui` route still accessible via direct URL but removed from the Settings submenu to reduce nav clutter.
+
+- **Settings organization**: server settings are grouped into Server, Web Interface, Storage, and System sections. System controls expose graceful restart and shutdown actions.
+
+- **Configuration cleanup**: removed the unused `send_delay` field from environment, TOML, API, and Settings UI surfaces.
+
+- **Map event pulses color-coded by packet type**: `pos` → green `#34d399`, `tele` → orange `#f97316`, broadcast (`dst=*`) → amber `#f59e0b`, ACK → purple `#a855f7`, direct message → sky blue `#38bdf8`. Pulse duration extended from 2.2 s to 5 s (5 × 1 s animation). `CET/SET` system messages and numeric destinations remain suppressed.
+
+- **DM trace TTL extended** from 45 s to 75 s (1 m 15 s).
+
+- **Map color legend**: shown below the live stream ticker when DM tracking is active; lists pulse dot colors and dashed-line path colors. Removed the bottom-left "positions · OSM · Maidenhead" label.
+
+- **Relay node pulse**: intermediate hops in `packet.src` flash yellow (`#facc15`) for 2 s when any packet transits through them.
+
+- **`my_call` editor moved from About to Settings**: the About page now shows the active callsign read-only with a link to the Settings page.
+
+- **`config.Load` signature**: now returns `(Config, EnvOverrides, string, error)`. The `EnvOverrides` map records which `GOMESHCOM_*` env vars are present and is used by the API to mark fields read-only.
+
+- **Settings nav entry added**: Settings icon appears in `secondaryNavRoutes` (top bar and mobile drawer).
+
+- **Documentation cleanup for runtime callsign**: README and backend/statistics docs now describe `GOMESHCOM_MY_CALL` as the startup default, runtime callsign updates via `PUT /api/adm/configs/my-call`, persisted `data/configs/station.json`, and current DM file naming.
+
+- **Long-lived services use live callsign**: `udpbridge.Bridge`, `chatlog.Logger`, and `stats.Collector` now read the callsign from a `myCallSource` interface (`*station.Identity` in production) instead of capturing a string at construction time. DM file routing, echo suppression, and outbox source all reflect the newest accepted callsign without restart.
+
+- **DM file naming**: new DM files are written as `DM_<basecall(mycall)>_<peer>.jsonl` (operator base callsign, e.g. `DM_IU5PMP_IK5FCK-10.jsonl`). Device switches (`IU5PMP-1` → `IU5PMP-2`) share the same history file; read-state is tracked separately per SSID in `msg_idx.json`.
+
+- **`msg_idx.json` DM keys**: now `DM_<mycall-with-ssid>_<peer>` (e.g. `DM_IU5PMP-1_IK5FCK-10`) for per-device unread tracking.
+
+- **`channelshow.DefaultPath`**: returns `data/configs/channel_show.json` instead of `data/channel_show.json`. `ensureDataDirs` now creates the `configs/` sub-directory.
+
+- **Echo suppression in bridge**: compares by basecall so echoes from any SSID of the same operator are suppressed.
+
+> **Planned removal**: `internal/legacymigrate` is a temporary migration aid. Delete it (and its call in `cmd/gomeshcomd/main.go`) in a future release after the migration window has closed.
+
+### Fixed
+
+- **Chat/DM list preview not updating after sending a message**: the last-message preview in the conversation list now correctly shows the most recently sent message. Previously, once a message had been received on a conversation, the preview was locked to the last *received* message and ignored any subsequent sent messages.
+
+- **Mobile chat — Add DM not opening thread**: after confirming a new DM via the "Add DM" modal on mobile, the thread view was not shown. `ChatView` now reacts to external conversation target changes and auto-navigates to thread on mobile.
+
+- **Web sessions survive server restarts**: authenticated sessions are persisted atomically in `data/http-sessions.json`. Only SHA-256 token hashes and expiration times are stored with `0600` permissions; expired sessions are rejected during startup and logout removals persist immediately.
+
+- **ACK/REJ detection — no-space callsign format**: `messageKind`, `ackSeqId`, and `rejSeqId` failed to recognise ACK/REJ packets where the target callsign is joined directly to the ack marker without a space (e.g. `IU5PMP-10:ack353`). Some firmware versions omit the space; those packets displayed as regular chat messages instead of being silently filtered. Regex updated from `(?:^|\s):?ack\d+` to `(?:^|[:\s])ack\d+` to accept both forms.
+
+- **ACK indicator missing in basecall scope**: in "All" (basecall) scope, ACK indicators were not shown on outgoing messages sent from a different SSID of the same operator (e.g., active callsign `IU5PMP-1`, message sent from `IU5PMP-10`). Two bugs combined: `isSent` in `ChatThread` used exact callsign comparison instead of base-call comparison, causing `sequenceId` to be null and short-circuiting all ACK lookup; and `entryMatchesRecord` in `acks.ts` compared the ACK target against the active callsign with exact match instead of base-call match. Both fixed: `isSent` now uses `baseCallFrom` in basecall scope; `ackEntriesForRecord`/`rejectEntriesForRecord` accept a `scope` parameter and compare base callsigns when `scope === 'basecall'`.
+
+- **`/api/chat/list?scope=mycall` false-positive DM entries**: the endpoint now verifies the shared basecall `.jsonl` file contains at least one record where `Src` or `Dst` matches the active full SSID before including the conversation. Previously, a file written only by another device (e.g. `IU5PMP-2`) would appear in `IU5PMP-1`'s list.
+
+- **Frontend live DM filter in basecall scope**: SSE packets addressed to another SSID sharing the same base callsign (e.g. `IU5PMP-2`) were silently dropped in `basecall` scope. The `appendLiveChatRecord` handler and `conversationIdForRecord` now compare against `baseCallFrom(myCall)` when scope is `basecall`.
+
 ## [0.9.0]
 
 ### Changed

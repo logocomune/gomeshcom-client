@@ -58,8 +58,8 @@ describe('stream UI helpers', () => {
 		const raw = streamEvent('message.created', {});
 
 		expect(packetBadge(position)).toBe('pos');
-		expect(packetTone(position)).toContain('border-emerald');
-		expect(packetTone(raw)).toContain('border-gray');
+		expect(packetTone(position)).toContain('border-azure');
+		expect(packetTone(raw)).toContain('border-ink-dim');
 		expect(packetField(position, 'missing')).toBe('—');
 		expect(packetField(position, 'lat')).toBe('43.1');
 	});

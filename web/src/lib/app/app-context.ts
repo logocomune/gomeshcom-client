@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import type { AckIndex } from '$lib/api/acks';
 import type { SseStore } from '$lib/stores/sse.svelte';
+import type { DmScope } from '$lib/api/chat';
 
 const APP_CONTEXT_KEY = Symbol('meshcom-app-context');
 
@@ -12,6 +13,7 @@ export type AppContext = {
 	openDeleteConfirm: () => void;
 	openNewDm: () => void;
 	openNewChannel: () => void;
+	changeDmScope: (scope: DmScope) => void | Promise<void>;
 };
 
 export function setAppContext(context: AppContext) {

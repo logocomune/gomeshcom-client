@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,12 +19,14 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/chatlog"
 	"github.com/logocomune/gomeshcom-client/internal/chatstatus"
 	"github.com/logocomune/gomeshcom-client/internal/config"
+	"github.com/logocomune/gomeshcom-client/internal/dmstats"
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 	"github.com/logocomune/gomeshcom-client/internal/outbox"
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
+	"github.com/logocomune/gomeshcom-client/internal/station"
 	"github.com/logocomune/gomeshcom-client/internal/stats"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 	"github.com/logocomune/gomeshcom-client/internal/webui"
@@ -42,20 +45,27 @@ type messageSender interface {
 }
 
 type Server struct {
-	cfg         config.Config
-	version     string
-	bus         *events.Bus
-	positions   *positions.Store
-	receiveLog  *receivelog.Logger
-	chatLog     *chatlog.Logger
-	chatStatus  *chatstatus.Store
-	channelShow *channelshow.Store
-	statsStore  *stats.Store
-	bridge      messageSender
-	sendCache   *sendcache.Cache
-	outbox      *outbox.Outbox
-	sessions    *sessionStore
-	cancel      context.CancelFunc
+	cfg          config.Config
+	identity     *station.Identity
+	version      string
+	bus          *events.Bus
+	positions    *positions.Store
+	receiveLog   *receivelog.Logger
+	chatLog      *chatlog.Logger
+	chatStatus   *chatstatus.Store
+	channelShow  *channelshow.Store
+	statsStore   *stats.Store
+	dmStats      *dmstats.Store
+	bridge       messageSender
+	sendCache    *sendcache.Cache
+	outbox       *outbox.Outbox
+	sessions     *sessionStore
+	cancel       context.CancelFunc
+	envOverrides config.EnvOverrides
+	tomlPath     string
+	restartFunc  func()
+	shutdownFunc func()
+	startedAt    time.Time
 }
 
 const outgoingEchoTimeout = 5 * time.Second
@@ -68,6 +78,15 @@ func WithChannelShow(store *channelshow.Store) ServerOption {
 	}
 }
 
+// WithStationIdentity attaches a runtime station identity to the server.
+// When provided, the server uses the live callsign from identity instead of
+// the startup config value.
+func WithStationIdentity(id *station.Identity) ServerOption {
+	return func(server *Server) {
+		server.identity = id
+	}
+}
+
 // WithStats attaches a stats store to the server, enabling the /api/stats endpoint.
 func WithStats(store *stats.Store) ServerOption {
 	return func(server *Server) {
@@ -75,10 +94,53 @@ func WithStats(store *stats.Store) ServerOption {
 	}
 }
 
+// WithDMStats attaches a DM stats store to the server, enabling the
+// /api/stats/dm endpoint and per-callsign sent/ack tracking.
+func WithDMStats(store *dmstats.Store) ServerOption {
+	return func(server *Server) {
+		server.dmStats = store
+	}
+}
+
+// WithEnvOverrides records which config fields are managed by environment variables.
+// The server uses this to mark fields read-only in GET /api/config responses and
+// to reject updates for those fields via PUT /api/config.
+func WithEnvOverrides(env config.EnvOverrides) ServerOption {
+	return func(server *Server) {
+		server.envOverrides = env
+	}
+}
+
+// WithTomlPath sets the path to the TOML config file.
+// PUT /api/config writes updated config to this path atomically.
+func WithTomlPath(path string) ServerOption {
+	return func(server *Server) {
+		server.tomlPath = path
+	}
+}
+
+// WithRestartFunc registers a callback that POST /api/restart (and SIGHUP) will
+// invoke to initiate a graceful restart. If not set, the endpoint returns 501.
+func WithRestartFunc(fn func()) ServerOption {
+	return func(server *Server) {
+		server.restartFunc = fn
+	}
+}
+
+// WithShutdownFunc registers a callback that POST /api/shutdown will invoke
+// to initiate a graceful shutdown without restarting. If not set, the endpoint
+// returns 501.
+func WithShutdownFunc(fn func()) ServerOption {
+	return func(server *Server) {
+		server.shutdownFunc = fn
+	}
+}
+
 func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore *positions.Store, receiveLog *receivelog.Logger, chatLog *chatlog.Logger, bridge messageSender, sc *sendcache.Cache, chatStatus *chatstatus.Store, options ...ServerOption) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	server := &Server{
 		cfg:        cfg,
+		identity:   station.NewInMemory(cfg.MyCall), // overridable via WithStationIdentity
 		version:    version,
 		bus:        bus,
 		positions:  positionStore,
@@ -88,6 +150,7 @@ func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore
 		bridge:     bridge,
 		sendCache:  sc,
 		cancel:     cancel,
+		startedAt:  time.Now().UTC(),
 	}
 	for _, option := range options {
 		option(server)
@@ -95,7 +158,7 @@ func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore
 	server.outbox = outbox.New(outgoingEchoTimeout, server.handleOutgoingTimeout)
 	server.watchOutgoingEchoes(ctx)
 	if authEnabled(cfg) {
-		server.sessions = newSessionStore()
+		server.sessions = newSessionStore(sessionPersistencePath(cfg.DataDir))
 		server.sessions.start(ctx)
 	}
 	return server
@@ -112,13 +175,26 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/events", requireAuth(http.HandlerFunc(s.streamEvents), s))
 	mux.Handle("GET /api/channel-show", requireAuth(http.HandlerFunc(s.getChannelShow), s))
 	mux.Handle("PUT /api/channel-show", requireAuth(http.HandlerFunc(s.updateChannelShow), s))
+	mux.Handle("GET /api/adm/configs/my-call", requireAuth(http.HandlerFunc(s.getMyCall), s))
+	mux.Handle("PUT /api/adm/configs/my-call", requireAuth(http.HandlerFunc(s.updateMyCall), s))
+	mux.Handle("GET /api/config", requireAuth(http.HandlerFunc(s.getConfig), s))
+	mux.Handle("PUT /api/config", requireAuth(http.HandlerFunc(s.updateConfig), s))
+	mux.Handle("POST /api/restart", requireAuth(http.HandlerFunc(s.restart), s))
+	mux.Handle("POST /api/shutdown", requireAuth(http.HandlerFunc(s.shutdown), s))
 	mux.Handle("GET /api/chat/list", requireAuth(http.HandlerFunc(s.listConversations), s))
 	mux.Handle("GET /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.getConversation), s))
 	mux.Handle("DELETE /api/chat/{conversation}", requireAuth(http.HandlerFunc(s.deleteConversation), s))
 	mux.Handle("POST /api/chat/{conversation}/read", requireAuth(http.HandlerFunc(s.markConversationRead), s))
 	mux.Handle("GET /api/stats", requireAuth(http.HandlerFunc(s.listStats), s))
+	mux.Handle("GET /api/stats/dm", requireAuth(http.HandlerFunc(s.listDMStats), s))
 	mux.Handle("/", spaHandler(webui.FS()))
 	handler := cacheHeadersMiddleware(mux)
+	if s.cfg.Compression.Enabled {
+		handler = compressionMiddleware(compressionOptions{
+			MinimumSize: s.cfg.Compression.MinimumSize,
+			GzipLevel:   gzip.BestSpeed,
+		}, handler)
+	}
 	if s.cfg.RequestLog.Enabled {
 		return requestLogMiddleware(handler)
 	}
@@ -238,7 +314,12 @@ func spaHandler(fsys fs.FS) http.Handler {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.version, "callsign": s.cfg.MyCall})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":     "ok",
+		"version":    s.version,
+		"callsign":   s.identity.Current(),
+		"started_at": s.startedAt.Format(time.RFC3339Nano),
+	})
 }
 
 func (s *Server) listPositions(w http.ResponseWriter, _ *http.Request) {
@@ -292,6 +373,29 @@ func (s *Server) listStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// dmStatsEntry is the JSON response shape for a single callsign in /api/stats/dm.
+type dmStatsEntry struct {
+	Sent int `json:"sent"`
+	Ack  int `json:"ack"`
+}
+
+func (s *Server) listDMStats(w http.ResponseWriter, _ *http.Request) {
+	if s.dmStats == nil {
+		writeJSON(w, http.StatusOK, map[string]dmStatsEntry{})
+		return
+	}
+
+	snapshot := s.dmStats.Snapshot()
+	result := make(map[string]dmStatsEntry, len(snapshot))
+	for callsign, e := range snapshot {
+		result[callsign] = dmStatsEntry{
+			Sent: e.Sent,
+			Ack:  e.Ack,
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Destination string `json:"dst"`
@@ -337,8 +441,11 @@ func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("message sent", "dst", outgoing.Destination, "msg", outgoing.Message)
-	if s.outbox != nil && !s.cfg.Send.DisableTx {
-		s.outbox.Register(s.cfg.MyCall, outgoing.Destination, outgoing.Message, time.Now().UTC())
+	if s.outbox != nil && !s.cfg.DemoMode {
+		s.outbox.Register(s.identity.Current(), outgoing.Destination, outgoing.Message, time.Now().UTC())
+	}
+	if s.dmStats != nil {
+		s.dmStats.RecordSent(outgoing.Destination)
 	}
 
 	writeJSON(w, http.StatusAccepted, outgoing)
@@ -366,12 +473,16 @@ func (s *Server) watchOutgoingEchoes(ctx context.Context) {
 					continue
 				}
 				if s.outbox != nil {
-					if s.outbox.Confirm(message.Source, message.Destination, message.Message) {
+					if _, ok := s.outbox.Confirm(message.Source, message.Destination, message.Message); ok {
+						now := time.Now().UTC()
+						if s.dmStats != nil {
+							s.dmStats.RecordAck(message.Destination)
+						}
 						if s.bus != nil {
 							s.bus.Publish(events.Event{
 								Type: "message.delivered",
 								Data: chatlog.Record{
-									ReceivedAt:     time.Now().UTC(),
+									ReceivedAt:     now,
 									Src:            message.Source,
 									Dst:            message.Destination,
 									Msg:            message.Message,
@@ -446,9 +557,9 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 
 	forwardTargets, _ := config.ParseForwardTargets(s.cfg.Forward.Targets)
 	if err := writeSSE(w, events.Event{Type: "station.identity", Data: stationIdentityEvent{
-		Callsign:           s.cfg.MyCall,
+		Callsign:           s.identity.Current(),
 		Version:            s.version,
-		TxDisabled:         s.cfg.Send.DisableTx,
+		TxDisabled:         s.cfg.DemoMode,
 		ForwardTargetCount: len(forwardTargets),
 	}}); err != nil {
 		return
@@ -499,7 +610,46 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) listConversations(w http.ResponseWriter, _ *http.Request) {
+// scopeFromRequest returns "basecall" when ?scope=basecall is set, else "mycall".
+func scopeFromRequest(r *http.Request) string {
+	if r.URL.Query().Get("scope") == "basecall" {
+		return "basecall"
+	}
+	return "mycall"
+}
+
+// dmSSIDFromID extracts the caller segment (first segment after "DM_") from a
+// DM conversation id of the form DM_<caller>_<peer>. Returns "" for non-DM ids
+// or legacy DM_<peer> ids without a separator.
+func dmSSIDFromID(id string) string {
+	if !strings.HasPrefix(id, "DM_") {
+		return ""
+	}
+	rest := id[3:]
+	idx := strings.Index(rest, "_")
+	if idx < 0 {
+		return "" // legacy: no caller segment
+	}
+	return rest[:idx]
+}
+
+// isDMKeyForBasecallAndPeer reports whether a chatstatus key belongs to the
+// given operator basecall and peer. Used for basecall-scope aggregation.
+func isDMKeyForBasecallAndPeer(key, myBase, peer string) bool {
+	if !strings.HasPrefix(key, "DM_") {
+		return false
+	}
+	if chatlog.DMPeer(key) != peer {
+		return false
+	}
+	caller := dmSSIDFromID(key)
+	if caller == "" {
+		return false // legacy key: skip
+	}
+	return chatlog.BaseCall(caller) == myBase
+}
+
+func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
 	if s.chatLog == nil {
 		writeJSON(w, http.StatusOK, []chatlog.Conversation{})
 		return
@@ -509,12 +659,60 @@ func (s *Server) listConversations(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "list conversations: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, convs)
+
+	scope := scopeFromRequest(r)
+	myCall := s.identity.Current()
+	myBase := chatlog.BaseCall(myCall)
+
+	result := make([]chatlog.Conversation, 0, len(convs))
+	for _, conv := range convs {
+		if !strings.HasPrefix(conv.ID, "DM_") {
+			// P_* conversations: always include unchanged.
+			result = append(result, conv)
+			continue
+		}
+		// Extract the basecall segment from the file id DM_<basecall>_<peer>.
+		fileBase := dmSSIDFromID(conv.ID) // for file ids, "caller" segment = basecall
+		if fileBase == "" {
+			// Legacy DM_<peer> file; include as-is (migration may not have run yet).
+			result = append(result, conv)
+			continue
+		}
+		if fileBase != myBase {
+			// Belongs to a different operator.
+			continue
+		}
+		peer := chatlog.DMPeer(conv.ID)
+		if scope == "basecall" {
+			// Return the file id unchanged; it already uses the basecall form.
+			result = append(result, conv)
+		} else {
+			// mycall scope: include only if the shared file has at least one
+			// record where the active full SSID appears as Src or Dst.
+			has, err := s.chatLog.FileContainsSSID(conv.ID, myCall)
+			if err != nil {
+				slog.Warn("chat list: ssid probe failed", "file", conv.ID, "error", err)
+			}
+			if !has {
+				continue
+			}
+			conv.ID = "DM_" + chatlog.Sanitize(myCall) + "_" + peer
+			result = append(result, conv)
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("conversation")
 	if !chatlog.ValidConversationID(id) {
+		writeError(w, http.StatusBadRequest, "invalid conversation id")
+		return
+	}
+
+	// Resolve the API id to the .jsonl file id (basecall form).
+	fileID := chatlog.FileIDForAPIID(id)
+	if !chatlog.ValidConversationID(fileID) {
 		writeError(w, http.StatusBadRequest, "invalid conversation id")
 		return
 	}
@@ -542,7 +740,7 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	records, err := s.chatLog.ReadSince(id, since)
+	records, err := s.chatLog.ReadSince(fileID, since)
 	if err != nil {
 		if errors.Is(err, chatlog.ErrInvalidID) {
 			writeError(w, http.StatusBadRequest, "invalid conversation id")
@@ -551,6 +749,22 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "read conversation: "+err.Error())
 		return
 	}
+
+	// In mycall scope, filter records to those whose my-side callsign matches
+	// the SSID embedded in the API id (DM_<ssid>_<peer>).
+	if scopeFromRequest(r) == "mycall" && strings.HasPrefix(id, "DM_") {
+		ssid := dmSSIDFromID(id)
+		if ssid != "" {
+			filtered := records[:0]
+			for _, rec := range records {
+				if chatlog.RecordMatchesSSID(rec.Src, rec.Dst, ssid) {
+					filtered = append(filtered, rec)
+				}
+			}
+			records = filtered
+		}
+	}
+
 	writeJSON(w, http.StatusOK, records)
 }
 
@@ -568,7 +782,22 @@ func (s *Server) markConversationRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.chatStatus != nil {
-		s.chatStatus.MarkRead(id, time.Now().UTC())
+		now := time.Now().UTC()
+		if scopeFromRequest(r) == "basecall" && strings.HasPrefix(id, "DM_") {
+			// Mark all per-SSID status keys for this operator + peer as read.
+			myBase := chatlog.BaseCall(s.identity.Current())
+			peer := chatlog.DMPeer(id)
+			for key := range s.chatStatus.Snapshot() {
+				if isDMKeyForBasecallAndPeer(key, myBase, peer) {
+					s.chatStatus.MarkRead(key, now)
+				}
+			}
+			if err := s.chatStatus.SaveIfDirty(); err != nil {
+				slog.Error("chat status save after basecall mark-read failed", "id", id, "error", err)
+			}
+		} else {
+			s.chatStatus.MarkRead(id, now)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -583,12 +812,26 @@ func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "chatlog disabled")
 		return
 	}
-	if err := s.chatLog.Remove(id); err != nil {
+	// Remove the .jsonl file using the basecall file id.
+	fileID := chatlog.FileIDForAPIID(id)
+	if err := s.chatLog.Remove(fileID); err != nil {
 		writeError(w, http.StatusInternalServerError, "remove conversation: "+err.Error())
 		return
 	}
 	if s.chatStatus != nil {
-		s.chatStatus.Remove(id)
+		if strings.HasPrefix(id, "DM_") {
+			// Remove all per-SSID status keys that belong to this operator + peer
+			// so no orphan entries remain regardless of which scope was used.
+			myBase := chatlog.BaseCall(s.identity.Current())
+			peer := chatlog.DMPeer(id)
+			for key := range s.chatStatus.Snapshot() {
+				if isDMKeyForBasecallAndPeer(key, myBase, peer) {
+					s.chatStatus.Remove(key)
+				}
+			}
+		} else {
+			s.chatStatus.Remove(id)
+		}
 		if err := s.chatStatus.SaveIfDirty(); err != nil {
 			slog.Error("chat status save after conversation delete failed", "id", id, "error", err)
 		}

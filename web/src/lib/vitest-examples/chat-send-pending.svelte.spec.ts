@@ -45,7 +45,7 @@ describe('chat send pending state', () => {
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = String(input);
-				if (url.endsWith('/api/chat/list')) return jsonResponse([]);
+				if (url.includes('/api/chat/list')) return jsonResponse([]);
 				if (url.includes('/api/chat/P_broadcast')) return jsonResponse([]);
 				if (url.endsWith('/api/messages') && init?.method === 'POST') {
 					return jsonResponse({ type: 'msg', dst: '*', msg: 'hello pending' }, 202);
@@ -60,7 +60,7 @@ describe('chat send pending state', () => {
 		await page.getByRole('button', { name: 'Send' }).click();
 
 		await expect.element(page.getByTestId('chat-panel').getByText('hello pending')).toBeVisible();
-		await expect.element(page.getByTestId('chat-panel').getByTitle('Pending').nth(1)).toBeVisible();
+		await expect.element(page.getByTestId('chat-panel').getByTitle('Pending').nth(0)).toBeVisible();
 	});
 
 	it('shows a green cloud when a public channel send echoes back from UDP', async () => {
@@ -69,7 +69,7 @@ describe('chat send pending state', () => {
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = String(input);
-				if (url.endsWith('/api/chat/list')) return jsonResponse([]);
+				if (url.includes('/api/chat/list')) return jsonResponse([]);
 				if (url.includes('/api/chat/P_broadcast')) return jsonResponse([]);
 				if (url.endsWith('/api/messages') && init?.method === 'POST') {
 					return jsonResponse({ type: 'msg', dst: '*', msg: 'hello public' }, 202);
@@ -104,7 +104,7 @@ describe('chat send pending state', () => {
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL) => {
 				const url = String(input);
-				if (url.endsWith('/api/chat/list')) {
+				if (url.includes('/api/chat/list')) {
 					return jsonResponse([
 						{
 							id: 'P_broadcast',

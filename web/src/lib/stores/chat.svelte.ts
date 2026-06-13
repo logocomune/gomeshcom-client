@@ -1,13 +1,22 @@
-import type { ChannelShowConfig, Conversation, ChatRecord, ChatStatusEntry, ChatStatusSnapshot } from '$lib/api/types';
+import type {
+	ChannelShowConfig,
+	Conversation,
+	ChatRecord,
+	ChatStatusEntry,
+	ChatStatusSnapshot
+} from '$lib/api/types';
 import { DEFAULT_CHANNEL_SHOW, isConvHidden } from '$lib/api/channelShow';
-import type { ChatTarget } from '$lib/api/chat';
+import type { ChatTarget, DmScope } from '$lib/api/chat';
 import {
 	conversationIdFor,
 	conversationIdForRecord,
 	chatRecordKey,
 	loadLastChatTarget,
 	saveLastChatTarget,
-	markConversationRead
+	markConversationRead,
+	baseCallFrom,
+	dmPeerFromId,
+	sanitizeConversationPart
 } from '$lib/api/chat';
 import { messageKind } from '$lib/api/events';
 import { partitionChannels } from '$lib/api/groups';
@@ -15,6 +24,9 @@ import { chatRecordMatchesFilter, stripNodeSequence } from '$lib/ui/chat-records
 import { normalizeCallsign } from '$lib/ui/callsign';
 import { loadChatChannelsCollapsed, saveChatChannelsCollapsed } from '$lib/ui/chat-layout';
 import { connectionState } from '$lib/stores/connection.svelte';
+import { uiPrefs } from '$lib/stores/ui-prefs.svelte';
+import { playDmAlert } from '$lib/ui/sound';
+import { toastStore } from '$lib/stores/toasts.svelte';
 
 const DEFAULT_CHAT_WIDTH = 50;
 const STORAGE_CHAT_WIDTH = 'meshcom:chatWidthPct';
@@ -24,11 +36,55 @@ const STORAGE_CHAT_LIST_WIDTH = 'meshcom:chatListWidthPx';
 const CHAT_LIST_MIN_PX = 160;
 const CHAT_LIST_MAX_PX = 520;
 
+function aggregateBasecallStatus(
+	snapshot: Record<string, ChatStatusEntry>,
+	myCall: string
+): Record<string, ChatStatusEntry> {
+	if (!myCall) return snapshot;
+	const myBase = baseCallFrom(myCall);
+	const result: Record<string, ChatStatusEntry> = {};
+
+	for (const [key, entry] of Object.entries(snapshot)) {
+		if (!key.startsWith('DM_')) {
+			result[key] = entry;
+			continue;
+		}
+		const rest = key.slice(3);
+		const sepIdx = rest.lastIndexOf('_');
+		if (sepIdx < 0) {
+			result[key] = entry;
+			continue;
+		}
+		const prefixPart = rest.slice(0, sepIdx);
+		const peer = rest.slice(sepIdx + 1);
+		if (baseCallFrom(prefixPart) !== myBase) {
+			result[key] = entry;
+			continue;
+		}
+		const basecallKey = 'DM_' + myBase + '_' + peer;
+		const existing = result[basecallKey];
+		if (!existing) {
+			result[basecallKey] = { ...entry };
+		} else {
+			const entryTime = new Date(entry.lastMsgReceived).getTime();
+			const existTime = new Date(existing.lastMsgReceived).getTime();
+			result[basecallKey] = {
+				lastMsgReceived: entryTime > existTime ? entry.lastMsgReceived : existing.lastMsgReceived,
+				lastRead: entry.lastRead > existing.lastRead ? entry.lastRead : existing.lastRead,
+				unreadCount: Math.max(entry.unreadCount, existing.unreadCount),
+				lastMsg: entryTime > existTime ? entry.lastMsg : existing.lastMsg
+			};
+		}
+	}
+	return result;
+}
+
 class ChatStore {
 	chatHistory = $state<Record<string, ChatRecord[]>>({});
 	conversations = $state<Conversation[]>([]);
 	chatTarget = $state<ChatTarget>({ kind: 'channel', value: 'Broadcast' });
 	chatStatus = $state<Record<string, ChatStatusEntry>>({});
+	dmScope = $state<DmScope>('mycall');
 	chatFilter = $state('');
 	fetchedConvIds = $state(new Set<string>());
 	historyHours = $state(168);
@@ -57,13 +113,31 @@ class ChatStore {
 	chatListWidthPx = $state(DEFAULT_CHAT_LIST_WIDTH_PX);
 	conversationsLoaded = $state(false);
 
-	currentConvId = $derived(conversationIdFor(this.chatTarget));
+	currentConvId = $derived(
+		this.chatTarget.kind === 'contact' && connectionState.stationCallsign
+			? 'DM_' +
+					sanitizeConversationPart(
+						this.dmScope === 'basecall'
+							? baseCallFrom(connectionState.stationCallsign)
+							: connectionState.stationCallsign
+					) +
+					'_' +
+					sanitizeConversationPart(this.chatTarget.value)
+			: conversationIdFor(this.chatTarget)
+	);
+
+	effectiveChatStatus = $derived(
+		this.dmScope === 'mycall'
+			? this.chatStatus
+			: aggregateBasecallStatus(this.chatStatus, connectionState.stationCallsign)
+	);
+
 	isBroadcastTarget = $derived(
 		this.chatTarget.kind === 'channel' && this.chatTarget.value === 'Broadcast'
 	);
 	unreadIds = $derived(
 		new Set(
-			Object.entries(this.chatStatus)
+			Object.entries(this.effectiveChatStatus)
 				.filter(([, e]) => e.unreadCount > 0)
 				.map(([id]) => id)
 		)
@@ -74,17 +148,13 @@ class ChatStore {
 	visibleUnreadIds = $derived(
 		new Set(
 			this.visibleConversations
-				.filter((c) => (this.chatStatus[c.id]?.unreadCount ?? 0) > 0)
+				.filter((c) => (this.effectiveChatStatus[c.id]?.unreadCount ?? 0) > 0)
 				.map((c) => c.id)
 		)
 	);
-	channelLabels = $derived(
-		this.conversations.filter((c) => c.kind !== 'dm').map((c) => c.label)
-	);
+	channelLabels = $derived(this.conversations.filter((c) => c.kind !== 'dm').map((c) => c.label));
 	resolvedChannels = $derived(partitionChannels(this.channelLabels));
-	contacts = $derived(
-		this.conversations.filter((c) => c.kind === 'dm').map((c) => c.label)
-	);
+	contacts = $derived(this.conversations.filter((c) => c.kind === 'dm').map((c) => c.label));
 	displayChatRecords = $derived(
 		(this.chatHistory[this.currentConvId] ?? []).filter((rec) => {
 			const kind = messageKind(rec.msg).kind;
@@ -133,22 +203,55 @@ class ChatStore {
 		this.channelShowOpen = true;
 	}
 
-	setConversations(conversations: Conversation[]) {
+	setConversations(conversations: Conversation[], preserveTarget = false) {
 		this.conversations = conversations;
 		this.fetchedConvIds = new Set();
-		this.chatTarget = loadLastChatTarget(conversations);
+		if (!preserveTarget) {
+			this.chatTarget = loadLastChatTarget(conversations);
+		}
 		this.conversationsLoaded = true;
 	}
 
+	setDmScope(scope: DmScope) {
+		if (this.dmScope === scope) return;
+		this.dmScope = scope;
+		// Clear DM history cache; re-fetched with new scope on next access.
+		const nextHistory = { ...this.chatHistory };
+		for (const id of Object.keys(nextHistory)) {
+			if (id.startsWith('DM_')) delete nextHistory[id];
+		}
+		this.chatHistory = nextHistory;
+		this.fetchedConvIds = new Set();
+	}
+
 	async markCurrentRead(convId: string) {
-		if ((this.chatStatus[convId]?.unreadCount ?? 0) === 0) return;
-		const prev = this.chatStatus[convId] ?? { lastMsgReceived: '', lastRead: '', unreadCount: 0 };
-		this.chatStatus = {
-			...this.chatStatus,
-			[convId]: { ...prev, unreadCount: 0, lastRead: new Date().toISOString() }
-		};
+		if ((this.effectiveChatStatus[convId]?.unreadCount ?? 0) === 0) return;
+
+		if (this.dmScope === 'mycall' || !convId.startsWith('DM_')) {
+			const prev = this.chatStatus[convId] ?? { lastMsgReceived: '', lastRead: '', unreadCount: 0 };
+			this.chatStatus = {
+				...this.chatStatus,
+				[convId]: { ...prev, unreadCount: 0, lastRead: new Date().toISOString() }
+			};
+		} else {
+			// Basecall scope: optimistically zero all matching SSID status keys.
+			const peer = dmPeerFromId(convId);
+			const myBase = baseCallFrom(connectionState.stationCallsign);
+			const next = { ...this.chatStatus };
+			for (const k of Object.keys(next)) {
+				if (!k.startsWith('DM_')) continue;
+				if (dmPeerFromId(k) !== peer) continue;
+				const rest = k.slice(3);
+				const sepIdx = rest.lastIndexOf('_');
+				if (sepIdx < 0) continue;
+				if (baseCallFrom(rest.slice(0, sepIdx)) === myBase) {
+					next[k] = { ...next[k], unreadCount: 0, lastRead: new Date().toISOString() };
+				}
+			}
+			this.chatStatus = next;
+		}
 		try {
-			await markConversationRead(convId);
+			await markConversationRead(convId, this.dmScope);
 		} catch {
 			// fire-and-forget; next snapshot reconciles
 		}
@@ -161,7 +264,7 @@ class ChatStore {
 
 	selectContact(contact: string) {
 		this.chatTarget = { kind: 'contact', value: normalizeCallsign(contact) };
-		saveLastChatTarget(this.chatTarget);
+		saveLastChatTarget(this.chatTarget, this.currentConvId);
 	}
 
 	toggleChannelsSidebar() {
@@ -169,10 +272,7 @@ class ChatStore {
 		this.saveChannelsCollapsed();
 	}
 
-	appendLiveChatRecord(
-		packet: import('$lib/api/types').MeshcomPacket,
-		receivedAt: string
-	) {
+	appendLiveChatRecord(packet: import('$lib/api/types').MeshcomPacket, receivedAt: string) {
 		const stationCallsign = connectionState.stationCallsign;
 		const dst = packet.dst ?? '';
 		const origin = (packet.src ?? '').split(',', 1)[0].toUpperCase();
@@ -185,9 +285,18 @@ class ChatStore {
 		} else {
 			const myCall = stationCallsign ? stationCallsign.toUpperCase() : '';
 			const dstUpper = dst.toUpperCase();
-			if (myCall && dstUpper !== myCall && origin !== myCall) return;
-			const interlocutor = myCall && dstUpper === myCall ? origin : dstUpper;
-			convId = 'DM_' + interlocutor.replace(/[^A-Z0-9_-]/g, '_');
+			const myBase = baseCallFrom(myCall);
+			const isBasecall = this.dmScope === 'basecall';
+			const matchesMy = isBasecall
+				? baseCallFrom(dstUpper) === myBase || baseCallFrom(origin) === myBase
+				: dstUpper === myCall || origin === myCall;
+			if (myCall && !matchesMy) return;
+			const interlocutor = (isBasecall ? baseCallFrom(dstUpper) === myBase : dstUpper === myCall)
+				? origin
+				: dstUpper;
+			const prefix = this.dmScope === 'basecall' ? baseCallFrom(myCall) : myCall;
+			convId =
+				'DM_' + sanitizeConversationPart(prefix) + '_' + sanitizeConversationPart(interlocutor);
 		}
 
 		const rec: ChatRecord = {
@@ -215,7 +324,7 @@ class ChatStore {
 					label = dst;
 				} else {
 					kind = 'dm';
-					label = convId.replace(/^DM_/, '');
+					label = dmPeerFromId(convId) || convId.replace(/^DM_/, '');
 				}
 			}
 			this.conversations = [
@@ -232,7 +341,7 @@ class ChatStore {
 	}
 
 	appendChatRecord(rec: ChatRecord) {
-		const convId = conversationIdForRecord(rec, connectionState.stationCallsign);
+		const convId = conversationIdForRecord(rec, connectionState.stationCallsign, this.dmScope);
 		if (!convId) return;
 		if (rec.delivery_status === 'failed') {
 			this.removeMatchingPendingRecord(convId, rec);
@@ -244,13 +353,13 @@ class ChatStore {
 			this.conversations = [
 				{
 					id: convId,
-					kind:
+					kind: convId === 'P_broadcast' ? 'broadcast' : convId.startsWith('P_') ? 'channel' : 'dm',
+					label:
 						convId === 'P_broadcast'
-							? 'broadcast'
-							: convId.startsWith('P_')
-								? 'channel'
-								: 'dm',
-					label: convId === 'P_broadcast' ? 'Broadcast' : convId.replace(/^(P_|DM_)/, ''),
+							? 'Broadcast'
+							: convId.startsWith('DM_')
+								? dmPeerFromId(convId) || convId.replace(/^DM_/, '')
+								: convId.replace(/^P_/, ''),
 					last_seen: rec.received_at,
 					size: 0
 				},
@@ -262,14 +371,22 @@ class ChatStore {
 			this.conversations = copy.sort((a, b) => b.last_seen.localeCompare(a.last_seen));
 		}
 
-		// Only inbound messages affect unread counts — skip outbound/pending/failed.
 		if (rec.direction !== 'outbound' && rec.delivery_status !== 'pending') {
 			this.updateChatStatusOnReceive(convId, rec.received_at, rec.msg);
+			if (convId.startsWith('DM_')) {
+				if (uiPrefs.dmSoundEnabled) {
+					playDmAlert();
+				}
+				if (uiPrefs.dmToastEnabled) {
+					const sender = dmPeerFromId(convId) || convId.replace(/^DM_/, '');
+					toastStore.addDm(sender);
+				}
+			}
 		}
 	}
 
 	removeChatRecord(rec: ChatRecord) {
-		const convId = conversationIdForRecord(rec, connectionState.stationCallsign);
+		const convId = conversationIdForRecord(rec, connectionState.stationCallsign, this.dmScope);
 		if (!convId) return;
 		const existing = this.chatHistory[convId] ?? [];
 		const key = chatRecordKey(rec);
@@ -285,9 +402,7 @@ class ChatStore {
 		if (existing.some((r) => chatRecordKey(r) === key)) return;
 		this.chatHistory = {
 			...this.chatHistory,
-			[convId]: [...existing, rec].sort((a, b) =>
-				a.received_at.localeCompare(b.received_at)
-			)
+			[convId]: [...existing, rec].sort((a, b) => a.received_at.localeCompare(b.received_at))
 		};
 	}
 
@@ -326,15 +441,31 @@ class ChatStore {
 
 	private updateChatStatusOnReceive(convId: string, receivedAt: string, msg: string) {
 		const stationCallsign = connectionState.stationCallsign;
-		const entry = this.chatStatus[convId] ?? { lastMsgReceived: '', lastRead: '', unreadCount: 0 };
+
+		// chatStatus always uses full-SSID keys for DMs; derive status key from convId.
+		let statusKey = convId;
+		if (stationCallsign && convId.startsWith('DM_')) {
+			const peer = dmPeerFromId(convId);
+			statusKey = 'DM_' + sanitizeConversationPart(stationCallsign) + '_' + peer;
+		}
+
+		const entry = this.chatStatus[statusKey] ?? {
+			lastMsgReceived: '',
+			lastRead: '',
+			unreadCount: 0
+		};
 		if (convId === this.currentConvId) {
 			this.chatStatus = {
 				...this.chatStatus,
-				[convId]: { ...entry, lastMsgReceived: receivedAt, lastRead: receivedAt, unreadCount: 0, lastMsg: msg }
+				[statusKey]: {
+					...entry,
+					lastMsgReceived: receivedAt,
+					lastRead: receivedAt,
+					unreadCount: 0,
+					lastMsg: msg
+				}
 			};
 		} else {
-			// Skip self-echo: self-echoes already filtered for DMs (appendLiveChatRecord line 144 guard),
-			// but broadcast/channel self-echoes still reach here — skip them.
 			const history = this.chatHistory[convId] ?? [];
 			const last = history.at(-1);
 			if (
@@ -347,7 +478,7 @@ class ChatStore {
 			}
 			this.chatStatus = {
 				...this.chatStatus,
-				[convId]: {
+				[statusKey]: {
 					...entry,
 					lastMsgReceived: receivedAt,
 					unreadCount: entry.unreadCount + 1,
@@ -363,7 +494,20 @@ class ChatStore {
 		this.chatHistory = nextHistory;
 
 		const nextStatus = { ...this.chatStatus };
-		delete nextStatus[id];
+		if (id.startsWith('DM_')) {
+			const peer = dmPeerFromId(id);
+			const myBase = baseCallFrom(connectionState.stationCallsign);
+			for (const k of Object.keys(nextStatus)) {
+				if (!k.startsWith('DM_')) continue;
+				if (dmPeerFromId(k) !== peer) continue;
+				const rest = k.slice(3);
+				const sepIdx = rest.lastIndexOf('_');
+				if (sepIdx < 0) continue;
+				if (baseCallFrom(rest.slice(0, sepIdx)) === myBase) delete nextStatus[k];
+			}
+		} else {
+			delete nextStatus[id];
+		}
 		this.chatStatus = nextStatus;
 
 		if (id === 'P_broadcast') {

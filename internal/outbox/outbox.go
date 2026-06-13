@@ -63,9 +63,13 @@ func (o *Outbox) Register(source, destination, message string, now time.Time) Pe
 	return pending
 }
 
-func (o *Outbox) Confirm(source, destination, message string) bool {
+// Confirm checks whether an incoming echo matches a pending outgoing message.
+// It returns the matched PendingMessage (carrying its CreatedAt for latency
+// calculation) and true on success. Returns the zero value and false when no
+// match is found.
+func (o *Outbox) Confirm(source, destination, message string) (PendingMessage, bool) {
 	if o == nil {
-		return false
+		return PendingMessage{}, false
 	}
 
 	o.mu.Lock()
@@ -91,7 +95,10 @@ func (o *Outbox) Confirm(source, destination, message string) bool {
 		} else {
 			o.byKey[key] = ids
 		}
-		return pending.ID != ""
+		if pending.ID == "" {
+			return PendingMessage{}, false
+		}
+		return pending, true
 	}
 	delete(o.byKey, key)
 
@@ -111,10 +118,10 @@ func (o *Outbox) Confirm(source, destination, message string) bool {
 		}
 	}
 	if matched.ID == "" {
-		return false
+		return PendingMessage{}, false
 	}
 	o.removeLocked(matched)
-	return true
+	return matched, true
 }
 
 func (o *Outbox) expire(id string) {

@@ -56,12 +56,16 @@ All `/api/*` responses send `Cache-Control: no-store, no-cache, must-revalidate,
 - `GET /api/positions`
 - `POST /api/messages`
 - `GET /api/events`
+- `GET /api/adm/configs/my-call`
+- `PUT /api/adm/configs/my-call`
 - `GET /api/channel-show`
 - `PUT /api/channel-show`
 - `GET /api/chat/list`
 - `GET /api/chat/{conversation}?hours=N`
 - `DELETE /api/chat/{conversation}`
 - `POST /api/chat/{conversation}/read`
+- `GET /api/stats`
+- `GET /api/stats/dm`
 
 
 `GET /api/channel-show` returns the frontend channel visibility preference:
@@ -124,7 +128,9 @@ Realtime DM route tracking includes ACK/reject `msg` packets as long as they car
 }
 ```
 
-`GOMESHCOM_MY_CALL` and `--my-call` accept `IU5PMP` or a `QQ`-prefixed callsign with optional numeric SSID, for example `IU5PMP`, `IU5PMP-1`, `QQ1ABC`, or `QQ1ABC-7`. Lowercase input is normalized to uppercase at startup, and non-`IU5PMP` prefixes are rewritten to `QQ`.
+`GOMESHCOM_MY_CALL` (or `--my-call`) sets the startup callsign default. It accepts any 3–10 alphanumeric character callsign with an optional numeric SSID, for example `IU5PMP-1` or `QQ1ABC`. Lowercase input is normalized to uppercase.
+
+The active callsign can be changed at runtime without restart via `PUT /api/adm/configs/my-call`. The new value is validated, applied immediately to DM routing and outbox source, persisted synchronously to `data/configs/station.json`, and broadcast to SSE clients as a `station.identity` event. The persisted value takes precedence over `GOMESHCOM_MY_CALL` at the next startup.
 
 `GET /api/events` emits the configured station identity once as `station.identity` immediately after the initial heartbeat. It also emits the position map once as a `positions.snapshot` SSE event, chat unread state as `chatstatus.snapshot`, and frontend channel visibility as `channelshow.snapshot` before replayed or live packet events. A `heartbeat` event is sent every 15 seconds to keep the connection alive.
 
@@ -141,15 +147,34 @@ Realtime DM route tracking includes ACK/reject `msg` packets as long as they car
 }
 ```
 
-The chat status index is persisted atomically to `data/chat/msg_idx.json` on the next one-minute save tick and flushed on shutdown. Incoming messages from stations other than `GOMESHCOM_MY_CALL` increment the unread counter; `POST /api/chat/{conversation}/read` resets it.
+The chat status index is persisted atomically to `data/chat/msg_idx.json` on the next one-minute save tick and flushed on shutdown. Incoming messages from stations other than the active runtime callsign increment the unread counter; `POST /api/chat/{conversation}/read` resets it.
 
-When authentication is enabled (`GOMESHCOM_AUTH_USERNAME` and `GOMESHCOM_AUTH_PASSWORD` both set), the server requires a session cookie obtained via `POST /api/session`. Sessions expire after `GOMESHCOM_AUTH_SESSION_TTL` (default `24h`) and the cookie name is controlled by `GOMESHCOM_AUTH_COOKIE_NAME` (default `meshcom_session`). Expired sessions are automatically evicted every 5 minutes. The login endpoint enforces a 1 KB body limit.
+When authentication is enabled (`GOMESHCOM_AUTH_USERNAME` and `GOMESHCOM_AUTH_PASSWORD` both set), the server requires a session cookie obtained via `POST /api/session`. Sessions expire after `GOMESHCOM_AUTH_SESSION_TTL` (default `24h`) and the cookie name is controlled by `GOMESHCOM_AUTH_COOKIE_NAME` (default `meshcom_session`). Session hashes and expiration times are persisted atomically in `data/http-sessions.json` with `0600` permissions, so active browser sessions survive server restarts without storing raw bearer tokens. Expired sessions are discarded during startup and automatically evicted every 5 minutes. The login endpoint enforces a 1 KB body limit.
 
 `GET /api/session` returns `{"required": bool, "authenticated": bool}` — always accessible without a session, returning `401` when auth is required but the caller is not authenticated. `DELETE /api/session` invalidates the current session and clears the cookie; always returns `204`.
 
 `GOMESHCOM_FORWARD_TARGETS` accepts a comma-separated list of `host:port` UDP addresses. Every received datagram is mirrored unmodified to each target immediately after local processing. Duplicate addresses are silently deduplicated.
 
 The UDP receive JSONL log is enabled by default and keeps daily raw packet logs for `GOMESHCOM_RECEIVE_LOG_RETENTION_DAYS` (default `365`). On each SSE connection, the server replays valid `packet.received` events from the last `GOMESHCOM_RECEIVE_LOG_REPLAY_WINDOW` (default `1h`) so the UI can repopulate recent messages after reconnecting.
+
+### DM statistics — `GET /api/stats/dm`
+
+Returns cumulative DM send and acknowledgement counters grouped by destination callsign. Requires auth when auth is enabled.
+
+```json
+{
+  "QQ1ABC-1": {
+    "sent": 5,
+    "ack": 4
+  },
+  "QQ1ABC": {
+    "sent": 5,
+    "ack": 4
+  }
+}
+```
+
+Each outgoing DM to a destination with a numeric SSID (e.g. `QQ1ABC-1`) updates two entries: the full callsign (`QQ1ABC-1`) and the base callsign without SSID (`QQ1ABC`). Destinations without an SSID (e.g. `QQ1ABC`) produce a single entry. Only the first ACK for each message is counted; outbox deduplication discards duplicate echoes. Counters are persisted to `data/stats/dm_stats.json` and survive restarts.
 
 ## Build Pipeline
 
@@ -162,7 +187,9 @@ Runtime files live under `data/` by default:
 
 ```text
 data/
-  channel_show.json
+  configs/
+    channel_show.json
+    station.json
   nodes/
     positions.json
   raw/
@@ -170,11 +197,11 @@ data/
   chat/
     msg_idx.json
     P_broadcast.jsonl
-    DM_QQ1ABC-1.jsonl
+    DM_QQ1ABC_QQ2DEF-1.jsonl
 ```
 
 Only `.gitkeep` placeholders are tracked. Runtime content is ignored by Git.
-On startup, `gomeshcomd` creates `data/raw`, `data/nodes`, and `data/chat` unconditionally.
+On startup, `gomeshcomd` creates `data/raw`, `data/nodes`, `data/chat`, `data/stats`, and `data/configs` unconditionally.
 
 ## Receive Log
 
@@ -206,17 +233,17 @@ Incoming datagrams are appended to one file per UTC day, for example `data/raw/r
 
 ## Chat Log
 
-Incoming `msg` packets are appended to per-conversation JSONL files under `GOMESHCOM_CHAT_LOG_PATH` (default `./data/chat`). DM messages are filtered: only messages where `src` or `dst` matches `GOMESHCOM_MY_CALL` are stored.
+Incoming `msg` packets are appended to per-conversation JSONL files under `GOMESHCOM_CHAT_LOG_PATH` (default `./data/chat`). DM messages are filtered: only messages where `src` or `dst` matches the active runtime callsign (see `PUT /api/adm/configs/my-call`) are stored. When the callsign changes, new DMs are routed under the new identity; existing files are left untouched.
 
-Outbound messages that do not echo back from the local node within the send tracking window are stored in the same per-conversation files with `delivery_status:"failed"`. The `src` field is the callsign configured when the send happened, so failed history remains stable even if `GOMESHCOM_MY_CALL` changes later.
+Outbound messages that do not echo back from the local node within the send tracking window are stored in the same per-conversation files with `delivery_status:"failed"`. The `src` field is the active callsign when the send happened, so failed history remains stable even if the runtime callsign changes later.
 
 Conversation file naming:
 
-| Destination       | File                  |
-| ----------------- | --------------------- |
-| `*` or empty      | `P_broadcast.jsonl`   |
-| Numeric (channel) | `P_<number>.jsonl`    |
-| Callsign (DM)     | `DM_<CALLSIGN>.jsonl` |
+| Destination       | File                                 |
+| ----------------- | ------------------------------------ |
+| `*` or empty      | `P_broadcast.jsonl`                  |
+| Numeric (channel) | `P_<number>.jsonl`                   |
+| Callsign (DM)     | `DM_<basecall(mycall)>_<peer>.jsonl` |
 
 ## Packet Parsing
 

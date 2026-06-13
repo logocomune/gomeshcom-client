@@ -19,6 +19,11 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
 
+// staticCallsign is a test-only myCallSource returning a fixed callsign.
+type staticCallsign string
+
+func (s staticCallsign) Current() string { return string(s) }
+
 func TestHandleDatagramLogsValidPacket(t *testing.T) {
 	dir := t.TempDir()
 	chatDir := filepath.Join(dir, "chat")
@@ -26,7 +31,7 @@ func TestHandleDatagramLogsValidPacket(t *testing.T) {
 	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receivelog.New(receivelog.Config{
 		Enabled: true,
 		Path:    dir,
-	}), chatlog.New(chatDir, ""), nil, false, nil, "", nil)
+	}), chatlog.New(chatDir, nil), nil, false, nil, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -72,7 +77,7 @@ func TestHandleDatagramLogsParseError(t *testing.T) {
 	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receivelog.New(receivelog.Config{
 		Enabled: true,
 		Path:    dir,
-	}), nil, nil, false, nil, "", nil)
+	}), nil, nil, false, nil, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -96,7 +101,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 	t.Run("direct packet writes rssi/snr on origin", func(t *testing.T) {
 		bus := events.NewBus()
 		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
-		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, "", nil)
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, nil, nil)
 
 		raw := `{"src_type":"node","type":"pos","src":"QQ1ABC-1","msg":"","lat":48.1,"long":16.3,"alt":123,"rssi":-90,"snr":8}`
 		bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
@@ -116,7 +121,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 	t.Run("indirect packet: origin keeps zero rssi/snr, relay gets freshness", func(t *testing.T) {
 		bus := events.NewBus()
 		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
-		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, "", nil)
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, nil, nil)
 
 		// Pre-populate relay via direct pos.
 		relayRaw := `{"type":"pos","src":"RELAY-1","lat":44.0,"long":11.0,"rssi":-70,"snr":2}`
@@ -149,7 +154,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 	t.Run("msg packet touches freshness of existing node", func(t *testing.T) {
 		bus := events.NewBus()
 		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
-		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, "", nil)
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, nil, nil)
 
 		// Pre-populate origin.
 		posRaw := `{"type":"pos","src":"QQ1ABC-1","lat":48.1,"long":16.3,"rssi":-70,"snr":2}`
@@ -168,7 +173,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 	t.Run("msg packet without signal preserves existing rssi/snr", func(t *testing.T) {
 		bus := events.NewBus()
 		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
-		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, "", nil)
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, nil, nil)
 
 		posRaw := `{"type":"pos","src":"QQ1ABC-1","lat":48.1,"long":16.3,"rssi":-70,"snr":2}`
 		bridge.handleDatagram("127.0.0.1:1799", []byte(posRaw), posRaw)
@@ -188,7 +193,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 
 func TestListen(t *testing.T) {
 	bus := events.NewBus()
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:0", bus, nil, nil, nil, false, nil, "", nil)
+	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:0", bus, nil, nil, nil, false, nil, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -256,7 +261,7 @@ func TestSendText(t *testing.T) {
 	defer conn.Close()
 	nodeAddr := conn.LocalAddr().String()
 
-	bridge := NewBridge("127.0.0.1:0", nodeAddr, events.NewBus(), nil, nil, nil, false, nil, "", nil)
+	bridge := NewBridge("127.0.0.1:0", nodeAddr, events.NewBus(), nil, nil, nil, false, nil, nil, nil)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -336,7 +341,7 @@ func TestEffectiveNodeAddr(t *testing.T) {
 
 func TestHandleDatagramLearnsNodeAddr(t *testing.T) {
 	bus := events.NewBus()
-	bridge := NewBridge("127.0.0.1:0", "", bus, nil, nil, nil, false, nil, "", nil)
+	bridge := NewBridge("127.0.0.1:0", "", bus, nil, nil, nil, false, nil, nil, nil)
 
 	// No packets yet — should return ErrNodeNotDetected.
 	if _, err := bridge.effectiveNodeAddr(); err == nil {
@@ -358,7 +363,7 @@ func TestHandleDatagramLearnsNodeAddr(t *testing.T) {
 
 func TestHandleDatagramDoesNotLearnWhenNodeAddrExplicit(t *testing.T) {
 	bus := events.NewBus()
-	bridge := NewBridge("127.0.0.1:0", "192.168.0.2:1799", bus, nil, nil, nil, false, nil, "", nil)
+	bridge := NewBridge("127.0.0.1:0", "192.168.0.2:1799", bus, nil, nil, nil, false, nil, nil, nil)
 
 	raw := `{"type":"msg","dst":"*","msg":"hello"}`
 	bridge.handleDatagram("10.0.0.99:1799", []byte(raw), raw)
@@ -379,7 +384,7 @@ func TestSendTextAutoDetect(t *testing.T) {
 	nodeAddr := conn.LocalAddr().String()
 
 	// Bridge with empty nodeAddr — must learn before sending.
-	bridge := NewBridge("127.0.0.1:0", "", events.NewBus(), nil, nil, nil, false, nil, "", nil)
+	bridge := NewBridge("127.0.0.1:0", "", events.NewBus(), nil, nil, nil, false, nil, nil, nil)
 
 	// Before learning: SendText must return ErrNodeNotDetected.
 	err = bridge.SendText(context.Background(), "*", "hi", 149)
@@ -437,7 +442,7 @@ func TestSendTextDryRun(t *testing.T) {
 	defer node.Close()
 	nodeAddr := node.LocalAddr().String()
 
-	bridge := NewBridge("127.0.0.1:0", nodeAddr, events.NewBus(), nil, nil, nil, true, nil, "", nil)
+	bridge := NewBridge("127.0.0.1:0", nodeAddr, events.NewBus(), nil, nil, nil, true, nil, nil, nil)
 
 	err = bridge.SendText(context.Background(), "*", "hello dry run", 149)
 	if err != nil {
@@ -455,7 +460,7 @@ func TestSendTextDryRun(t *testing.T) {
 
 func TestSendTextDryRunNoNodeRequired(t *testing.T) {
 	// Bridge with no node addr and no learned addr — dry-run must still succeed.
-	bridge := NewBridge("127.0.0.1:0", "", events.NewBus(), nil, nil, nil, true, nil, "", nil)
+	bridge := NewBridge("127.0.0.1:0", "", events.NewBus(), nil, nil, nil, true, nil, nil, nil)
 
 	err := bridge.SendText(context.Background(), "*", "dry run no node", 149)
 	if err != nil {
@@ -487,7 +492,7 @@ func TestListenForwardsRawDatagram(t *testing.T) {
 	tmp.Close()
 
 	bus := events.NewBus()
-	bridge := NewBridge(listenAddr, "127.0.0.1:0", bus, nil, nil, nil, false, fwd, "", nil)
+	bridge := NewBridge(listenAddr, "127.0.0.1:0", bus, nil, nil, nil, false, fwd, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -538,7 +543,7 @@ func FuzzHandleDatagram(f *testing.F) {
 		// Subscribe to drain the bus so it never blocks.
 		_ = bus.Subscribe(ctx)
 
-		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:0", bus, nil, nil, nil, false, nil, "", nil)
+		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:0", bus, nil, nil, nil, false, nil, nil, nil)
 		// Must never panic.
 		bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
 	})
@@ -630,7 +635,7 @@ func TestLogChatMessageSelfEchoSkipsChatStatus(t *testing.T) {
 	bus := events.NewBus()
 	spy := &spyChatStatus{}
 
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, "QQ0QQ-1"), nil, false, nil, "QQ0QQ-1", spy)
+	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, staticCallsign("QQ0QQ-1")), nil, false, nil, staticCallsign("QQ0QQ-1"), spy)
 
 	// Self-echo: source == myCall. Must NOT call chatStatus.
 	raw := `{"type":"msg","src":"QQ0QQ-1","dst":"*","msg":"self echo"}`
@@ -647,7 +652,7 @@ func TestLogChatMessageInboundUpdatesChatStatus(t *testing.T) {
 	bus := events.NewBus()
 	spy := &spyChatStatus{}
 
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, "QQ0QQ-1"), nil, false, nil, "QQ0QQ-1", spy)
+	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, staticCallsign("QQ0QQ-1")), nil, false, nil, staticCallsign("QQ0QQ-1"), spy)
 
 	// Inbound from a different node: must call RecordIncoming.
 	raw := `{"type":"msg","src":"QQ1ABC-1","dst":"*","msg":"hello"}`
@@ -671,7 +676,7 @@ func TestLogChatMessageSelfEchoViaPathSkipsChatStatus(t *testing.T) {
 	spy := &spyChatStatus{}
 
 	// Self-echo with via path: source field is "QQ0QQ-1,RELAY-1".
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, "QQ0QQ-1"), nil, false, nil, "QQ0QQ-1", spy)
+	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, staticCallsign("QQ0QQ-1")), nil, false, nil, staticCallsign("QQ0QQ-1"), spy)
 
 	raw := `{"type":"msg","src":"QQ0QQ-1,RELAY-1","dst":"*","msg":"self via"}`
 	bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)

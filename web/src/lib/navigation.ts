@@ -1,6 +1,7 @@
 import {
 	mdiAccessPoint,
 	mdiChartBar,
+	mdiCog,
 	mdiInformationOutline,
 	mdiMapOutline,
 	mdiMessageTextOutline,
@@ -9,10 +10,17 @@ import {
 	mdiWaveform
 } from '@mdi/js';
 
+export type NavChild = {
+	href: string;
+	icon: string;
+	label: string;
+};
+
 export type NavRoute = {
 	href: string;
 	icon: string;
 	label: string;
+	children?: NavChild[];
 };
 
 export const primaryNavRoutes: NavRoute[] = [
@@ -25,6 +33,7 @@ export const primaryNavRoutes: NavRoute[] = [
 ];
 
 export const secondaryNavRoutes: NavRoute[] = [
+	{ href: '/settings', icon: mdiCog, label: 'Settings' },
 	{ href: '/about', icon: mdiInformationOutline, label: 'About' },
 	{ href: '/credits', icon: mdiStarOutline, label: 'Credits' }
 ];

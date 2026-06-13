@@ -5,11 +5,38 @@ import {
 	fetchHistory,
 	loadLastChatTarget,
 	saveLastChatTarget,
-	markConversationRead
+	markConversationRead,
+	baseCallFrom,
+	dmPeerFromId
 } from './chat';
 
+describe('baseCallFrom', () => {
+	it.each([
+		['IU5PMP-1', 'IU5PMP'],
+		['IU5PMP-10', 'IU5PMP'],
+		['IU5PMP', 'IU5PMP'],
+		['IK5FCK-10', 'IK5FCK'],
+		['XX5YYY-2', 'XX5YYY'],
+		['iu5pmp-1', 'IU5PMP']
+	])('baseCallFrom(%s) = %s', (input, expected) => {
+		expect(baseCallFrom(input)).toBe(expected);
+	});
+});
+
+describe('dmPeerFromId', () => {
+	it.each([
+		['DM_IK5FCK-10', 'IK5FCK-10'],
+		['DM_IU5PMP-1_IK5FCK-10', 'IK5FCK-10'],
+		['DM_IU5PMP_IK5FCK-10', 'IK5FCK-10'],
+		['P_broadcast', ''],
+		['P_123', '']
+	])('dmPeerFromId(%s) = %s', (id, expected) => {
+		expect(dmPeerFromId(id)).toBe(expected);
+	});
+});
+
 describe('conversationIdForRecord', () => {
-	it('keeps outbound failed DM tied to destination when MyCall changes', () => {
+	it('maps outbound DM to mycall-prefixed conv id (mycall scope)', () => {
 		expect(
 			conversationIdForRecord(
 				{
@@ -20,15 +47,33 @@ describe('conversationIdForRecord', () => {
 					direction: 'outbound',
 					delivery_status: 'failed'
 				},
-				'NEWMYCALL-1'
+				'NEWMYCALL-1',
+				'mycall'
 			)
-		).toBe('DM_QQ1ABC-1');
+		).toBe('DM_NEWMYCALL-1_QQ1ABC-1');
+	});
+
+	it('maps outbound DM to basecall-prefixed conv id (basecall scope)', () => {
+		expect(
+			conversationIdForRecord(
+				{
+					received_at: '2026-05-18T09:00:00Z',
+					src: 'IU5PMP-1',
+					dst: 'IK5FCK-10',
+					msg: 'hello',
+					direction: 'outbound',
+					delivery_status: 'failed'
+				},
+				'IU5PMP-1',
+				'basecall'
+			)
+		).toBe('DM_IU5PMP_IK5FCK-10');
 	});
 
 	it.each([
 		{ dst: '*', want: 'P_broadcast' },
 		{ dst: '123', want: 'P_123' }
-	])('returns $want for outbound failed destination $dst', ({ dst, want }) => {
+	])('returns $want for outbound destination $dst', ({ dst, want }) => {
 		expect(
 			conversationIdForRecord(
 				{
@@ -43,6 +88,22 @@ describe('conversationIdForRecord', () => {
 			)
 		).toBe(want);
 	});
+
+	it('uses default mycall scope when scope omitted', () => {
+		expect(
+			conversationIdForRecord(
+				{
+					received_at: '2026-05-18T09:00:00Z',
+					src: 'IU5PMP-1',
+					dst: 'IK5FCK-10',
+					msg: 'hello',
+					direction: 'outbound',
+					delivery_status: 'failed'
+				},
+				'IU5PMP-1'
+			)
+		).toBe('DM_IU5PMP-1_IK5FCK-10');
+	});
 });
 
 describe('markConversationRead', () => {
@@ -50,7 +111,7 @@ describe('markConversationRead', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('calls POST with the correct URL', async () => {
+	it('calls POST without scope param for public conversations', async () => {
 		const fetchSpy = vi
 			.spyOn(globalThis, 'fetch')
 			.mockResolvedValue(new Response(null, { status: 204 }));
@@ -61,12 +122,23 @@ describe('markConversationRead', () => {
 		});
 	});
 
-	it('encodes callsign with special chars', async () => {
+	it('appends scope=mycall for DM conversations (default scope)', async () => {
 		const fetchSpy = vi
 			.spyOn(globalThis, 'fetch')
 			.mockResolvedValue(new Response(null, { status: 204 }));
-		await markConversationRead('DM_QQ1ABC-1');
-		expect(fetchSpy).toHaveBeenCalledWith('/api/chat/DM_QQ1ABC-1/read', {
+		await markConversationRead('DM_IU5PMP-1_IK5FCK-10');
+		expect(fetchSpy).toHaveBeenCalledWith('/api/chat/DM_IU5PMP-1_IK5FCK-10/read?scope=mycall', {
+			method: 'POST',
+			credentials: 'same-origin'
+		});
+	});
+
+	it('appends scope=basecall when requested', async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response(null, { status: 204 }));
+		await markConversationRead('DM_IU5PMP_IK5FCK-10', 'basecall');
+		expect(fetchSpy).toHaveBeenCalledWith('/api/chat/DM_IU5PMP_IK5FCK-10/read?scope=basecall', {
 			method: 'POST',
 			credentials: 'same-origin'
 		});
@@ -96,12 +168,26 @@ describe('loadLastChatTarget / saveLastChatTarget', () => {
 		expect(store['meshcom:chat:last']).toBe('DM_QQ1ABC-1');
 	});
 
+	it('saves provided convId when given', () => {
+		saveLastChatTarget({ kind: 'contact', value: 'QQ1ABC-1' }, 'DM_IU5PMP-1_QQ1ABC-1');
+		expect(store['meshcom:chat:last']).toBe('DM_IU5PMP-1_QQ1ABC-1');
+	});
+
 	it('loads saved DM when it still exists', () => {
-		store['meshcom:chat:last'] = 'DM_QQ1ABC-1';
+		store['meshcom:chat:last'] = 'DM_IU5PMP-1_QQ1ABC-1';
 		expect(
 			loadLastChatTarget([
 				{ id: 'P_broadcast', kind: 'broadcast', label: 'Broadcast', last_seen: '', size: 0 },
-				{ id: 'DM_QQ1ABC-1', kind: 'dm', label: 'QQ1ABC-1', last_seen: '', size: 0 }
+				{ id: 'DM_IU5PMP-1_QQ1ABC-1', kind: 'dm', label: 'QQ1ABC-1', last_seen: '', size: 0 }
+			])
+		).toEqual({ kind: 'contact', value: 'QQ1ABC-1' });
+	});
+
+	it('extracts peer from DM id when label missing', () => {
+		store['meshcom:chat:last'] = 'DM_IU5PMP-1_QQ1ABC-1';
+		expect(
+			loadLastChatTarget([
+				{ id: 'DM_IU5PMP-1_QQ1ABC-1', kind: 'dm', label: '', last_seen: '', size: 0 }
 			])
 		).toEqual({ kind: 'contact', value: 'QQ1ABC-1' });
 	});
@@ -152,15 +238,28 @@ describe('fetchHistory', () => {
 		});
 	});
 
-	it('omits hours for DM history so backend default window applies', async () => {
+	it('sends scope=mycall for DM history (default)', async () => {
 		vi.stubGlobal('location', { origin: 'http://localhost:3000' });
 		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([]));
 
-		await fetchHistory('DM_QQ1ABC-1', 168);
+		await fetchHistory('DM_IU5PMP-1_QQ1ABC-1', 168);
 
-		expect(fetchSpy).toHaveBeenCalledWith('http://localhost:3000/api/chat/DM_QQ1ABC-1', {
-			credentials: 'same-origin'
-		});
+		expect(fetchSpy).toHaveBeenCalledWith(
+			'http://localhost:3000/api/chat/DM_IU5PMP-1_QQ1ABC-1?scope=mycall',
+			{ credentials: 'same-origin' }
+		);
+	});
+
+	it('sends scope=basecall for DM history when requested', async () => {
+		vi.stubGlobal('location', { origin: 'http://localhost:3000' });
+		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([]));
+
+		await fetchHistory('DM_IU5PMP_QQ1ABC-1', 168, 'basecall');
+
+		expect(fetchSpy).toHaveBeenCalledWith(
+			'http://localhost:3000/api/chat/DM_IU5PMP_QQ1ABC-1?scope=basecall',
+			{ credentials: 'same-origin' }
+		);
 	});
 });
 

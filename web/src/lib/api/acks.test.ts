@@ -49,6 +49,56 @@ describe('ackEntriesForRecord', () => {
 			ackEntriesForRecord(ackIndex, '571', sentRecord('QQ2BOB-1', 'hello bob {571'), 'QQ0ME-1')
 		).toEqual([]);
 	});
+
+	it('basecall scope: matches ACK targeted at different SSID of same operator', () => {
+		// Real-world case: message sent from IU5PMP-10, ACK arrives as "IU5PMP-10:ack353"
+		// Active callsign is IU5PMP-1 (different SSID, same base call)
+		const ackIndex = buildAckIndex([
+			packetEvent('2026-06-13T09:59:21Z', {
+				type: 'msg',
+				src: 'IU5RCB-12,IW5AKT-10',
+				dst: 'IU5PMP-10',
+				msg: 'IU5PMP-10:ack353'
+			})
+		]);
+
+		const record: import('./types').ChatRecord = {
+			received_at: '2026-06-13T09:58:46Z',
+			src: 'IU5PMP-10',
+			dst: 'IU5RCB-12',
+			msg: 'Ciao ti vedo in mappa{353'
+		};
+
+		// basecall scope: IU5PMP-1 matches IU5PMP-10 (same base IU5PMP)
+		expect(ackEntriesForRecord(ackIndex, '353', record, 'IU5PMP-1', 'basecall')).toMatchObject([
+			{ source: 'IU5RCB-12' }
+		]);
+
+		// mycall scope: IU5PMP-1 does NOT match IU5PMP-10
+		expect(ackEntriesForRecord(ackIndex, '353', record, 'IU5PMP-1', 'mycall')).toEqual([]);
+	});
+
+	it('basecall scope: still rejects ACKs from a different operator', () => {
+		const ackIndex = buildAckIndex([
+			packetEvent('2026-05-20T10:00:05Z', {
+				type: 'msg',
+				src: 'QQ2BOB-1',
+				dst: 'QQ9OTHER-1',
+				msg: 'QQ9OTHER-1 :ack571'
+			})
+		]);
+
+		// QQ9OTHER base call ≠ QQ0ME base call → still rejected
+		expect(
+			ackEntriesForRecord(
+				ackIndex,
+				'571',
+				sentRecord('QQ2BOB-1', 'hello {571'),
+				'QQ0ME-1',
+				'basecall'
+			)
+		).toEqual([]);
+	});
 });
 
 describe('buildAckIndex', () => {
@@ -83,10 +133,12 @@ describe('buildAckIndex', () => {
 			}
 		]);
 
-		expect(ackEntriesForRecord(ackIndex, '571', sentRecord('QQ2BOB-1', 'hello {571'), 'QQ0ME-1')).toMatchObject([
-			{ source: 'QQ2BOB-1' }
-		]);
-		expect(ackEntriesForRecord(ackIndex, '571', sentRecord('QQ3ANN-1', 'hello {571'), 'QQ0ME-1')).toEqual([]);
+		expect(
+			ackEntriesForRecord(ackIndex, '571', sentRecord('QQ2BOB-1', 'hello {571'), 'QQ0ME-1')
+		).toMatchObject([{ source: 'QQ2BOB-1' }]);
+		expect(
+			ackEntriesForRecord(ackIndex, '571', sentRecord('QQ3ANN-1', 'hello {571'), 'QQ0ME-1')
+		).toEqual([]);
 	});
 });
 

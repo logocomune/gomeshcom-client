@@ -11,6 +11,11 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 )
 
+// staticCallsign is a test-only myCallSource that returns a fixed callsign.
+type staticCallsign string
+
+func (s staticCallsign) Current() string { return string(s) }
+
 func writeJSONL(t *testing.T, path string, records []Record) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
@@ -28,7 +33,7 @@ func writeJSONL(t *testing.T, path string, records []Record) {
 
 func TestList(t *testing.T) {
 	dir := t.TempDir()
-	logger := New(dir, "QQ0QQ-1")
+	logger := New(dir, staticCallsign("QQ0QQ-1"))
 
 	t0 := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
 	t1 := time.Date(2025, 1, 1, 11, 0, 0, 0, time.UTC)
@@ -67,7 +72,7 @@ func TestList(t *testing.T) {
 }
 
 func TestListMissingDir(t *testing.T) {
-	logger := New(filepath.Join(t.TempDir(), "nonexistent"), "QQ0QQ-1")
+	logger := New(filepath.Join(t.TempDir(), "nonexistent"), staticCallsign("QQ0QQ-1"))
 	convs, err := logger.List()
 	if err != nil {
 		t.Fatalf("List on missing dir: %v", err)
@@ -79,7 +84,7 @@ func TestListMissingDir(t *testing.T) {
 
 func TestReadSince(t *testing.T) {
 	dir := t.TempDir()
-	logger := New(dir, "QQ0QQ-1")
+	logger := New(dir, staticCallsign("QQ0QQ-1"))
 
 	base := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
 	records := []Record{
@@ -102,7 +107,7 @@ func TestReadSince(t *testing.T) {
 }
 
 func TestReadSinceMissingFile(t *testing.T) {
-	logger := New(t.TempDir(), "QQ0QQ-1")
+	logger := New(t.TempDir(), staticCallsign("QQ0QQ-1"))
 	records, err := logger.ReadSince("P_broadcast", time.Now())
 	if err != nil {
 		t.Fatalf("ReadSince missing file: %v", err)
@@ -113,7 +118,7 @@ func TestReadSinceMissingFile(t *testing.T) {
 }
 
 func TestReadSinceEmptyNeverNilSlice(t *testing.T) {
-	logger := New(t.TempDir(), "QQ0QQ-1")
+	logger := New(t.TempDir(), staticCallsign("QQ0QQ-1"))
 	records, err := logger.ReadSince("P_broadcast", time.Now())
 	if err != nil {
 		t.Fatalf("ReadSince: %v", err)
@@ -128,7 +133,7 @@ func TestReadSinceEmptyNeverNilSlice(t *testing.T) {
 }
 
 func TestReadSinceInvalidID(t *testing.T) {
-	logger := New(t.TempDir(), "QQ0QQ-1")
+	logger := New(t.TempDir(), staticCallsign("QQ0QQ-1"))
 	cases := []string{
 		"../etc/passwd",
 		"../../secret",
@@ -147,7 +152,7 @@ func TestReadSinceInvalidID(t *testing.T) {
 
 func TestReadSinceMalformedLineSkipped(t *testing.T) {
 	dir := t.TempDir()
-	logger := New(dir, "QQ0QQ-1")
+	logger := New(dir, staticCallsign("QQ0QQ-1"))
 
 	path := filepath.Join(dir, "P_broadcast.jsonl")
 	f, _ := os.Create(path)
@@ -166,7 +171,8 @@ func TestReadSinceMalformedLineSkipped(t *testing.T) {
 }
 
 func TestAppendDMFilter(t *testing.T) {
-	myCall := "QQ0QQ-1"
+	myCallStr := "QQ0QQ-1"
+	myCall := staticCallsign(myCallStr)
 	now := time.Now().UTC()
 
 	msg := func(src, dst, text string) meshcom.TextMessage {
@@ -180,8 +186,8 @@ func TestAppendDMFilter(t *testing.T) {
 	}{
 		{msg("QQ1ABC-1", "*", "broadcast"), true, "P_broadcast"},
 		{msg("QQ1ABC-1", "123", "channel"), true, "P_123"},
-		{msg(myCall, "QQ1ABC-1", "outgoing DM"), true, "DM_QQ1ABC-1"}, // interlocutor = dst
-		{msg("QQ1ABC-1", myCall, "incoming DM"), true, "DM_QQ1ABC-1"}, // interlocutor = src
+		{msg(myCallStr, "QQ1ABC-1", "outgoing DM"), true, "DM_QQ0QQ_QQ1ABC-1"}, // interlocutor = dst
+		{msg("QQ1ABC-1", myCallStr, "incoming DM"), true, "DM_QQ0QQ_QQ1ABC-1"}, // interlocutor = src
 		{msg("QQ1ABC-1", "QQ1XYZ", "unrelated DM"), false, ""},
 	}
 
@@ -217,12 +223,14 @@ func TestAppendFailedPersistsOutboundStatus(t *testing.T) {
 	}{
 		"broadcast": {dst: "*", wantID: "P_broadcast", wantStatus: "failed"},
 		"channel":   {dst: "123", wantID: "P_123", wantStatus: "failed"},
-		"dm":        {dst: "QQ1ABC-1", wantID: "DM_QQ1ABC-1", wantStatus: "failed"},
+		// AppendFailed uses source as myCall: filenameForMsg("QQ0QQ-1","QQ1ABC-1","QQ0QQ-1")
+		// → DM_<basecall("QQ0QQ-1")>_QQ1ABC-1 = DM_QQ0QQ_QQ1ABC-1.
+		"dm": {dst: "QQ1ABC-1", wantID: "DM_QQ0QQ_QQ1ABC-1", wantStatus: "failed"},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			logger := New(t.TempDir(), "DIFFERENT-1")
+			logger := New(t.TempDir(), staticCallsign("DIFFERENT-1"))
 			record, err := logger.AppendFailed("QQ0QQ-1", test.dst, "hello", now)
 			if err != nil {
 				t.Fatalf("AppendFailed: %v", err)
@@ -254,14 +262,14 @@ func TestAppendFailedPersistsOutboundStatus(t *testing.T) {
 // TestAppendDMNormalization verifies that both directions of a DM conversation
 // land in the same file keyed on the interlocutor's callsign.
 func TestAppendDMNormalization(t *testing.T) {
-	myCall := "QQ0QQ-1"
+	myCallStr := "QQ0QQ-1"
 	other := "QQ1ABC-1"
 	now := time.Now().UTC()
 	logDir := t.TempDir()
-	l := New(logDir, myCall)
+	l := New(logDir, staticCallsign(myCallStr))
 
-	outgoing := meshcom.TextMessage{Source: myCall, Destination: other, Message: "hello"}
-	incoming := meshcom.TextMessage{Source: other, Destination: myCall, Message: "world"}
+	outgoing := meshcom.TextMessage{Source: myCallStr, Destination: other, Message: "hello"}
+	incoming := meshcom.TextMessage{Source: other, Destination: myCallStr, Message: "world"}
 
 	if err := l.Append(outgoing, now); err != nil {
 		t.Fatalf("Append outgoing: %v", err)
@@ -270,25 +278,25 @@ func TestAppendDMNormalization(t *testing.T) {
 		t.Fatalf("Append incoming: %v", err)
 	}
 
-	// Both must appear in DM_QQ1ABC-1, not in DM_QQ0QQ-1.
-	recs, err := l.ReadSince("DM_QQ1ABC-1", time.Time{})
+	// Both must appear in DM_QQ0QQ_QQ1ABC-1 (basecall of myCall = QQ0QQ, peer = QQ1ABC-1).
+	recs, err := l.ReadSince("DM_QQ0QQ_QQ1ABC-1", time.Time{})
 	if err != nil {
 		t.Fatalf("ReadSince: %v", err)
 	}
 	if len(recs) != 2 {
-		t.Fatalf("expected 2 records in DM_%s, got %d", other, len(recs))
+		t.Fatalf("expected 2 records in DM_QQ0QQ_%s, got %d", other, len(recs))
 	}
 
-	// DM_QQ0QQ-1 must not exist.
-	wrongRecs, _ := l.ReadSince("DM_QQ0QQ-1", time.Time{})
+	// DM_QQ0QQ_QQ0QQ-1 must not exist (self-conversation never written).
+	wrongRecs, _ := l.ReadSince("DM_QQ0QQ_QQ0QQ-1", time.Time{})
 	if len(wrongRecs) > 0 {
-		t.Fatalf("unexpected records in DM_%s: %d", myCall, len(wrongRecs))
+		t.Fatalf("unexpected records in DM_QQ0QQ_%s: %d", myCallStr, len(wrongRecs))
 	}
 }
 
 func TestRemoveDeletesFile(t *testing.T) {
 	dir := t.TempDir()
-	logger := New(dir, "QQ0QQ-1")
+	logger := New(dir, staticCallsign("QQ0QQ-1"))
 
 	msg := meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "*", Message: "hi"}
 	if err := logger.Append(msg, time.Now()); err != nil {
@@ -317,14 +325,14 @@ func TestRemoveDeletesFile(t *testing.T) {
 }
 
 func TestRemoveIdempotentMissingFile(t *testing.T) {
-	logger := New(t.TempDir(), "QQ0QQ-1")
+	logger := New(t.TempDir(), staticCallsign("QQ0QQ-1"))
 	if err := logger.Remove("P_broadcast"); err != nil {
 		t.Fatalf("Remove on missing file: %v", err)
 	}
 }
 
 func TestRemoveInvalidID(t *testing.T) {
-	logger := New(t.TempDir(), "QQ0QQ-1")
+	logger := New(t.TempDir(), staticCallsign("QQ0QQ-1"))
 	cases := []string{"../etc/passwd", "../../secret", "random", "DM_", "P_"}
 	for _, id := range cases {
 		if err := logger.Remove(id); err == nil {
@@ -335,7 +343,7 @@ func TestRemoveInvalidID(t *testing.T) {
 
 func TestRemoveConcurrentWithAppend(t *testing.T) {
 	dir := t.TempDir()
-	logger := New(dir, "QQ0QQ-1")
+	logger := New(dir, staticCallsign("QQ0QQ-1"))
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -369,10 +377,11 @@ func TestConversationID(t *testing.T) {
 		{"broadcast star", "QQ1ABC-1", "*", "QQ0QQ-1", "P_broadcast"},
 		{"broadcast empty", "QQ1ABC-1", "", "QQ0QQ-1", "P_broadcast"},
 		{"numeric channel", "QQ1ABC-1", "2", "QQ0QQ-1", "P_2"},
-		{"dm inbound", "QQ1ABC-1", "QQ0QQ-1", "QQ0QQ-1", "DM_QQ1ABC-1"},
-		{"dm outbound", "QQ0QQ-1", "QQ1ABC-1", "QQ0QQ-1", "DM_QQ1ABC-1"},
+		// DM file ids: DM_<basecall(myCall)>_<interlocutor>
+		{"dm inbound", "QQ1ABC-1", "QQ0QQ-1", "QQ0QQ-1", "DM_QQ0QQ_QQ1ABC-1"},
+		{"dm outbound", "QQ0QQ-1", "QQ1ABC-1", "QQ0QQ-1", "DM_QQ0QQ_QQ1ABC-1"},
 		{"dm not our call", "QQ1ABC-1", "QQ2DEF-2", "QQ0QQ-1", ""},
-		{"sanitize callsign", "QQ0QQ-1", "QQ3/P", "QQ0QQ-1", "DM_QQ3_P"},
+		{"sanitize callsign", "QQ0QQ-1", "QQ3/P", "QQ0QQ-1", "DM_QQ0QQ_QQ3_P"},
 		{"via path stripped", "QQ1ABC-1,RELAY-1", "*", "QQ0QQ-1", "P_broadcast"},
 	}
 
@@ -383,5 +392,139 @@ func TestConversationID(t *testing.T) {
 				t.Fatalf("ConversationID(%q, %q, %q) = %q, want %q", tt.src, tt.dst, tt.myCall, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBaseCall(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"IU5PMP-1", "IU5PMP"},
+		{"IU5PMP-10", "IU5PMP"},
+		{"IU5PMP-2", "IU5PMP"},
+		{"IU5PMP", "IU5PMP"},     // no SSID
+		{"IU5PMP-X", "IU5PMP-X"}, // non-numeric suffix: preserved
+		{"QQ0QQ-1", "QQ0QQ"},
+		{"K2A", "K2A"},
+	}
+	for _, tt := range tests {
+		got := BaseCall(tt.in)
+		if got != tt.want {
+			t.Errorf("BaseCall(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestStatusKey(t *testing.T) {
+	tests := []struct {
+		name   string
+		src    string
+		dst    string
+		myCall string
+		want   string
+	}{
+		{"broadcast", "QQ1ABC-1", "*", "QQ0QQ-1", "P_broadcast"},
+		{"channel", "QQ1ABC-1", "2", "QQ0QQ-1", "P_2"},
+		{"dm inbound full ssid", "QQ1ABC-1", "IU5PMP-1", "IU5PMP-1", "DM_IU5PMP-1_QQ1ABC-1"},
+		{"dm outbound full ssid", "IU5PMP-1", "QQ1ABC-1", "IU5PMP-1", "DM_IU5PMP-1_QQ1ABC-1"},
+		// IU5PMP-1 and IU5PMP-2 produce different status keys (per-device tracking)
+		{"dm ssid-2", "QQ1ABC-1", "IU5PMP-2", "IU5PMP-2", "DM_IU5PMP-2_QQ1ABC-1"},
+		{"dm foreign", "QQ1ABC-1", "QQ2DEF-2", "QQ0QQ-1", ""},
+		{"empty myCall", "QQ1ABC-1", "QQ0QQ-1", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StatusKey(tt.src, tt.dst, tt.myCall)
+			if got != tt.want {
+				t.Errorf("StatusKey(%q,%q,%q) = %q, want %q", tt.src, tt.dst, tt.myCall, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFileIDForAPIID(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		// mycall-scoped id → file id (basecall)
+		{"DM_IU5PMP-1_IK5FCK-10", "DM_IU5PMP_IK5FCK-10"},
+		{"DM_IU5PMP-2_IK5FCK-10", "DM_IU5PMP_IK5FCK-10"}, // same file for both devices
+		// basecall-scoped id → idempotent (BaseCall of basecall = itself)
+		{"DM_IU5PMP_IK5FCK-10", "DM_IU5PMP_IK5FCK-10"},
+		// P_* passthrough
+		{"P_broadcast", "P_broadcast"},
+		{"P_123", "P_123"},
+		// legacy DM_<peer> (no underscore): preserved
+		{"DM_IK5FCK-10", "DM_IK5FCK-10"},
+	}
+	for _, tt := range tests {
+		got := FileIDForAPIID(tt.in)
+		if got != tt.want {
+			t.Errorf("FileIDForAPIID(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestDMPeer(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"DM_IU5PMP_IK5FCK-10", "IK5FCK-10"},
+		{"DM_IU5PMP-1_IK5FCK-10", "IK5FCK-10"},
+		{"DM_IK5FCK-10", "IK5FCK-10"}, // legacy
+		{"P_broadcast", ""},
+		{"P_123", ""},
+	}
+	for _, tt := range tests {
+		got := DMPeer(tt.in)
+		if got != tt.want {
+			t.Errorf("DMPeer(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestRecordMatchesSSID(t *testing.T) {
+	tests := []struct {
+		src  string
+		dst  string
+		ssid string
+		want bool
+	}{
+		{"IU5PMP-1", "IK5FCK-10", "IU5PMP-1", true},         // src match
+		{"IK5FCK-10", "IU5PMP-1", "IU5PMP-1", true},         // dst match
+		{"IK5FCK-10", "IK5FCK-5", "IU5PMP-1", false},        // no match
+		{"IU5PMP-2", "IK5FCK-10", "IU5PMP-1", false},        // different SSID
+		{"IU5PMP-1,RELAY-3", "IK5FCK-10", "IU5PMP-1", true}, // routing path stripped
+	}
+	for _, tt := range tests {
+		got := RecordMatchesSSID(tt.src, tt.dst, tt.ssid)
+		if got != tt.want {
+			t.Errorf("RecordMatchesSSID(%q,%q,%q) = %v, want %v", tt.src, tt.dst, tt.ssid, got, tt.want)
+		}
+	}
+}
+
+// TestSameBasecallSameFile verifies that IU5PMP-1 and IU5PMP-2 produce the
+// same .jsonl file (basecall-namespaced), a core invariant of the design.
+func TestSameBasecallSameFile(t *testing.T) {
+	peer := "IK5FCK-10"
+	file1 := ConversationID(peer, "IU5PMP-1", "IU5PMP-1")
+	file2 := ConversationID(peer, "IU5PMP-2", "IU5PMP-2")
+	if file1 != file2 {
+		t.Errorf("expected same file for IU5PMP-1 and IU5PMP-2, got %q vs %q", file1, file2)
+	}
+}
+
+// TestDifferentBasecallDifferentFile verifies that different operators get
+// separate DM files even when addressing the same peer.
+func TestDifferentBasecallDifferentFile(t *testing.T) {
+	peer := "IK5FCK-10"
+	file1 := ConversationID(peer, "IU5PMP-1", "IU5PMP-1")
+	file2 := ConversationID(peer, "IK3XYZ-1", "IK3XYZ-1")
+	if file1 == file2 {
+		t.Errorf("expected different files for different operators, both got %q", file1)
 	}
 }

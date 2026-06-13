@@ -4,26 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
+	"github.com/logocomune/gomeshcom-client/internal/callsign"
 )
 
 const Prefix = "GOMESHCOM"
 
-var callsignPattern = regexp.MustCompile(`^[A-Z0-9]{3,10}(?:-[0-9]{1,2})?$`)
-
 type Config struct {
 	conf.Version
-	HTTPAddr         string        `conf:"default:127.0.0.1:8080,help:HTTP listen address"`
-	UDPListenAddr    string        `conf:"default:0.0.0.0:1799,help:MeshCom UDP listen address"`
-	NodeAddr         string        `conf:"help:MeshCom node UDP address (auto-detected from incoming UDP traffic when empty)"`
-	MyCall           string        `conf:"default:QQ0XX-1,help:local callsign"`
-	DataDir          string        `conf:"default:./data,help:runtime data directory"`
-	SendDelay        time.Duration `conf:"default:40s,help:minimum delay between outgoing UDP messages"`
-	MaxMessageLength int           `conf:"default:149,help:maximum outgoing UTF-8 message length"`
+	HTTPAddr         string `conf:"default:127.0.0.1:8080,help:HTTP listen address"`
+	UDPListenAddr    string `conf:"default:0.0.0.0:1799,help:MeshCom UDP listen address"`
+	NodeAddr         string `conf:"help:MeshCom node UDP address (auto-detected from incoming UDP traffic when empty)"`
+	MyCall           string `conf:"default:QQ0XX-1,help:local callsign"`
+	DataDir          string `conf:"default:./data,help:runtime data directory"`
+	MaxMessageLength int    `conf:"default:149,help:maximum outgoing UTF-8 message length"`
+	DemoMode         bool   `conf:"default:false,help:demo mode — disables TX and locks the config API"`
 	ReceiveLog       ReceiveLog
 	ChatLog          ChatLog
 	Stats            Stats
@@ -31,6 +29,7 @@ type Config struct {
 	Forward          Forward
 	Auth             Auth
 	RequestLog       RequestLog
+	Compression      Compression
 	LogLevel         string `conf:"default:info,help:log level: debug|info|warn|error"`
 }
 
@@ -55,8 +54,7 @@ type ChatLog struct {
 }
 
 type Send struct {
-	DedupTTL  time.Duration `conf:"default:2s,help:LRU TTL window for duplicate outgoing messages (0 disables)"`
-	DisableTx bool          `conf:"default:false,help:dry-run mode — log outgoing UDP messages as warnings without transmitting"`
+	DedupTTL time.Duration `conf:"default:2s,help:LRU TTL window for duplicate outgoing messages (0 disables)"`
 }
 
 type Forward struct {
@@ -74,7 +72,19 @@ type RequestLog struct {
 	Enabled bool `conf:"default:false,help:enable structured HTTP request logging"`
 }
 
-func Load(build string) (Config, string, error) {
+type Compression struct {
+	Enabled     bool `conf:"default:true,help:enable HTTP gzip response compression"`
+	MinimumSize int  `conf:"default:1024,help:minimum response body size in bytes before gzip is applied"`
+}
+
+// Load parses configuration from built-in defaults, a TOML file, and environment
+// variables. Precedence (low → high): built-in defaults < TOML file < env vars.
+//
+// The TOML file path is derived from the data directory (env or default); changing
+// data_dir inside the TOML has no effect — use GOMESHCOM_DATA_DIR to relocate data.
+// A missing TOML file is created with commented defaults and startup continues.
+// An invalid TOML file causes Load to return an error.
+func Load(build string) (Config, EnvOverrides, string, error) {
 	cfg := Config{
 		Version: conf.Version{
 			Build: build,
@@ -82,17 +92,37 @@ func Load(build string) (Config, string, error) {
 		},
 	}
 
+	// Step 1: parse env + built-in defaults via ardanlabs/conf.
+	// This resolves DataDir so we can locate the TOML file.
 	info, err := conf.ParseWithOptions(Prefix, &cfg, conf.WithStrictFlags())
 	if err != nil {
-		return Config{}, info, err
+		return Config{}, nil, info, err
 	}
+
+	// Step 2: detect which fields are explicitly set via GOMESHCOM_* env vars.
+	env := DetectEnvOverrides()
+
+	// Step 3: write default TOML if missing (using built-in defaults, not env values),
+	// then load it. WriteDefaultToml is a no-op when the file already exists.
+	tomlPath := DefaultTomlPath(cfg.DataDir)
+	if writeErr := WriteDefaultToml(tomlPath, builtInDefaultConfig()); writeErr != nil {
+		_ = writeErr // non-fatal; logger not yet configured
+	}
+
+	tf, err := loadTomlFile(tomlPath)
+	if err != nil {
+		return Config{}, nil, info, fmt.Errorf("config file: %w", err)
+	}
+
+	// Step 4: apply TOML values for fields not already set by env.
+	mergeToml(&cfg, tf, env)
 
 	cfg = normalize(cfg)
 	if err := Validate(cfg); err != nil {
-		return Config{}, info, err
+		return Config{}, nil, info, err
 	}
 
-	return cfg, info, nil
+	return cfg, env, info, nil
 }
 
 // ParseForwardTargets splits the CSV forward-targets string, trims whitespace,
@@ -114,13 +144,47 @@ func ParseForwardTargets(csv string) ([]string, error) {
 	return result, nil
 }
 
-func normalize(cfg Config) Config {
-	cfg.MyCall = normalizeCallsign(cfg.MyCall)
-	return cfg
+// builtInDefaultConfig returns a Config populated with the same defaults coded in
+// the struct tags (conf:"default:..."). Used only to generate the initial TOML
+// template so the file never captures env-override values.
+func builtInDefaultConfig() Config {
+	return Config{
+		HTTPAddr:         "127.0.0.1:8080",
+		UDPListenAddr:    "0.0.0.0:1799",
+		NodeAddr:         "",
+		MyCall:           "QQ0XX-1",
+		DataDir:          "./data",
+		MaxMessageLength: 149,
+		LogLevel:         "info",
+		ReceiveLog: ReceiveLog{
+			Enabled:       true,
+			Path:          "./data/raw",
+			RetentionDays: 365,
+			ReplayWindow:  time.Hour,
+		},
+		Stats: Stats{
+			Enabled:       true,
+			Path:          "./data/stats/stats.json",
+			RetentionDays: 30,
+		},
+		ChatLog: ChatLog{
+			Path:             "./data/chat",
+			HistoryWindow:    24 * time.Hour,
+			MaxHistoryWindow: 720 * time.Hour,
+		},
+		Send: Send{
+			DedupTTL: 2 * time.Second,
+		},
+		Forward:     Forward{Targets: ""},
+		Auth:        Auth{SessionTTL: 24 * time.Hour, CookieName: "meshcom_session"},
+		RequestLog:  RequestLog{Enabled: false},
+		Compression: Compression{Enabled: true, MinimumSize: 1024},
+	}
 }
 
-func normalizeCallsign(value string) string {
-	return strings.ToUpper(strings.TrimSpace(value))
+func normalize(cfg Config) Config {
+	cfg.MyCall = callsign.Normalize(cfg.MyCall)
+	return cfg
 }
 
 func Validate(cfg Config) error {
@@ -146,7 +210,7 @@ func Validate(cfg Config) error {
 		return errors.New("data dir is required")
 	}
 
-	if !callsignPattern.MatchString(cfg.MyCall) {
+	if !callsign.IsValid(cfg.MyCall) {
 		return errors.New("my call must be 3-10 alphanumeric characters with an optional numeric SSID (e.g. IU5PMP-1)")
 	}
 
@@ -174,10 +238,6 @@ func Validate(cfg Config) error {
 
 	if cfg.ChatLog.MaxHistoryWindow < cfg.ChatLog.HistoryWindow {
 		return errors.New("chat log max history window must be >= history window")
-	}
-
-	if cfg.SendDelay < 0 {
-		return errors.New("send delay must not be negative")
 	}
 
 	if cfg.Send.DedupTTL < 0 {
