@@ -21,7 +21,7 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/chatlog"
 	"github.com/logocomune/gomeshcom-client/internal/chatstatus"
 	"github.com/logocomune/gomeshcom-client/internal/config"
-	"github.com/logocomune/gomeshcom-client/internal/dmstats
+	"github.com/logocomune/gomeshcom-client/internal/dmstats"
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/httpapi"
 	"github.com/logocomune/gomeshcom-client/internal/legacymigrate"
