@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Tests for `ChatStore` and `ToastStore`**: added unit tests covering `appendLiveChatRecord` (broadcast, channel, DM routing, deduplication, pending removal, ACK suppression), `appendChatRecord` (DM/mention toast and sound triggers, outbound/pending suppression, failed delivery cleanup), and `ToastStore` (`addDm`, `addMention`, `dismiss`, auto-dismiss timer).
+
+### Fixed
+
+- **Mention toast now has its own independent setting**: `dmToastEnabled` previously also gated `@mention` toasts in channels; split into `dmToastEnabled` (DM banners) and `mentionToastEnabled` (channel @mention banners), each with its own toggle in Settings → Notifications.
+
+- **ACK/reject regex no longer matches embedded tokens**: strings like `ack123abc` or `CALL:rej42test` are no longer classified as control messages — added `\b` word-boundary after `\d+` in both patterns.
+
+- **DM list preview no longer shows ACK text**: incoming ACK/reject packets are now excluded from the conversation-list "last message" preview and do not increment the unread counter — both on the server (`chatstatus.RecordIncoming` skipped via `meshcom.IsAckOrReject`) and on the client (`appendLiveChatRecord`, `appendChatRecord`, and `latestPreview`). ACK/reject records are still stored in history for delivery tracking and remain hidden in the thread view as before.
+
 ## [0.10.0]
 
 ### Added

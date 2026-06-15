@@ -39,7 +39,6 @@ describe('conversationPreview', () => {
 	});
 });
 
-
 describe('latestPreview', () => {
 	it('returns empty string when no history and no status', () => {
 		expect(latestPreview([], undefined)).toBe('');
@@ -69,6 +68,51 @@ describe('latestPreview', () => {
 		const status: ChatStatusEntry = { lastMsgReceived: '', lastRead: '', unreadCount: 0 };
 		const records = [makeRecord('only in history', '2026-01-01T10:00:00Z')];
 		expect(latestPreview(records, status)).toBe('only in history');
+	});
+
+	it('skips ACK record at end — shows prior text message', () => {
+		const records = [
+			makeRecord('hello', '2026-01-01T10:00:00Z'),
+			makeRecord('PEER:ack42', '2026-01-01T10:01:00Z')
+		];
+		expect(latestPreview(records, undefined)).toBe('hello');
+	});
+
+	it('skips reject record at end — shows prior text message', () => {
+		const records = [
+			makeRecord('hi there', '2026-01-01T10:00:00Z'),
+			makeRecord('PEER:rej99', '2026-01-01T10:01:00Z')
+		];
+		expect(latestPreview(records, undefined)).toBe('hi there');
+	});
+
+	it('returns empty string when all records are ACK', () => {
+		const records = [
+			makeRecord('PEER:ack1', '2026-01-01T10:00:00Z'),
+			makeRecord('PEER:ack2', '2026-01-01T10:01:00Z')
+		];
+		expect(latestPreview(records, undefined)).toBe('');
+	});
+
+	it('skips ACK in status.lastMsg — falls back to history', () => {
+		const status = makeStatus('2026-01-01T11:00:00Z', 'PEER:ack42');
+		const records = [makeRecord('real message', '2026-01-01T10:00:00Z')];
+		expect(latestPreview(records, status)).toBe('real message');
+	});
+
+	it('returns empty when status.lastMsg is ACK and no history', () => {
+		const status = makeStatus('2026-01-01T11:00:00Z', 'PEER:ack42');
+		expect(latestPreview([], status)).toBe('');
+	});
+
+	it('prefers status.lastMsg when newer than last non-ACK record', () => {
+		const status = makeStatus('2026-01-01T11:00:00Z', 'latest received');
+		const records = [
+			makeRecord('older text', '2026-01-01T09:00:00Z'),
+			makeRecord('PEER:ack5', '2026-01-01T10:30:00Z')
+		];
+		// last non-ACK is 09:00, status is 11:00 → status wins
+		expect(latestPreview(records, status)).toBe('latest received');
 	});
 });
 

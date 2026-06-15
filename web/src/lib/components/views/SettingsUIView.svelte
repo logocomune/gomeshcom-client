@@ -111,6 +111,28 @@
 							></span>
 						</button>
 					</label>
+					<label class="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
+						<div>
+							<div class="text-sm text-ink">Mention toast notification</div>
+							<div class="text-xs text-ink-muted">
+								Show banner when your callsign is @mentioned in a channel
+							</div>
+						</div>
+						<button
+							type="button"
+							role="switch"
+							aria-label="Toggle mention toast notification"
+							aria-checked={uiPrefs.mentionToastEnabled}
+							onclick={() => (uiPrefs.mentionToastEnabled = !uiPrefs.mentionToastEnabled)}
+							class="inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors
+								{uiPrefs.mentionToastEnabled ? 'bg-azure' : 'bg-ink-dim/40'}"
+						>
+							<span
+								class="ml-0.5 h-4 w-4 shrink-0 rounded-full bg-white shadow transition-transform
+									{uiPrefs.mentionToastEnabled ? 'translate-x-4' : 'translate-x-0'}"
+							></span>
+						</button>
+					</label>
 				</div>
 			</section>
 

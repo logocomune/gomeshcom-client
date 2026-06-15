@@ -1,5 +1,5 @@
 import type { ChatRecord, ChatStatusEntry, Conversation } from '$lib/api/types';
-import { cleanMessage } from '$lib/api/events';
+import { cleanMessage, messageKind } from '$lib/api/events';
 
 const PREVIEW_MAX = 40;
 
@@ -14,11 +14,18 @@ export function conversationPreview(records: ChatRecord[]): string {
 	return previewText(last.msg);
 }
 
+function isPreviewable(rec: ChatRecord): boolean {
+	const k = messageKind(rec.msg).kind;
+	return k !== 'ack' && k !== 'reject';
+}
+
 export function latestPreview(records: ChatRecord[], status: ChatStatusEntry | undefined): string {
-	const lastRec = records.at(-1);
+	// Skip ACK/reject records — they are not meaningful as conversation previews.
+	const lastRec = [...records].reverse().find(isPreviewable);
 	const statusTs = status?.lastMsgReceived ?? '';
 	if (lastRec && lastRec.received_at > statusTs) return previewText(lastRec.msg);
-	if (status?.lastMsg != null) return previewText(status.lastMsg);
+	if (status?.lastMsg != null && isPreviewable({ msg: status.lastMsg } as ChatRecord))
+		return previewText(status.lastMsg);
 	return lastRec ? previewText(lastRec.msg) : '';
 }
 

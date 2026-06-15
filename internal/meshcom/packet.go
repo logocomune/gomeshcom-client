@@ -4,10 +4,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 )
+
+// ackPattern matches ACK text: "ack571", ":ack571", "CALL :ack571", "CALL:ack571".
+// Mirrors the frontend messageKind regex so both sides classify identically.
+var ackPattern = regexp.MustCompile(`(?i)(?:^|[:\s])ack\d+\b`)
+
+// rejPattern matches reject text with the same structural variants as ackPattern.
+var rejPattern = regexp.MustCompile(`(?i)(?:^|[:\s])rej\d+\b`)
+
+// IsAckOrReject reports whether msg is a MeshCom ACK or reject control message.
+// These must not update conversation previews or unread counters.
+func IsAckOrReject(msg string) bool {
+	return ackPattern.MatchString(msg) || rejPattern.MatchString(msg)
+}
 
 type PacketType string
 

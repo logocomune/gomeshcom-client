@@ -116,6 +116,38 @@ func TestParsePacket_TypePreservedInJSON(t *testing.T) {
 	}
 }
 
+func TestIsAckOrReject(t *testing.T) {
+	tests := map[string]struct {
+		msg  string
+		want bool
+	}{
+		"bare ack":            {msg: "ack571", want: true},
+		"colon ack":           {msg: ":ack571", want: true},
+		"callsign space ack":  {msg: "QQ1ABC-1 :ack571", want: true},
+		"callsign colon ack":  {msg: "QQ1ABC-1:ack571", want: true},
+		"uppercase ACK":       {msg: "ACK42", want: true},
+		"bare rej":            {msg: "rej99", want: true},
+		"colon rej":           {msg: ":rej99", want: true},
+		"callsign space rej":  {msg: "QQ1ABC-1 :rej99", want: true},
+		"uppercase REJ":       {msg: "REJ7", want: true},
+		"plain text message":  {msg: "hello world", want: false},
+		"message with ack in word": {msg: "acknowledge receipt", want: false},
+		"ack followed by letters":  {msg: "ack123abc", want: false},
+		"rej followed by letters":  {msg: "CALL:rej42test", want: false},
+		"empty string":             {msg: "", want: false},
+		"time packet":              {msg: "{CET}2026-01-01 12:00:00", want: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := IsAckOrReject(tc.msg)
+			if got != tc.want {
+				t.Fatalf("IsAckOrReject(%q) = %v, want %v", tc.msg, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewOutgoingText(t *testing.T) {
 	tests := map[string]struct {
 		destination string

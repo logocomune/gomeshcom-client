@@ -18,7 +18,7 @@ import {
 	dmPeerFromId,
 	sanitizeConversationPart
 } from '$lib/api/chat';
-import { messageKind } from '$lib/api/events';
+import { messageKind, splitSourcePath } from '$lib/api/events';
 import { partitionChannels } from '$lib/api/groups';
 import { chatRecordMatchesFilter, stripNodeSequence } from '$lib/ui/chat-records';
 import { normalizeCallsign } from '$lib/ui/callsign';
@@ -314,30 +314,39 @@ class ChatStore {
 		this.removeMatchingPendingRecord(convId, rec);
 		this.appendChatRecordToConversation(convId, rec);
 
+		// ACK/reject packets must not update last_seen, preview text, or unread count;
+		// they are only stored in history for delivery tracking.
+		const recKind = messageKind(rec.msg).kind;
+		const isAckOrReject = recKind === 'ack' || recKind === 'reject';
+
 		const idx = this.conversations.findIndex((c) => c.id === convId);
 		if (idx === -1) {
-			let kind: Conversation['kind'] = 'broadcast';
-			let label = 'Broadcast';
-			if (dst !== '' && dst !== '*') {
-				if (/^\d+$/.test(dst)) {
-					kind = 'channel';
-					label = dst;
-				} else {
-					kind = 'dm';
-					label = dmPeerFromId(convId) || convId.replace(/^DM_/, '');
+			if (!isAckOrReject) {
+				let kind: Conversation['kind'] = 'broadcast';
+				let label = 'Broadcast';
+				if (dst !== '' && dst !== '*') {
+					if (/^\d+$/.test(dst)) {
+						kind = 'channel';
+						label = dst;
+					} else {
+						kind = 'dm';
+						label = dmPeerFromId(convId) || convId.replace(/^DM_/, '');
+					}
 				}
+				this.conversations = [
+					{ id: convId, kind, label, last_seen: receivedAt, size: 0 },
+					...this.conversations
+				];
 			}
-			this.conversations = [
-				{ id: convId, kind, label, last_seen: receivedAt, size: 0 },
-				...this.conversations
-			];
-		} else {
+		} else if (!isAckOrReject) {
 			this.conversations = this.conversations.map((c) =>
 				c.id === convId ? { ...c, last_seen: receivedAt } : c
 			);
 		}
 
-		this.updateChatStatusOnReceive(convId, receivedAt, rec.msg);
+		if (!isAckOrReject) {
+			this.updateChatStatusOnReceive(convId, receivedAt, rec.msg);
+		}
 	}
 
 	appendChatRecord(rec: ChatRecord) {
@@ -348,30 +357,34 @@ class ChatStore {
 		}
 		this.appendChatRecordToConversation(convId, { ...rec, source: 'event-live' });
 
+		const isAckOrRejectRecord = ['ack', 'reject'].includes(messageKind(rec.msg).kind);
+
 		const idx = this.conversations.findIndex((c) => c.id === convId);
 		if (idx === -1) {
-			this.conversations = [
-				{
-					id: convId,
-					kind: convId === 'P_broadcast' ? 'broadcast' : convId.startsWith('P_') ? 'channel' : 'dm',
-					label:
-						convId === 'P_broadcast'
-							? 'Broadcast'
-							: convId.startsWith('DM_')
-								? dmPeerFromId(convId) || convId.replace(/^DM_/, '')
-								: convId.replace(/^P_/, ''),
-					last_seen: rec.received_at,
-					size: 0
-				},
-				...this.conversations
-			];
-		} else {
+			if (!isAckOrRejectRecord) {
+				this.conversations = [
+					{
+						id: convId,
+						kind:
+							convId === 'P_broadcast' ? 'broadcast' : convId.startsWith('P_') ? 'channel' : 'dm',
+						label:
+							convId === 'P_broadcast'
+								? 'Broadcast'
+								: convId.startsWith('DM_')
+									? dmPeerFromId(convId) || convId.replace(/^DM_/, '')
+									: convId.replace(/^P_/, ''),
+						last_seen: rec.received_at,
+						size: 0
+					},
+					...this.conversations
+				];
+			}
+		} else if (!isAckOrRejectRecord) {
 			const copy = this.conversations.slice();
 			copy[idx] = { ...copy[idx], last_seen: rec.received_at };
 			this.conversations = copy.sort((a, b) => b.last_seen.localeCompare(a.last_seen));
 		}
-
-		if (rec.direction !== 'outbound' && rec.delivery_status !== 'pending') {
+		if (rec.direction !== 'outbound' && rec.delivery_status !== 'pending' && !isAckOrRejectRecord) {
 			this.updateChatStatusOnReceive(convId, rec.received_at, rec.msg);
 			if (convId.startsWith('DM_')) {
 				if (uiPrefs.dmSoundEnabled) {
@@ -380,6 +393,14 @@ class ChatStore {
 				if (uiPrefs.dmToastEnabled) {
 					const sender = dmPeerFromId(convId) || convId.replace(/^DM_/, '');
 					toastStore.addDm(sender);
+				}
+			} else if (convId.startsWith('P_') && uiPrefs.mentionToastEnabled) {
+				const myBase = baseCallFrom(connectionState.stationCallsign);
+				const escaped = myBase?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+				if (escaped && new RegExp(`@${escaped}(?![A-Z0-9])`, 'i').test(rec.msg)) {
+					const channel = convId.replace(/^P_/, '');
+					const sender = splitSourcePath(rec.src).origin;
+					toastStore.addMention(sender, channel);
 				}
 			}
 		}

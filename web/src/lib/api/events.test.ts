@@ -116,7 +116,7 @@ describe('event helpers', () => {
 	});
 
 	it('splits relay path and detects system messages', () => {
-		expect.assertions(12);
+		expect.assertions(16);
 
 		expect(splitSourcePath('QQ1XAR-32,QQ5AKT-10,QQ5CND-10')).toEqual({
 			origin: 'QQ1XAR-32',
@@ -138,6 +138,12 @@ describe('event helpers', () => {
 		expect(ackSeqId({ msg: 'QQ5PMP-1 :ack571' })).toBe('571');
 		expect(rejSeqId({ msg: 'IU5PMP-10:rej99' })).toBe('99');
 		expect(msgSeqId({ msg: 'hello {123}' })).toBe('123');
+		// regression: ack/rej with trailing alpha chars must NOT be classified as control messages
+		expect(messageKind('ack123abc').kind).toBe('message');
+		expect(messageKind('rej42test').kind).toBe('message');
+		// ackSeqId/rejSeqId must be consistent: trailing alpha → null, not a spurious seq ID
+		expect(ackSeqId({ msg: 'ack123abc' })).toBeNull();
+		expect(rejSeqId({ msg: 'rej42test' })).toBeNull();
 	});
 
 	it('extracts latest map positions from events', () => {

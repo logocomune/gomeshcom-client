@@ -4,6 +4,7 @@ type UiPrefs = {
 	soundEnabled: boolean;
 	dmSoundEnabled: boolean;
 	dmToastEnabled: boolean;
+	mentionToastEnabled: boolean;
 	compactMode: boolean;
 	timestampFormat: 'relative' | 'absolute';
 	showPacketCounter: boolean;
@@ -13,6 +14,7 @@ const defaults: UiPrefs = {
 	soundEnabled: true,
 	dmSoundEnabled: true,
 	dmToastEnabled: true,
+	mentionToastEnabled: true,
 	compactMode: false,
 	timestampFormat: 'absolute',
 	showPacketCounter: true
@@ -33,6 +35,7 @@ class UiPrefsStore {
 	soundEnabled = $state(defaults.soundEnabled);
 	dmSoundEnabled = $state(defaults.dmSoundEnabled);
 	dmToastEnabled = $state(defaults.dmToastEnabled);
+	mentionToastEnabled = $state(defaults.mentionToastEnabled);
 	compactMode = $state(defaults.compactMode);
 	timestampFormat = $state<UiPrefs['timestampFormat']>(defaults.timestampFormat);
 	showPacketCounter = $state(defaults.showPacketCounter);
@@ -42,6 +45,7 @@ class UiPrefsStore {
 		this.soundEnabled = saved.soundEnabled;
 		this.dmSoundEnabled = saved.dmSoundEnabled;
 		this.dmToastEnabled = saved.dmToastEnabled;
+		this.mentionToastEnabled = saved.mentionToastEnabled;
 		this.compactMode = saved.compactMode;
 		this.timestampFormat = saved.timestampFormat;
 		this.showPacketCounter = saved.showPacketCounter;
@@ -53,6 +57,7 @@ class UiPrefsStore {
 			soundEnabled: this.soundEnabled,
 			dmSoundEnabled: this.dmSoundEnabled,
 			dmToastEnabled: this.dmToastEnabled,
+			mentionToastEnabled: this.mentionToastEnabled,
 			compactMode: this.compactMode,
 			timestampFormat: this.timestampFormat,
 			showPacketCounter: this.showPacketCounter
@@ -64,6 +69,7 @@ class UiPrefsStore {
 		this.soundEnabled = defaults.soundEnabled;
 		this.dmSoundEnabled = defaults.dmSoundEnabled;
 		this.dmToastEnabled = defaults.dmToastEnabled;
+		this.mentionToastEnabled = defaults.mentionToastEnabled;
 		this.compactMode = defaults.compactMode;
 		this.timestampFormat = defaults.timestampFormat;
 		this.showPacketCounter = defaults.showPacketCounter;

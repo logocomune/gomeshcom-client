@@ -685,3 +685,38 @@ func TestLogChatMessageSelfEchoViaPathSkipsChatStatus(t *testing.T) {
 		t.Fatalf("self-echo via relay must not call RecordIncoming, got %d calls", spy.count())
 	}
 }
+
+func TestLogChatMessageAckSkipsChatStatus(t *testing.T) {
+	tests := map[string]string{
+		"bare ack":           "ack571",
+		"colon ack":          ":ack571",
+		"callsign colon ack": "QQ1ABC-1:ack571",
+		"bare rej":           "rej99",
+	}
+
+	for name, msg := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			chatDir := filepath.Join(dir, "chat")
+			bus := events.NewBus()
+			spy := &spyChatStatus{}
+
+			bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, staticCallsign("QQ0QQ-1")), nil, false, nil, staticCallsign("QQ0QQ-1"), spy)
+
+			raw := `{"type":"msg","src":"QQ1ABC-1","dst":"QQ0QQ-1","msg":"` + msg + `"}`
+			bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
+
+			if spy.count() != 0 {
+				t.Fatalf("ACK/reject packet must not call RecordIncoming, got %d calls", spy.count())
+			}
+
+			// ACK/reject must still be persisted to chat history so the UI can
+			// render delivery confirmations. The DM log file is keyed by the
+			// basecall of myCall and the peer callsign.
+			chatRecord := readChatRecord(t, filepath.Join(chatDir, "DM_QQ0QQ_QQ1ABC-1.jsonl"))
+			if chatRecord.Msg != msg {
+				t.Fatalf("chat log msg = %q, want %q", chatRecord.Msg, msg)
+			}
+		})
+	}
+}

@@ -185,7 +185,7 @@ func (b *Bridge) logChatMessage(msg meshcom.TextMessage, receivedAt time.Time) {
 	if err := b.chatLog.Append(msg, receivedAt); err != nil {
 		slog.Error("chat log write failed", "error", err)
 	}
-	if b.chatStatus != nil {
+	if b.chatStatus != nil && !meshcom.IsAckOrReject(msg.Message) {
 		myCall := b.myCall()
 		origin := strings.ToUpper(strings.SplitN(msg.Source, ",", 2)[0])
 		// Skip our own echoes: compare by basecall so device-switch echoes are
