@@ -4,21 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-17
+
 ### Added
 
 - **Tests for `ChatStore` and `ToastStore`**: added unit tests covering `appendLiveChatRecord` (broadcast, channel, DM routing, deduplication, pending removal, ACK suppression), `appendChatRecord` (DM/mention toast and sound triggers, outbound/pending suppression, failed delivery cleanup), and `ToastStore` (`addDm`, `addMention`, `dismiss`, auto-dismiss timer).
-
-### Fixed
-
-- **Mention toast now has its own independent setting**: `dmToastEnabled` previously also gated `@mention` toasts in channels; split into `dmToastEnabled` (DM banners) and `mentionToastEnabled` (channel @mention banners), each with its own toggle in Settings → Notifications.
-
-- **ACK/reject regex no longer matches embedded tokens**: strings like `ack123abc` or `CALL:rej42test` are no longer classified as control messages — added `\b` word-boundary after `\d+` in both patterns.
-
-- **DM list preview no longer shows ACK text**: incoming ACK/reject packets are now excluded from the conversation-list "last message" preview and do not increment the unread counter — both on the server (`chatstatus.RecordIncoming` skipped via `meshcom.IsAckOrReject`) and on the client (`appendLiveChatRecord`, `appendChatRecord`, and `latestPreview`). ACK/reject records are still stored in history for delivery tracking and remain hidden in the thread view as before.
-
-## [0.10.0]
-
-### Added
 
 - **Demo mode** (`demo_mode = false` top-level TOML, env `GOMESHCOM_DEMO_MODE`): when enabled, TX is disabled and the config API (`GET /api/config`, `PUT /api/config`) returns HTTP 403. The settings page shows a "Demo mode active" banner instead of the form. Replaces the former `[send] disable_tx` option.
 
@@ -109,6 +99,12 @@ All notable changes to this project are documented in this file.
 > **Planned removal**: `internal/legacymigrate` is a temporary migration aid. Delete it (and its call in `cmd/gomeshcomd/main.go`) in a future release after the migration window has closed.
 
 ### Fixed
+
+- **Mention toast now has its own independent setting**: `dmToastEnabled` previously also gated `@mention` toasts in channels; split into `dmToastEnabled` (DM banners) and `mentionToastEnabled` (channel @mention banners), each with its own toggle in Settings → Notifications.
+
+- **ACK/reject regex no longer matches embedded tokens**: strings like `ack123abc` or `CALL:rej42test` are no longer classified as control messages — added `\b` word-boundary after `\d+` in both patterns.
+
+- **DM list preview no longer shows ACK text**: incoming ACK/reject packets are now excluded from the conversation-list "last message" preview and do not increment the unread counter — both on the server (`chatstatus.RecordIncoming` skipped via `meshcom.IsAckOrReject`) and on the client (`appendLiveChatRecord`, `appendChatRecord`, and `latestPreview`). ACK/reject records are still stored in history for delivery tracking and remain hidden in the thread view as before.
 
 - **Chat/DM list preview not updating after sending a message**: the last-message preview in the conversation list now correctly shows the most recently sent message. Previously, once a message had been received on a conversation, the preview was locked to the last *received* message and ignored any subsequent sent messages.
 
