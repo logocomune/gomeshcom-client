@@ -1,69 +1,29 @@
 # Statistics
 
-The Statistics page (`/statistics`) shows aggregated packet traffic heard by the local node.
+The Statistics page (`/statistics`) shows hourly packet traffic received by the local node.
 
-## Data model
+## Storage
 
-All hourly buckets are stored in a single file:
+Runtime statistics live in SQLite, in hourly UTC buckets. When a database is created from an existing installation, `data/stats/stats.json` is imported once. The JSON file is not updated afterwards.
 
-```
-data/stats/stats.json
-```
+Each bucket records received direct messages, delivered DM acknowledgements, public messages, telemetry, positions, parse errors, totals, channel counters, and five-kilometre distance buckets.
 
-The file is a JSON object keyed by UTC-hour Unix timestamp. Example:
-
-```json
-{
-  "1748692800": {
-    "hour": 1748692800,
-    "dm": 3,
-    "dm_ack": 2,
-    "public": 17,
-    "telemetry": 8,
-    "position": 5,
-    "errors": 0,
-    "total": 33,
-    "distance_km": { "0-5": 2, "5-10": 1, "45-50": 1 }
-  },
-  "1748696400": { "hour": 1748696400, "dm": 1, ... }
-}
-```
-
-| Field | Meaning |
-|---|---|
-| `hour` | Unix timestamp (UTC), truncated to the hour |
-| `dm` | Received DM text messages |
-| `dm_ack` | Outgoing DM messages confirmed delivered (echo matched) |
-| `public` | Broadcast / channel text messages |
-| `telemetry` | Telemetry packets |
-| `position` | Position packets |
-| `errors` | UDP datagrams that failed to parse |
-| `total` | `dm + public + telemetry + position` (errors excluded) |
-| `distance_km` | Count of position packets bucketed in 5 km bins from own station |
-
-## Cleanup / retention
-
-On every periodic flush (every minute), buckets older than `GOMESHCOM_STATS_RETENTION_DAYS` (default `30`) are removed from the in-memory map and the file is rewritten. Set to `0` for infinite retention.
-
-## Distance histogram
-
-Computed using the Haversine great-circle distance between the sender's last reported position and the own station's position. The own station is the active runtime callsign, initially loaded from `GOMESHCOM_MY_CALL` or the persisted `data/configs/station.json` value. If the own station has no known position, the distance field is omitted and the histogram is empty.
-
-Bucket width: 5 km. Bins above 100 km are merged into `100+`.
+`total` contains DM, public, telemetry, and position packets; parse errors are tracked separately.
 
 ## API
 
-```
+```text
 GET /api/stats?hours=N
 ```
 
-- `hours` — time window (default `24`, max `720`).
-- Returns `{ from, to, hours, buckets: Bucket[] }` sorted by hour ascending.
+`hours` defaults to `24` and is capped at `720`. The response contains UTC buckets in ascending order.
 
-## Configuration
+`GET /api/stats/dm` returns cumulative sent and acknowledged direct-message counters by destination callsign. A destination with a numeric SSID contributes to both its full callsign and base callsign totals.
 
-| Env var | Default | Description |
-|---|---|---|
-| `GOMESHCOM_STATS_ENABLED` | `true` | Enable/disable stats collection |
-| `GOMESHCOM_STATS_PATH` | `./data/stats/stats.json` | Path to the stats JSON file |
-| `GOMESHCOM_STATS_RETENTION_DAYS` | `30` | Days of hourly buckets to retain |
+## Retention
+
+`GOMESHCOM_STORAGE_PURGE_INTERVAL` controls maintenance frequency. `GOMESHCOM_STORAGE_TELEMETRY_RETENTION` controls telemetry storage, while `GOMESHCOM_STORAGE_PUBLIC_CHAT_RETENTION`, `GOMESHCOM_STORAGE_RECEIVE_LOG_RETENTION`, and `GOMESHCOM_STORAGE_NODES_RETENTION` control their respective datasets. Statistics are retained with the SQLite database unless explicitly removed by an operator.
+
+## Distance Buckets
+
+Distance uses the Haversine great-circle distance between a sender position and the active station position. Buckets are five kilometres wide; distances above 100 km are grouped into `100+`. No distance is recorded until the active station has a known position.

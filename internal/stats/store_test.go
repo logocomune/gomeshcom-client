@@ -3,8 +3,6 @@ package stats
 import (
 	"encoding/json"
 	"math/rand"
-	"os"
-	"path/filepath"
 	"sort"
 	"testing"
 	"testing/quick"
@@ -112,31 +110,12 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	// Verify file exists and contains expected JSON.
-	data, err := os.ReadFile(store.path)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	var raw map[int64]*Bucket
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	key := hourKey(now)
-	b, ok := raw[key]
-	if !ok {
-		t.Fatal("bucket missing from JSON file")
-	}
-	if b.DM != 1 || b.Public != 1 || b.Position != 1 || b.DMAck != 1 {
-		t.Errorf("unexpected counts: %+v", b)
-	}
-
-	// Load into fresh store and verify.
-	store2 := New(Config{Path: store.path, RetentionDays: 30})
+	store2 := NewSQLite(store.db, Config{RetentionDays: 30})
 	if err := store2.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	store2.mu.Lock()
-	loaded := store2.buckets[key]
+	loaded := store2.buckets[hourKey(now)]
 	store2.mu.Unlock()
 	if loaded == nil {
 		t.Fatal("bucket not loaded")
@@ -239,6 +218,5 @@ func TestReadRange(t *testing.T) {
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "stats.json")
-	return New(Config{Path: path, RetentionDays: 3})
+	return NewSQLite(openStatsTestDB(t), Config{RetentionDays: 3})
 }

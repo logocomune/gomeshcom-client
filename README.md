@@ -21,6 +21,10 @@ If this is your first network setup, follow the step-by-step guide first:
 
 - [First Setup](docs/first-setup.md)
 
+## Documentation
+
+Browse current setup, feature, operational, and MeshCom reference material in [docs/README.md](docs/README.md).
+
 ### Binary
 
 ```bash
@@ -135,6 +139,11 @@ All options are available via environment variable or CLI flag using the `GOMESH
 | `GOMESHCOM_RECEIVE_LOG_REPLAY_WINDOW` | `1h` | Packets replayed on SSE reconnect |
 | `GOMESHCOM_CHAT_LOG_HISTORY_WINDOW` | `24h` | Default chat history window |
 | `GOMESHCOM_CHAT_LOG_MAX_HISTORY_WINDOW` | `720h` | Maximum chat history via API |
+| `GOMESHCOM_STORAGE_PURGE_INTERVAL` | `4h` | Interval between SQLite purge runs |
+| `GOMESHCOM_STORAGE_RECEIVE_LOG_RETENTION` | `720h` | SQLite receive-log row retention (`30d` in TOML) |
+| `GOMESHCOM_STORAGE_PUBLIC_CHAT_RETENTION` | `720h` | SQLite public-chat row retention (`30d` in TOML) |
+| `GOMESHCOM_STORAGE_NODES_RETENTION` | `168h` | SQLite node retention based on `lastseen` (`7d` in TOML) |
+| `GOMESHCOM_STORAGE_TELEMETRY_RETENTION` | `720h` | SQLite telemetry row retention (`30d` in TOML) |
 | `GOMESHCOM_SEND_DEDUP_TTL` | `2s` | Duplicate suppression window; `0` disables it |
 | `GOMESHCOM_AUTH_USERNAME` | *(empty)* | Optional HTTP auth username. Must be set together with `GOMESHCOM_AUTH_PASSWORD`. |
 | `GOMESHCOM_AUTH_PASSWORD` | *(empty)* | Optional HTTP auth password. Must be set together with `GOMESHCOM_AUTH_USERNAME`. |

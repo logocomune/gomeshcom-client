@@ -4,15 +4,14 @@
 // counter is split into a full entry (e.g. "CALL-1") and a base entry
 // (e.g. "CALL"). Latency (ms from send to ack) is accumulated only on the
 // full entry; the base entry tracks only sent/ack counts.
-// Counters are cumulative (not bucketed by time) and persisted to a JSON file.
+// Counters are cumulative (not bucketed by time) and persisted to SQLite.
 package dmstats
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,42 +37,21 @@ type Entry struct {
 // a single JSON file.
 type Store struct {
 	mu      sync.Mutex
-	path    string
+	db      *sql.DB
 	entries map[string]*Entry // keyed by uppercase callsign (full or base)
 	dirty   bool
 }
 
-// New constructs a Store. Call Load to restore persisted data, then Start to
-// begin periodic flushing.
-func New(path string) *Store {
+func NewSQLite(db *sql.DB) *Store {
 	return &Store{
-		path:    path,
+		db:      db,
 		entries: make(map[string]*Entry),
 	}
 }
 
-// Load reads the store file into memory. A missing file is not an error.
+// Load reads the SQLite store into memory.
 func (s *Store) Load() error {
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read dm stats file: %w", err)
-	}
-
-	var raw map[string]*Entry
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("unmarshal dm stats file: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for k, v := range raw {
-		s.entries[k] = v
-	}
-	return nil
+	return s.loadSQLite()
 }
 
 // Start runs the periodic flush loop until ctx is cancelled, then performs a
@@ -173,24 +151,54 @@ func (s *Store) save() error {
 	s.dirty = false
 	s.mu.Unlock()
 
-	return writeFileAtomically(s.path, snap)
+	return writeSQLite(s.db, snap)
 }
 
-func writeFileAtomically(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create dmstats dir: %w", err)
-	}
-	data, err := json.Marshal(v)
+func (s *Store) loadSQLite() error {
+	rows, err := s.db.Query(`SELECT callsign, sent, ack FROM dm_stats`)
 	if err != nil {
-		return fmt.Errorf("marshal dmstats: %w", err)
+		return fmt.Errorf("query dm stats: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("write dmstats tmp: %w", err)
+	defer rows.Close()
+
+	entries := make(map[string]*Entry)
+	for rows.Next() {
+		var callsign string
+		entry := &Entry{}
+		if err := rows.Scan(&callsign, &entry.Sent, &entry.Ack); err != nil {
+			return fmt.Errorf("scan dm stats: %w", err)
+		}
+		entries[callsign] = entry
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename dmstats file: %w", err)
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate dm stats: %w", err)
+	}
+
+	s.mu.Lock()
+	s.entries = entries
+	s.dirty = false
+	s.mu.Unlock()
+	return nil
+}
+
+func writeSQLite(db *sql.DB, entries map[string]*Entry) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin dm stats save: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM dm_stats`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("clear dm stats: %w", err)
+	}
+	for callsign, entry := range entries {
+		_, err := tx.Exec(`INSERT INTO dm_stats(callsign, sent, ack) VALUES (?, ?, ?)`, callsign, entry.Sent, entry.Ack)
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("save dm stats %s: %w", callsign, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit dm stats save: %w", err)
 	}
 	return nil
 }

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: gomeshcomd API
-  version: 0.6.0
+  version: 0.10.0
   description: |
     HTTP and Server-Sent Events API exposed by gomeshcomd.
     Static frontend routes are served by the same HTTP listener but are not
@@ -25,15 +25,18 @@ tags:
   - name: Channels
     description: Frontend channel visibility preferences
   - name: Chat
-    description: Disk-backed chat history
+    description: SQLite-backed chat history and read state
   - name: Stats
     description: Hourly packet statistics
   - name: Config
     description: Runtime daemon configuration (read and partial update)
   - name: Admin
     description: Daemon lifecycle control (restart, shutdown)
+security:
+  - sessionCookie: []
 paths:
   /api/session:
+    security: []
     get:
       tags: [Session]
       summary: Return authentication status
@@ -139,6 +142,7 @@ paths:
               schema:
                 type: string
   /api/health:
+    security: []
     get:
       tags: [Health]
       summary: Return service health
@@ -353,7 +357,7 @@ paths:
                 value: ["*", "222"]
       responses:
         "200":
-          description: Normalized preference stored in memory and persisted on the next periodic save.
+          description: Normalized preference stored in SQLite.
           content:
             application/json:
               schema:
@@ -412,7 +416,7 @@ paths:
         Replaces the active station callsign without restarting the daemon.
         The new value is normalized (trim + uppercase), validated against the
         pattern `^[A-Z0-9]{3,10}(?:-[0-9]{1,2})?$`, and persisted synchronously
-        to `data/configs/station.json` before responding.
+        to SQLite before responding.
 
         On success the backend publishes a `station.identity` SSE event so all
         connected clients update immediately. DM file routing, echo suppression,
@@ -559,10 +563,8 @@ paths:
       tags: [Chat]
       summary: Delete chat history for one conversation
       description: |
-        Removes the conversation JSONL file from disk. Also removes the
-        corresponding entry from the in-memory chat status store and immediately
-        persists `msg_idx.json`, so the conversation does not reappear as
-        unread after a restart.
+        Removes the conversation from SQLite, including its read marker, so it
+        cannot reappear with stale unread state after a restart.
       operationId: deleteConversation
       parameters:
         - name: conversation
@@ -697,9 +699,8 @@ paths:
       tags: [Stats]
       summary: Return per-callsign DM delivery statistics
       description: |
-        Returns a map of callsign → `{sent, ack}` counters accumulated since
-        daemon start (persisted across restarts if the DM stats store is
-        configured). Returns an empty object when the store is not configured.
+        Returns a map of callsign → `{sent, ack}` counters stored in SQLite.
+        Returns an empty object when the DM statistics store is not configured.
       operationId: listDMStats
       responses:
         "200":
@@ -761,8 +762,9 @@ paths:
       summary: Partially update the daemon configuration
       description: |
         Merges the supplied fields onto the current effective configuration.
-        Omitted fields are left unchanged. Duration values are Go duration
-        strings (e.g. `"40s"`, `"2h"`).
+        Omitted fields are left unchanged. Duration values use Go duration
+        strings (e.g. `"40s"`, `"2h"`); storage purge durations also accept
+        day suffixes such as `"30d"`.
 
         Fields currently managed by environment variables cannot be changed via
         this endpoint and return `409`. Fields that require a daemon restart are
@@ -1025,12 +1027,21 @@ components:
         src_type:
           type: string
           enum: [lora, udp, node]
+        via:
+          type: array
+          description: Relay callsigns between origin and local node.
+          items:
+            type: string
         dst:
           type: string
           example: "*"
         msg_id:
           type: string
           example: 5DFC7187
+        sequence_id:
+          type: string
+          description: MeshCom outbound DM sequence identifier.
+          example: "1234"
         msg:
           type: string
           example: hello
@@ -1048,6 +1059,25 @@ components:
           type: string
           enum: [failed]
           example: failed
+        ack_status:
+          type: string
+          enum: [ack, rej]
+        ack_received_at:
+          type: string
+          format: date-time
+        ack_src:
+          type: string
+        ack_src_type:
+          type: string
+          enum: [lora, udp, node]
+        ack_rssi:
+          type: integer
+        ack_snr:
+          type: integer
+        ack_via:
+          type: array
+          items:
+            type: string
     TextMessage:
       type: object
       required: [type, msg]
@@ -1131,7 +1161,7 @@ components:
         mode:
           type: string
           enum: [all, allowlist]
-          description: `all` shows every channel; `allowlist` shows only entries in `channels`.
+          description: "`all` shows every channel; `allowlist` shows only entries in `channels`."
           example: allowlist
         channels:
           type: array
@@ -1270,7 +1300,7 @@ components:
         lastRead:
           type: string
           format: date-time
-          description: Timestamp of the last `POST /api/chat/{conversation}/read` call. Zero value if never read.
+          description: Timestamp of the current SQLite read marker. Zero value if never read.
           example: "2026-05-24T09:55:00Z"
         unreadCount:
           type: integer
@@ -1284,7 +1314,7 @@ components:
     ChatStatusSnapshotEvent:
       type: object
       description: |
-        Map keyed by conversation ID (`P_broadcast`, `P_<channel>`, `DM_<CALLSIGN>`)
+        Map keyed by conversation ID (`P_broadcast`, `P_<channel>`, `DM_<mycall>_<peer>`)
         with the current read/unread state for each thread.
         Emitted as the `chatstatus.snapshot` SSE event on every new `/api/events` connection.
       additionalProperties:
@@ -1498,6 +1528,23 @@ components:
         enabled:
           $ref: "#/components/schemas/ConfigFieldMeta"
 
+    ConfigStorageSection:
+      type: object
+      required: [sqlite_path, purge_interval, receive_log_retention, public_chat_retention, nodes_retention, telemetry_retention]
+      properties:
+        sqlite_path:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        purge_interval:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        receive_log_retention:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        public_chat_retention:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        nodes_retention:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        telemetry_retention:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
     ConfigResponse:
       type: object
       required:
@@ -1516,6 +1563,7 @@ components:
         - forward
         - auth
         - request_log
+        - storage
       properties:
         server:
           $ref: "#/components/schemas/ConfigServerInfo"
@@ -1547,6 +1595,8 @@ components:
           $ref: "#/components/schemas/ConfigAuthSection"
         request_log:
           $ref: "#/components/schemas/ConfigRequestLogSection"
+        storage:
+          $ref: "#/components/schemas/ConfigStorageSection"
 
     ConfigUpdateReceiveLog:
       type: object
@@ -1623,11 +1673,39 @@ components:
         enabled:
           type: boolean
 
+    ConfigUpdateStorage:
+      type: object
+      properties:
+        sqlite_path:
+          type: string
+          example: "./data/gomeshcom.db"
+        purge_interval:
+          type: string
+          description: Duration string. TOML/API accept day suffixes such as `"30d"` in addition to Go duration strings.
+          example: "4h"
+        receive_log_retention:
+          type: string
+          description: Duration string. TOML/API accept day suffixes such as `"30d"` in addition to Go duration strings.
+          example: "30d"
+        public_chat_retention:
+          type: string
+          description: Duration string. TOML/API accept day suffixes such as `"30d"` in addition to Go duration strings.
+          example: "30d"
+        nodes_retention:
+          type: string
+          description: Duration string. TOML/API accept day suffixes such as `"7d"` in addition to Go duration strings.
+          example: "7d"
+        telemetry_retention:
+          type: string
+          description: Duration string. TOML/API accept day suffixes such as `"30d"` in addition to Go duration strings.
+          example: "30d"
+
     ConfigUpdateRequest:
       type: object
       description: |
         Partial configuration update. Omitted fields are left unchanged.
         Duration values are Go duration strings (e.g. `"40s"`, `"2h"`).
+        Storage purge durations also accept day suffixes such as `"30d"`.
         Fields managed by environment variables return `409` if present.
       properties:
         http_addr:
@@ -1663,6 +1741,8 @@ components:
           $ref: "#/components/schemas/ConfigUpdateAuth"
         request_log:
           $ref: "#/components/schemas/ConfigUpdateRequestLog"
+        storage:
+          $ref: "#/components/schemas/ConfigUpdateStorage"
 
     ConfigUpdateResponse:
       type: object
@@ -1683,3 +1763,11 @@ components:
           type: string
           enum: [restarting, "shutting down"]
           example: restarting
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: meshcom_session
+      description: |
+        HTTP-only session cookie created by `POST /api/session`. Its actual
+        name is configured by `GOMESHCOM_AUTH_COOKIE_NAME`.

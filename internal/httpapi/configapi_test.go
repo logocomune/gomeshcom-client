@@ -42,6 +42,14 @@ func fullTestConfig() config.Config {
 		Send:       config.Send{DedupTTL: 2 * time.Second},
 		Auth:       config.Auth{SessionTTL: 24 * time.Hour, CookieName: "meshcom_session"},
 		RequestLog: config.RequestLog{Enabled: false},
+		Storage: config.Storage{
+			SQLitePath:          "./data/gomeshcom.db",
+			PurgeInterval:       4 * time.Hour,
+			ReceiveLogRetention: 30 * 24 * time.Hour,
+			PublicChatRetention: 30 * 24 * time.Hour,
+			NodesRetention:      7 * 24 * time.Hour,
+			TelemetryRetention:  30 * 24 * time.Hour,
+		},
 	}
 }
 
@@ -101,6 +109,37 @@ func TestBuildConfigResponseRequiresRestartFlag(t *testing.T) {
 	}
 }
 
+func TestBuildConfigResponseIncludesStoragePurgeFields(t *testing.T) {
+	cfg := fullTestConfig()
+	env := config.EnvOverrides{"STORAGE_SQLITE_PATH": true, "STORAGE_NODES_RETENTION": true, "STORAGE_TELEMETRY_RETENTION": true}
+	resp := buildConfigResponse(cfg, env, "", time.Time{})
+
+	if resp.Storage.SQLitePath.Value != "./data/gomeshcom.db" {
+		t.Fatalf("storage.sqlite_path.value = %v, want ./data/gomeshcom.db", resp.Storage.SQLitePath.Value)
+	}
+	if !resp.Storage.SQLitePath.EnvOverride {
+		t.Fatal("storage.sqlite_path.env_override = false, want true")
+	}
+	if !resp.Storage.SQLitePath.RequiresRestart {
+		t.Fatal("storage.sqlite_path.requires_restart = false, want true")
+	}
+	if resp.Storage.PurgeInterval.Value != "4h0m0s" {
+		t.Fatalf("storage.purge_interval.value = %v, want 4h0m0s", resp.Storage.PurgeInterval.Value)
+	}
+	if resp.Storage.ReceiveLogRetention.Value != "720h0m0s" {
+		t.Fatalf("storage.receive_log_retention.value = %v, want 720h0m0s", resp.Storage.ReceiveLogRetention.Value)
+	}
+	if !resp.Storage.NodesRetention.EnvOverride {
+		t.Fatal("storage.nodes_retention.env_override = false, want true")
+	}
+	if resp.Storage.TelemetryRetention.Value != "720h0m0s" {
+		t.Fatalf("storage.telemetry_retention.value = %v, want 720h0m0s", resp.Storage.TelemetryRetention.Value)
+	}
+	if !resp.Storage.TelemetryRetention.EnvOverride {
+		t.Fatal("storage.telemetry_retention.env_override = false, want true")
+	}
+}
+
 // -------- GET /api/config (HTTP, no auth) --------
 
 func TestGetConfigHTTPReturnsOK(t *testing.T) {
@@ -147,6 +186,70 @@ func TestUpdateConfigPersistsToToml(t *testing.T) {
 	content := string(data)
 	if !contains(content, `log_level = "debug"`) {
 		t.Errorf("expected log_level = \"debug\" in TOML; got:\n%s", content)
+	}
+}
+
+func TestUpdateConfigStoragePathRequiresRestart(t *testing.T) {
+	cfg := fullTestConfig()
+	server := configTestServer(cfg, config.EnvOverrides{}, "")
+
+	body, _ := json.Marshal(map[string]any{"storage": map[string]any{"sqlite_path": "./data/other.db"}})
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if server.cfg.Storage.SQLitePath != "./data/other.db" {
+		t.Fatalf("Storage.SQLitePath = %q, want ./data/other.db", server.cfg.Storage.SQLitePath)
+	}
+
+	var resp struct {
+		RequiresRestart bool `json:"requires_restart"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.RequiresRestart {
+		t.Fatal("requires_restart = false, want true")
+	}
+}
+
+func TestUpdateConfigStoragePurgeDurations(t *testing.T) {
+	cfg := fullTestConfig()
+	server := configTestServer(cfg, config.EnvOverrides{}, "")
+
+	body, _ := json.Marshal(map[string]any{"storage": map[string]any{
+		"purge_interval":        "2h",
+		"receive_log_retention": "14d",
+		"public_chat_retention": "10d",
+		"nodes_retention":       "3d",
+		"telemetry_retention":   "21d",
+	}})
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if server.cfg.Storage.PurgeInterval != 2*time.Hour {
+		t.Fatalf("Storage.PurgeInterval = %s, want 2h", server.cfg.Storage.PurgeInterval)
+	}
+	if server.cfg.Storage.ReceiveLogRetention != 14*24*time.Hour {
+		t.Fatalf("Storage.ReceiveLogRetention = %s, want 14d", server.cfg.Storage.ReceiveLogRetention)
+	}
+	if server.cfg.Storage.PublicChatRetention != 10*24*time.Hour {
+		t.Fatalf("Storage.PublicChatRetention = %s, want 10d", server.cfg.Storage.PublicChatRetention)
+	}
+	if server.cfg.Storage.NodesRetention != 3*24*time.Hour {
+		t.Fatalf("Storage.NodesRetention = %s, want 3d", server.cfg.Storage.NodesRetention)
+	}
+	if server.cfg.Storage.TelemetryRetention != 21*24*time.Hour {
+		t.Fatalf("Storage.TelemetryRetention = %s, want 21d", server.cfg.Storage.TelemetryRetention)
 	}
 }
 

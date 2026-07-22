@@ -17,7 +17,11 @@ export function formatChatTimestamp(value: string): string {
 		d.getFullYear() === now.getFullYear() &&
 		d.getMonth() === now.getMonth() &&
 		d.getDate() === now.getDate();
-	const time = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+	const time = d.toLocaleTimeString('it-IT', {
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit'
+	});
 	if (sameDay) return time;
 	const date = d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
 	return `${date} ${time}`;
@@ -29,4 +33,8 @@ export function formatRtt(ms: number): string {
 	const sec = Math.round(ms / 1000);
 	if (sec < 60) return `${sec}s`;
 	return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+}
+
+export function formatAltitude(feet: number): string {
+	return `${Math.round(feet * 0.3048)} m`;
 }

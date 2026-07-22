@@ -2,9 +2,6 @@ package positions
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -15,7 +12,7 @@ import (
 func intPtr(value int) *int { return &value }
 
 func TestStoreUpdatesPositionByOriginCallsign(t *testing.T) {
-	store := New(filepath.Join(t.TempDir(), "positions.json"))
+	store := NewSQLite(openPositionsTestDB(t, context.Background()))
 	firstSeen := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	lastSeen := firstSeen.Add(time.Minute)
 
@@ -60,9 +57,9 @@ func TestStoreUpdatesPositionByOriginCallsign(t *testing.T) {
 }
 
 func TestStoreSaveAndLoad(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nodes", "positions.json")
+	db := openPositionsTestDB(t, context.Background())
 	seenAt := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
-	store := New(path)
+	store := NewSQLite(db)
 
 	store.Update(meshcom.Position{
 		Source:     "QQ1ABC-1",
@@ -78,81 +75,44 @@ func TestStoreSaveAndLoad(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read positions file: %v", err)
-	}
-	var raw map[string]Record
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("unmarshal positions file: %v", err)
-	}
-	if _, ok := raw["QQ1ABC-1"]; !ok {
-		t.Fatalf("saved keys = %v, want QQ1ABC-1", raw)
-	}
-	if raw["QQ1ABC-1"].LastDirectSeen == nil || !raw["QQ1ABC-1"].LastDirectSeen.Equal(seenAt) {
-		t.Fatalf("saved lastdirectseen = %v, want %v", raw["QQ1ABC-1"].LastDirectSeen, seenAt)
-	}
-
-	loaded := New(path)
+	loaded := NewSQLite(db)
 	if err := loaded.Load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
-	if got := loaded.Snapshot()["QQ1ABC-1"]; !recordsEqual(got, raw["QQ1ABC-1"]) {
-		t.Fatalf("loaded = %+v, want %+v", got, raw["QQ1ABC-1"])
+	got := loaded.Snapshot()["QQ1ABC-1"]
+	if got.LastDirectSeen == nil || !got.LastDirectSeen.Equal(seenAt) {
+		t.Fatalf("loaded lastdirectseen = %v, want %v", got.LastDirectSeen, seenAt)
+	}
+	if got.Latitude != 48.1 || got.Longitude != 16.3 || got.HardwareID != "TLORA_V2" {
+		t.Fatalf("loaded = %+v", got)
 	}
 }
 
-func TestStoreLoadErrors(t *testing.T) {
-	dir := t.TempDir()
-
-	// Corrupt JSON
-	path1 := filepath.Join(dir, "corrupt.json")
-	os.WriteFile(path1, []byte("{"), 0644)
-	s1 := New(path1)
-	if err := s1.Load(); err == nil {
-		t.Error("load corrupt json: want error, got nil")
-	}
-
-	// Missing file is NOT an error
-	path2 := filepath.Join(dir, "missing.json")
-	s2 := New(path2)
-	if err := s2.Load(); err != nil {
-		t.Errorf("load missing file: want nil, got %v", err)
-	}
-}
-
-func TestStoreSaveIfDirtyNoop(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "positions.json")
-	store := New(path)
-
-	if err := store.SaveIfDirty(); err != nil {
-		t.Errorf("SaveIfDirty empty: %v", err)
-	}
-
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error("SaveIfDirty empty created file")
+func TestStoreLoadEmptyDB(t *testing.T) {
+	store := NewSQLite(openPositionsTestDB(t, context.Background()))
+	if err := store.Load(); err != nil {
+		t.Errorf("load empty db: want nil, got %v", err)
 	}
 }
 
 func TestStoreStart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "positions.json")
-	store := New(path)
+	db := openPositionsTestDB(t, context.Background())
+	store := NewSQLite(db)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	go store.Start(ctx)
 
 	store.Update(meshcom.Position{Source: "QQ0QQ-1"}, time.Now())
-
-	cancel() // Should trigger save on shutdown
-
-	// Wait a bit for save to complete
+	cancel()
 	time.Sleep(50 * time.Millisecond)
 
-	if _, err := os.Stat(path); err != nil {
-		t.Errorf("file not saved on context cancel: %v", err)
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM nodes WHERE node_id = 'QQ0QQ-1'`).Scan(&count); err != nil {
+		t.Fatalf("query nodes: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("nodes count = %d, want 1", count)
 	}
 }
 
@@ -172,7 +132,6 @@ func recordsEqual(left Record, right Record) bool {
 }
 
 func TestLastDirectSeen(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(5 * time.Minute)
 	t2 := t1.Add(10 * time.Minute)
@@ -181,21 +140,21 @@ func TestLastDirectSeen(t *testing.T) {
 	}
 
 	// direct packet → LastDirectSeen set
-	s := New(filepath.Join(dir, "p1.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	s.Update(pos("QQ0QQ-1"), t0)
 	if r := s.Snapshot()["QQ0QQ-1"]; r.LastDirectSeen == nil || !r.LastDirectSeen.Equal(t0) {
 		t.Fatalf("direct: LastDirectSeen = %v, want %v", r.LastDirectSeen, t0)
 	}
 
 	// relay packet → LastDirectSeen nil on origin
-	s = New(filepath.Join(dir, "p2.json"))
+	s = NewSQLite(openPositionsTestDB(t, context.Background()))
 	s.Update(pos("QQ0QQ-1,RELAY"), t0)
 	if r := s.Snapshot()["QQ0QQ-1"]; r.LastDirectSeen != nil {
 		t.Fatalf("relay-only: LastDirectSeen = %v, want nil", r.LastDirectSeen)
 	}
 
 	// relay after direct → preserves origin LastDirectSeen
-	s = New(filepath.Join(dir, "p3.json"))
+	s = NewSQLite(openPositionsTestDB(t, context.Background()))
 	s.Update(pos("QQ0QQ-1"), t0)
 	s.Update(pos("QQ0QQ-1,RELAY"), t1)
 	if r := s.Snapshot()["QQ0QQ-1"]; r.LastDirectSeen == nil || !r.LastDirectSeen.Equal(t0) {
@@ -203,7 +162,7 @@ func TestLastDirectSeen(t *testing.T) {
 	}
 
 	// direct after relay → updates origin LastDirectSeen
-	s = New(filepath.Join(dir, "p4.json"))
+	s = NewSQLite(openPositionsTestDB(t, context.Background()))
 	s.Update(pos("QQ0QQ-1,RELAY"), t0)
 	s.Update(pos("QQ0QQ-1"), t2)
 	if r := s.Snapshot()["QQ0QQ-1"]; r.LastDirectSeen == nil || !r.LastDirectSeen.Equal(t2) {
@@ -212,12 +171,11 @@ func TestLastDirectSeen(t *testing.T) {
 }
 
 func TestLastHopFreshnessOnPosPacket(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(5 * time.Minute)
 
 	// Pre-populate relay node with a pos packet so it has a record.
-	s := New(filepath.Join(dir, "p.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	s.Update(meshcom.Position{Source: "QQ0REL-1", Latitude: 44.0, Longitude: 11.0}, t0)
 
 	// Indirect pos from origin via RELAY-1 → RELAY-1 should get direct freshness.
@@ -248,11 +206,10 @@ func TestLastHopFreshnessOnPosPacket(t *testing.T) {
 }
 
 func TestViaChainFreshnessOnPosPacket(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(5 * time.Minute)
 
-	s := New(filepath.Join(dir, "p.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	s.Update(meshcom.Position{Source: "QQ0REL-1", Latitude: 44.0, Longitude: 11.0}, t0)
 	s.Update(meshcom.Position{Source: "QQ0MID-1", Latitude: 45.0, Longitude: 12.0}, t0)
 
@@ -293,11 +250,10 @@ func TestViaChainFreshnessOnPosPacket(t *testing.T) {
 }
 
 func TestLastHopFreshnessSkippedIfNoRecord(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 
 	// Relay has no pre-existing record → should be skipped (not created).
-	s := New(filepath.Join(dir, "p.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	s.Update(meshcom.Position{
 		Source:    "ORIGIN-1,GHOST-RELAY",
 		Latitude:  43.0,
@@ -313,11 +269,10 @@ func TestLastHopFreshnessSkippedIfNoRecord(t *testing.T) {
 }
 
 func TestTouchFromPacketDirect(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(5 * time.Minute)
 
-	s := New(filepath.Join(dir, "p.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	// Create initial record via pos packet.
 	s.Update(meshcom.Position{Source: "A-1", Latitude: 43.0, Longitude: 10.0}, t0)
 
@@ -340,10 +295,9 @@ func TestTouchFromPacketDirect(t *testing.T) {
 }
 
 func TestTouchFromPacketDirectSkipsIfNoRecord(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 
-	s := New(filepath.Join(dir, "p.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	changed := s.TouchFromPacket("GHOST-1", intPtr(-80), intPtr(7), t0)
 	if changed {
 		t.Fatal("TouchFromPacket on missing origin: expected changed=false")
@@ -354,11 +308,10 @@ func TestTouchFromPacketDirectSkipsIfNoRecord(t *testing.T) {
 }
 
 func TestTouchFromPacketIndirect(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(3 * time.Minute)
 
-	s := New(filepath.Join(dir, "p.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	// Create origin via an indirect pos so it has no lastDirectSeen.
 	s.Update(meshcom.Position{Source: "ORIGIN-1,BOOTSTRAP", Latitude: 43.0, Longitude: 10.0}, t0)
 	// Create relay via a direct pos so it has a pre-existing lastDirectSeen at t0.
@@ -396,11 +349,10 @@ func TestTouchFromPacketIndirect(t *testing.T) {
 }
 
 func TestTouchFromPacketIndirectUpdatesAllViaHopsLastSeen(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(3 * time.Minute)
 
-	s := New(filepath.Join(dir, "p.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	s.Update(meshcom.Position{Source: "ORIGIN-1", Latitude: 43.0, Longitude: 10.0}, t0)
 	s.Update(meshcom.Position{Source: "MID-1", Latitude: 44.0, Longitude: 11.0}, t0)
 	s.Update(meshcom.Position{Source: "RELAY-1", Latitude: 45.0, Longitude: 12.0}, t0)
@@ -439,11 +391,10 @@ func TestTouchFromPacketIndirectUpdatesAllViaHopsLastSeen(t *testing.T) {
 }
 
 func TestTouchFromPacketIndirectSkipsRelayIfNoRecord(t *testing.T) {
-	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(3 * time.Minute)
 
-	s := New(filepath.Join(dir, "p.json"))
+	s := NewSQLite(openPositionsTestDB(t, context.Background()))
 	// Only origin exists; relay has no record.
 	s.Update(meshcom.Position{Source: "ORIGIN-1", Latitude: 43.0, Longitude: 10.0}, t0)
 

@@ -78,14 +78,14 @@ type Telemetry struct {
 	SourceType string     `json:"src_type,omitempty"`
 	RSSI       *int       `json:"rssi,omitempty"`
 	SNR        *int       `json:"snr,omitempty"`
-	Temp1      float64    `json:"temp1,omitempty"`
-	Temp2      float64    `json:"temp2,omitempty"`
-	Humidity   float64    `json:"hum,omitempty"`
-	Battery    int        `json:"batt,omitempty"`
-	QFE        float64    `json:"qfe,omitempty"`
-	QNH        float64    `json:"qnh,omitempty"`
-	Gas        float64    `json:"gas,omitempty"`
-	CO2        float64    `json:"co2,omitempty"`
+	Temp1      *float64   `json:"temp1,omitempty"`
+	Temp2      *float64   `json:"temp2,omitempty"`
+	Humidity   *float64   `json:"hum,omitempty"`
+	Battery    *int       `json:"batt,omitempty"`
+	QFE        *float64   `json:"qfe,omitempty"`
+	QNH        *float64   `json:"qnh,omitempty"`
+	Gas        *float64   `json:"gas,omitempty"`
+	CO2        *float64   `json:"co2,omitempty"`
 }
 
 type OutgoingText struct {

@@ -2,9 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
-## [0.10.0] - 2026-06-17
+## [0.11.0] 2026-07-22
 
 ### Added
+
+- **Graph views**: added `/graph` and Map graph overlay for direct and relayed paths, distance labels, path summaries, freshness controls, zoom, pan, and hover highlighting.
+- **SQLite runtime storage**: migrated nodes, received packets, chat history/read state, channel visibility, station identity, sessions, statistics, DM statistics, and telemetry from JSON/JSONL to SQLite. Existing data imports once at startup; WAL, foreign keys, retention purge, and telemetry history are included.
+- **DM delivery metadata**: stores MeshCom sequence IDs, ACK/reject details, and relay paths; matching is limited to pending outbound DMs from the previous five minutes.
+
+### Fixed
+
+- **Altitude units**: converted ExtUDP altitude from feet to metres in traffic, map, and simulator documentation.
+- **Documentation and OpenAPI**: removed obsolete and non-English documentation, added a documentation index, and aligned API contract with authentication, SQLite persistence, and chat metadata.
+
+## [0.10.0] - 2026-06-17
+
+
 
 - **Tests for `ChatStore` and `ToastStore`**: added unit tests covering `appendLiveChatRecord` (broadcast, channel, DM routing, deduplication, pending removal, ACK suppression), `appendChatRecord` (DM/mention toast and sound triggers, outbound/pending suppression, failed delivery cleanup), and `ToastStore` (`addDm`, `addMention`, `dismiss`, auto-dismiss timer).
 
@@ -62,6 +75,12 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Nodes view direct status**: the Nodes table now uses the same `lastDirectSeen` freshness rule as the map for the `direct` label, while the hop count and path columns continue to show the latest position packet path.
+
+- **SQLite node saves are incremental**: position flushes now write only nodes changed since the previous successful save instead of upserting every known node, reducing write-lock duration during routine node persistence.
+
+- **SQLite runtime persistence cleanup**: removed file-backed runtime repositories for HTTP sessions, receive log, chat history, chat read status, nodes, hourly stats, DM stats, channel visibility, and station identity. Startup still reads legacy JSON/JSONL files through one-time import and migration paths when the SQLite database is first created.
+
 - **Interface settings hidden from nav**: `/settings/ui` route still accessible via direct URL but removed from the Settings submenu to reduce nav clutter.
 
 - **Settings organization**: server settings are grouped into Server, Web Interface, Storage, and System sections. System controls expose graceful restart and shutdown actions.
@@ -98,13 +117,25 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- **Graph view readability on wide relay trees**: the graph now defaults to a two-hop view, adds 2 / 3 / all hop controls, and keeps large hop-3 fan-outs from shrinking labels into unreadable text.
+
+- **SQLite busy handling**: runtime SQLite opens now use a single pooled connection and a five-second busy timeout, reducing intermittent `SQLITE_BUSY` failures when periodic stats, node saves, purge, or other stores write at the same time.
+
+- **SQLite chat ACK storage**: ACK/reject packets now update only the most recent matching outbound DM row and preserve relay metadata in `ack_via`.
+
+- **SQLite startup import ordering**: legacy file-layout migration now runs before SQLite imports so moved `channel_show.json`, renamed DM JSONL files, and migrated `msg_idx.json` keys are imported into the database on first startup.
+
+- **SQLite node import compatibility**: missing node `via` values now persist as an empty JSON array instead of `null`, satisfying the SQLite schema constraint.
+
+- **Chat message dedupe window**: backend history, frontend deduplication, and message-list render keys now treat matching msg_id values as duplicates only when they come from the same sender within five minutes, avoiding stale packet ID collisions hiding later messages.
+
 - **Mention toast now has its own independent setting**: `dmToastEnabled` previously also gated `@mention` toasts in channels; split into `dmToastEnabled` (DM banners) and `mentionToastEnabled` (channel @mention banners), each with its own toggle in Settings → Notifications.
 
 - **ACK/reject regex no longer matches embedded tokens**: strings like `ack123abc` or `CALL:rej42test` are no longer classified as control messages — added `\b` word-boundary after `\d+` in both patterns.
 
 - **DM list preview no longer shows ACK text**: incoming ACK/reject packets are now excluded from the conversation-list "last message" preview and do not increment the unread counter — both on the server (`chatstatus.RecordIncoming` skipped via `meshcom.IsAckOrReject`) and on the client (`appendLiveChatRecord`, `appendChatRecord`, and `latestPreview`). ACK/reject records are still stored in history for delivery tracking and remain hidden in the thread view as before.
 
-- **Chat/DM list preview not updating after sending a message**: the last-message preview in the conversation list now correctly shows the most recently sent message. Previously, once a message had been received on a conversation, the preview was locked to the last *received* message and ignored any subsequent sent messages.
+- **Chat/DM list preview not updating after sending a message**: the last-message preview in the conversation list now correctly shows the most recently sent message. Previously, once a message had been received on a conversation, the preview was locked to the last _received_ message and ignored any subsequent sent messages.
 
 - **Mobile chat — Add DM not opening thread**: after confirming a new DM via the "Add DM" modal on mobile, the thread view was not shown. `ChatView` now reacts to external conversation target changes and auto-navigates to thread on mobile.
 

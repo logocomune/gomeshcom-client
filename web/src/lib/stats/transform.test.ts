@@ -20,7 +20,7 @@ function bucket(channels: Record<string, number>): Bucket {
 describe('buildChannelTable', () => {
 	it('aggregates all dm: entries into one DM row', () => {
 		const rows = buildChannelTable([
-			bucket({ 'dm:IU1ABC': 3, 'dm:IU1DEF': 7, 'ch:9': 1 })
+			bucket({ 'dm:QQ1ABC': 3, 'dm:QQ1DEF': 7, 'ch:9': 1 })
 		]);
 		const dm = rows.find((r) => r.kind === 'dm');
 		expect(dm).toBeDefined();
@@ -33,8 +33,8 @@ describe('buildChannelTable', () => {
 
 	it('aggregates dm: entries across multiple buckets', () => {
 		const rows = buildChannelTable([
-			bucket({ 'dm:IU1ABC': 4 }),
-			bucket({ 'dm:IU1ABC': 2, 'dm:IU1XYZ': 5 })
+			bucket({ 'dm:QQ1ABC': 4 }),
+			bucket({ 'dm:QQ1ABC': 2, 'dm:QQ1XYZ': 5 })
 		]);
 		const dm = rows.find((r) => r.kind === 'dm');
 		expect(dm!.count).toBe(11);

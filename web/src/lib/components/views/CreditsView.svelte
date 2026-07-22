@@ -1,7 +1,8 @@
 <script lang="ts">
 	const goLibs = [
 		{ name: 'ardanlabs/conf', version: 'v3.11.0', url: 'https://github.com/ardanlabs/conf', license: 'MIT', desc: 'Environment and CLI configuration' },
-		{ name: 'hashicorp/golang-lru', version: 'v2.0.7', url: 'https://github.com/hashicorp/golang-lru', license: 'MPL-2.0', desc: 'LRU cache with TTL expiry' }
+		{ name: 'hashicorp/golang-lru', version: 'v2.0.7', url: 'https://github.com/hashicorp/golang-lru', license: 'MPL-2.0', desc: 'LRU cache with TTL expiry' },
+		{ name: 'modernc.org/sqlite', version: 'v1.53.0', url: 'https://pkg.go.dev/modernc.org/sqlite', license: 'BSD-3-Clause', desc: 'Pure Go SQLite driver for persistent storage' }
 	];
 
 	const jsLibs = [

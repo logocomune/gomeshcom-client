@@ -2,15 +2,13 @@
 //
 // Identity holds the active callsign behind a read-write mutex so that all
 // long-lived services can read the latest value without a process restart.
-// Persistence mirrors the channelshow.Store pattern: a JSON file under
-// data/configs/ is updated on a background ticker and flushed on shutdown.
-//
-// Precedence at startup: persisted station.json > GOMESHCOM_MY_CALL config
-// default. Runtime updates via Update override both.
+// Runtime persistence uses SQLite. Legacy station.json is read only during
+// one-time migration/import.
 package station
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -27,7 +25,7 @@ const saveInterval = time.Minute
 type Identity struct {
 	mu      sync.RWMutex
 	current string
-	path    string // empty → in-memory only, no persistence
+	db      *sql.DB
 	dirty   bool
 }
 
@@ -40,18 +38,40 @@ func DefaultPath(dataDir string) string {
 	return filepath.Join(dataDir, "configs", "station.json")
 }
 
-// New loads persisted callsign from path (if present and valid). Falls back to
-// fallback (the startup config value). Returns an error only for I/O failures.
-func New(path, fallback string) (*Identity, error) {
+// LoadLegacy reads a legacy station.json file for one-time migration paths.
+func LoadLegacy(path, fallback string) (string, error) {
+	current := callsign.Normalize(fallback)
+
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return current, nil
+		}
+		return "", fmt.Errorf("open legacy station identity: %w", err)
+	}
+	defer file.Close()
+
+	var persisted persistedIdentity
+	if err := json.NewDecoder(file).Decode(&persisted); err != nil {
+		return "", fmt.Errorf("decode legacy station identity: %w", err)
+	}
+
+	normalized := callsign.Normalize(persisted.Callsign)
+	if !callsign.IsValid(normalized) {
+		slog.Warn("legacy station identity file contains invalid callsign; using config default", "value", persisted.Callsign)
+		return current, nil
+	}
+	return normalized, nil
+}
+
+func NewSQLite(db *sql.DB, fallback string) (*Identity, error) {
 	id := &Identity{
-		path:    path,
+		db:      db,
 		current: callsign.Normalize(fallback),
 	}
-
-	if err := id.load(); err != nil {
+	if err := id.loadSQLite(context.Background()); err != nil {
 		return nil, err
 	}
-
 	return id, nil
 }
 
@@ -95,7 +115,7 @@ func (id *Identity) Update(cs string) (string, error) {
 // Start runs the periodic flush loop until ctx is cancelled, then performs a
 // final flush. Call in a dedicated goroutine.
 func (id *Identity) Start(ctx context.Context) {
-	if id.path == "" {
+	if id.db == nil {
 		return // in-memory only
 	}
 
@@ -120,7 +140,7 @@ func (id *Identity) Start(ctx context.Context) {
 // SaveIfDirty persists the current callsign if it has changed since the last
 // save. No-op if the Identity is in-memory only or nothing has changed.
 func (id *Identity) SaveIfDirty() error {
-	if id.path == "" {
+	if id.db == nil {
 		return nil
 	}
 
@@ -133,7 +153,7 @@ func (id *Identity) SaveIfDirty() error {
 	id.dirty = false
 	id.mu.Unlock()
 
-	if err := writeFileAtomically(id.path, snapshot); err != nil {
+	if err := id.write(snapshot); err != nil {
 		id.mu.Lock()
 		id.dirty = true
 		id.mu.Unlock()
@@ -143,74 +163,33 @@ func (id *Identity) SaveIfDirty() error {
 	return nil
 }
 
-// load reads the persisted file and replaces the current callsign if the file
-// contains a valid callsign. A missing file is treated as "not yet persisted"
-// and is not an error.
-func (id *Identity) load() error {
-	if id.path == "" {
-		return nil
+func (id *Identity) write(snapshot string) error {
+	if _, err := id.db.ExecContext(context.Background(), `
+		INSERT INTO station_identity(id, callsign)
+		VALUES (1, ?)
+		ON CONFLICT(id) DO UPDATE SET callsign = excluded.callsign
+	`, snapshot); err != nil {
+		return fmt.Errorf("save station identity sqlite: %w", err)
 	}
+	return nil
+}
 
-	_ = os.Remove(id.path + ".tmp")
-
-	file, err := os.Open(id.path)
+func (id *Identity) loadSQLite(ctx context.Context) error {
+	var persisted string
+	err := id.db.QueryRowContext(ctx, `SELECT callsign FROM station_identity WHERE id = 1`).Scan(&persisted)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if err == sql.ErrNoRows {
 			return nil
 		}
-		return fmt.Errorf("open station identity: %w", err)
-	}
-	defer file.Close()
-
-	var p persistedIdentity
-	if err := json.NewDecoder(file).Decode(&p); err != nil {
-		return fmt.Errorf("decode station identity: %w", err)
+		return fmt.Errorf("load station identity sqlite: %w", err)
 	}
 
-	normalized := callsign.Normalize(p.Callsign)
+	normalized := callsign.Normalize(persisted)
 	if !callsign.IsValid(normalized) {
-		slog.Warn("station identity file contains invalid callsign — using config default", "value", p.Callsign)
+		slog.Warn("station identity row contains invalid callsign; using config default", "value", persisted)
 		return nil
 	}
 
 	id.current = normalized
-	return nil
-}
-
-func writeFileAtomically(path, cs string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create station identity dir: %w", err)
-	}
-
-	tmpPath := path + ".tmp"
-	tmp, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("create temp station identity file: %w", err)
-	}
-
-	enc := json.NewEncoder(tmp)
-	enc.SetIndent("", "  ")
-	if encErr := enc.Encode(persistedIdentity{Callsign: cs}); encErr != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("encode station identity: %w", encErr)
-	}
-
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("sync temp station identity file: %w", err)
-	}
-
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("close temp station identity file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("replace station identity file: %w", err)
-	}
-
 	return nil
 }

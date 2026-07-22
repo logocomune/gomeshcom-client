@@ -2,10 +2,10 @@ package positions
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -30,16 +30,18 @@ type Record struct {
 }
 
 type Store struct {
-	mu      sync.Mutex
-	path    string
-	records map[string]Record
-	dirty   bool
+	mu         sync.Mutex
+	db         *sql.DB
+	records    map[string]Record
+	dirtyNodes map[string]bool
+	dirty      bool
 }
 
-func New(path string) *Store {
+func NewSQLite(db *sql.DB) *Store {
 	return &Store{
-		path:    path,
-		records: make(map[string]Record),
+		db:         db,
+		records:    make(map[string]Record),
+		dirtyNodes: make(map[string]bool),
 	}
 }
 
@@ -48,32 +50,7 @@ func DefaultPath(dataDir string) string {
 }
 
 func (s *Store) Load() error {
-	// Remove any leftover temp file from a previous crash.
-	_ = os.Remove(s.path + ".tmp")
-
-	file, err := os.Open(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("open positions: %w", err)
-	}
-	defer file.Close()
-
-	var records map[string]Record
-	if err := json.NewDecoder(file).Decode(&records); err != nil {
-		return fmt.Errorf("decode positions: %w", err)
-	}
-
-	s.mu.Lock()
-	s.records = records
-	if s.records == nil {
-		s.records = make(map[string]Record)
-	}
-	s.dirty = false
-	s.mu.Unlock()
-
-	return nil
+	return s.loadSQLite()
 }
 
 func (s *Store) Start(ctx context.Context) {
@@ -143,8 +120,7 @@ func (s *Store) Update(position meshcom.Position, seenAt time.Time) bool {
 		return false
 	}
 
-	s.records[callsign] = record
-	s.dirty = true
+	s.setRecordLocked(callsign, record)
 	return true
 }
 
@@ -167,15 +143,13 @@ func (s *Store) TouchFromPacket(src string, rssi, snr *int, seenAt time.Time) bo
 	if isDirect {
 		if rec, exists := s.records[callsign]; exists {
 			applyFreshness(&rec, freshnessDirect, seenAt, rssi, snr)
-			s.records[callsign] = rec
-			s.dirty = true
+			s.setRecordLocked(callsign, rec)
 			changed = true
 		}
 	} else {
 		if rec, exists := s.records[callsign]; exists {
 			applyFreshness(&rec, freshnessIndirect, seenAt, nil, nil)
-			s.records[callsign] = rec
-			s.dirty = true
+			s.setRecordLocked(callsign, rec)
 			changed = true
 		}
 		changed = s.touchViaChainLocked(via, rssi, snr, seenAt) || changed
@@ -210,21 +184,44 @@ func (s *Store) SaveIfDirty() error {
 		s.mu.Unlock()
 		return nil
 	}
-	records := make(map[string]Record, len(s.records))
-	for callsign, record := range s.records {
-		records[callsign] = record
+	records := make(map[string]Record, len(s.dirtyNodes))
+	for callsign := range s.dirtyNodes {
+		records[callsign] = s.records[callsign]
 	}
+	dirtyNodes := s.dirtyNodeSet()
 	s.dirty = false
+	s.dirtyNodes = make(map[string]bool)
 	s.mu.Unlock()
 
-	if err := writeFileAtomically(s.path, records); err != nil {
+	if err := writeSQLite(s.db, records); err != nil {
 		s.mu.Lock()
 		s.dirty = true
+		for callsign := range dirtyNodes {
+			s.dirtyNodes[callsign] = true
+		}
 		s.mu.Unlock()
 		return err
 	}
 
 	return nil
+}
+
+func (s *Store) setRecordLocked(callsign string, record Record) {
+	s.records[callsign] = record
+	s.markDirtyLocked(callsign)
+}
+
+func (s *Store) markDirtyLocked(callsign string) {
+	s.dirtyNodes[callsign] = true
+	s.dirty = true
+}
+
+func (s *Store) dirtyNodeSet() map[string]bool {
+	dirtyNodes := make(map[string]bool, len(s.dirtyNodes))
+	for callsign := range s.dirtyNodes {
+		dirtyNodes[callsign] = true
+	}
+	return dirtyNodes
 }
 
 type freshnessMode int
@@ -258,8 +255,7 @@ func (s *Store) touchLastHopLocked(callsign string, rssi, snr *int, seenAt time.
 		return false
 	}
 	applyFreshness(&rec, freshnessDirect, seenAt, rssi, snr)
-	s.records[callsign] = rec
-	s.dirty = true
+	s.setRecordLocked(callsign, rec)
 	return true
 }
 
@@ -277,41 +273,163 @@ func (s *Store) touchViaChainLocked(via []string, rssi, snr *int, seenAt time.Ti
 		} else {
 			applyFreshness(&rec, freshnessIndirect, seenAt, nil, nil)
 		}
-		s.records[callsign] = rec
-		s.dirty = true
+		s.setRecordLocked(callsign, rec)
 		changed = true
 	}
 	return changed
 }
 
-func writeFileAtomically(path string, records map[string]Record) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create positions dir: %w", err)
-	}
-
-	tmpPath := path + ".tmp"
-	temp, err := os.Create(tmpPath)
+func (s *Store) loadSQLite() error {
+	rows, err := s.db.Query(`
+		SELECT node_id, lat, lng, alt, hw_id, firstseen, lastseen, lastdirectseen, rssi, snr, via
+		FROM nodes
+	`)
 	if err != nil {
-		return fmt.Errorf("create temp positions file: %w", err)
+		return fmt.Errorf("query positions: %w", err)
+	}
+	defer rows.Close()
+
+	records := make(map[string]Record)
+	for rows.Next() {
+		nodeID, record, err := scanNodeRecord(rows)
+		if err != nil {
+			return err
+		}
+		records[nodeID] = record
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate positions: %w", err)
 	}
 
-	encoder := json.NewEncoder(temp)
-	encoder.SetIndent("", "  ")
-	if encErr := encoder.Encode(records); encErr != nil {
-		temp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("encode positions: %w", encErr)
-	}
-
-	if err := temp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("close temp positions file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("replace positions file: %w", err)
-	}
-
+	s.mu.Lock()
+	s.records = records
+	s.dirtyNodes = make(map[string]bool)
+	s.dirty = false
+	s.mu.Unlock()
 	return nil
+}
+
+type nodeScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanNodeRecord(row nodeScanner) (string, Record, error) {
+	var nodeID string
+	var record Record
+	var firstSeen, lastSeen string
+	var lastDirectSeen sql.NullString
+	var via sql.NullString
+	if err := row.Scan(
+		&nodeID,
+		&record.Latitude,
+		&record.Longitude,
+		&record.Altitude,
+		&record.HardwareID,
+		&firstSeen,
+		&lastSeen,
+		&lastDirectSeen,
+		&record.RSSI,
+		&record.SNR,
+		&via,
+	); err != nil {
+		return "", Record{}, fmt.Errorf("scan position: %w", err)
+	}
+
+	parsedFirstSeen, err := time.Parse(time.RFC3339Nano, firstSeen)
+	if err != nil {
+		return "", Record{}, fmt.Errorf("parse firstseen for %s: %w", nodeID, err)
+	}
+	parsedLastSeen, err := time.Parse(time.RFC3339Nano, lastSeen)
+	if err != nil {
+		return "", Record{}, fmt.Errorf("parse lastseen for %s: %w", nodeID, err)
+	}
+	record.FirstSeen = parsedFirstSeen
+	record.LastSeen = parsedLastSeen
+
+	if lastDirectSeen.Valid {
+		parsedLastDirectSeen, err := time.Parse(time.RFC3339Nano, lastDirectSeen.String)
+		if err != nil {
+			return "", Record{}, fmt.Errorf("parse lastdirectseen for %s: %w", nodeID, err)
+		}
+		record.LastDirectSeen = &parsedLastDirectSeen
+	}
+
+	if via.Valid && via.String != "" {
+		if err := json.Unmarshal([]byte(via.String), &record.Via); err != nil {
+			return "", Record{}, fmt.Errorf("decode via for %s: %w", nodeID, err)
+		}
+	}
+	if record.Via == nil {
+		record.Via = []string{}
+	}
+
+	return nodeID, record, nil
+}
+
+func writeSQLite(db *sql.DB, records map[string]Record) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin positions sqlite save: %w", err)
+	}
+	for nodeID, record := range records {
+		if err := upsertNode(tx, nodeID, record); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit positions sqlite save: %w", err)
+	}
+	return nil
+}
+
+func upsertNode(tx *sql.Tx, nodeID string, record Record) error {
+	via, err := json.Marshal(normalizeVia(record.Via))
+	if err != nil {
+		return fmt.Errorf("encode via for %s: %w", nodeID, err)
+	}
+
+	var lastDirectSeen any
+	if record.LastDirectSeen != nil {
+		lastDirectSeen = record.LastDirectSeen.UTC().Format(time.RFC3339Nano)
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO nodes(node_id, lat, lng, alt, hw_id, firstseen, lastseen, lastdirectseen, rssi, snr, via)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(node_id) DO UPDATE SET
+			lat = excluded.lat,
+			lng = excluded.lng,
+			alt = excluded.alt,
+			hw_id = excluded.hw_id,
+			firstseen = excluded.firstseen,
+			lastseen = excluded.lastseen,
+			lastdirectseen = excluded.lastdirectseen,
+			rssi = excluded.rssi,
+			snr = excluded.snr,
+			via = excluded.via
+	`,
+		nodeID,
+		record.Latitude,
+		record.Longitude,
+		record.Altitude,
+		record.HardwareID,
+		record.FirstSeen.UTC().Format(time.RFC3339Nano),
+		record.LastSeen.UTC().Format(time.RFC3339Nano),
+		lastDirectSeen,
+		record.RSSI,
+		record.SNR,
+		string(via),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert node %s: %w", nodeID, err)
+	}
+	return nil
+}
+
+func normalizeVia(via []string) []string {
+	if via == nil {
+		return []string{}
+	}
+	return via
 }

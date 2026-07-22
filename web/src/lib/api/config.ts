@@ -45,6 +45,15 @@ export type ConfigRequestLog = {
 	enabled: ConfigFieldMeta<boolean>;
 };
 
+export type ConfigStorage = {
+	sqlite_path: ConfigFieldMeta<string>;
+	purge_interval: ConfigFieldMeta<string>;
+	receive_log_retention: ConfigFieldMeta<string>;
+	public_chat_retention: ConfigFieldMeta<string>;
+	nodes_retention: ConfigFieldMeta<string>;
+	telemetry_retention: ConfigFieldMeta<string>;
+};
+
 export type ServerInfo = {
 	version: string;
 	started_at: string;
@@ -67,6 +76,7 @@ export type AppConfig = {
 	forward: ConfigForward;
 	auth: ConfigAuth;
 	request_log: ConfigRequestLog;
+	storage: ConfigStorage;
 };
 
 export type ConfigUpdateResponse = {
@@ -111,6 +121,14 @@ export type ConfigPatch = {
 	};
 	request_log?: {
 		enabled?: boolean;
+	};
+	storage?: {
+		sqlite_path?: string;
+		purge_interval?: string;
+		receive_log_retention?: string;
+		public_chat_retention?: string;
+		nodes_retention?: string;
+		telemetry_retention?: string;
 	};
 };
 

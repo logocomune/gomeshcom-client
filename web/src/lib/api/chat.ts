@@ -6,6 +6,7 @@ export type ChatTarget = { kind: 'channel' | 'contact'; value: string };
 export type DmScope = 'mycall' | 'basecall';
 
 const LAST_TARGET_KEY = 'meshcom:chat:last';
+const CHAT_RECORD_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
 export function baseCallFrom(callsign: string): string {
 	const upper = callsign.toUpperCase();
@@ -93,15 +94,12 @@ export async function fetchHistory(
 	const response = await apiFetch(url.toString());
 	if (!response.ok) return [];
 	const records = ((await response.json()) as ChatRecord[] | null) ?? [];
-	const seen = new Set<string>();
-	return records
-		.filter((r) => {
-			const key = chatRecordKey(r);
-			if (seen.has(key)) return false;
-			seen.add(key);
-			return true;
-		})
-		.map((r) => ({ ...r, source: 'event-history' as const }));
+	const uniqueRecords: ChatRecord[] = [];
+	for (const record of records) {
+		if (uniqueRecords.some((existing) => isDuplicateChatRecord(existing, record))) continue;
+		uniqueRecords.push(record);
+	}
+	return uniqueRecords.map((r) => ({ ...r, source: 'event-history' as const }));
 }
 
 function isDirectMessageConversation(id: string): boolean {
@@ -142,18 +140,39 @@ export function conversationIdForRecord(
 	const localBase = baseCallFrom(localCall);
 	const isBasecall = scope === 'basecall';
 	const matchesMy = isBasecall
-		? (baseCallFrom(dstUpper) === localBase || baseCallFrom(origin) === localBase)
-		: (dstUpper === localCall || origin === localCall);
+		? baseCallFrom(dstUpper) === localBase || baseCallFrom(origin) === localBase
+		: dstUpper === localCall || origin === localCall;
 	if (localCall && !matchesMy) return null;
-	const interlocutor =
-		(isBasecall ? baseCallFrom(dstUpper) === localBase : dstUpper === localCall)
-			? origin
-			: dstUpper;
+	const interlocutor = (isBasecall ? baseCallFrom(dstUpper) === localBase : dstUpper === localCall)
+		? origin
+		: dstUpper;
 	return 'DM_' + sanitizeConversationPart(prefix) + '_' + sanitizeConversationPart(interlocutor);
 }
 
 export function chatRecordKey(rec: ChatRecord): string {
-	return rec.msg_id || `${rec.src ?? ''}|${rec.dst ?? ''}|${rec.msg}|${rec.received_at}`;
+	return [rec.src ?? '', rec.dst ?? '', rec.msg_id ?? '', rec.msg, rec.received_at].join('|');
+}
+
+export function isDuplicateChatRecord(existing: ChatRecord, candidate: ChatRecord): boolean {
+	if (existing.msg_id && candidate.msg_id) {
+		return (
+			existing.msg_id === candidate.msg_id &&
+			senderFrom(existing.src) === senderFrom(candidate.src) &&
+			receivedWithinDedupeWindow(existing.received_at, candidate.received_at)
+		);
+	}
+	return chatRecordKey(existing) === chatRecordKey(candidate);
+}
+
+function senderFrom(source: string | undefined): string {
+	return (source ?? '').split(',', 1)[0].trim().toUpperCase();
+}
+
+function receivedWithinDedupeWindow(left: string, right: string): boolean {
+	const leftTime = Date.parse(left);
+	const rightTime = Date.parse(right);
+	if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) return left === right;
+	return Math.abs(leftTime - rightTime) <= CHAT_RECORD_DEDUPE_WINDOW_MS;
 }
 
 export function sanitizeConversationPart(value: string): string {

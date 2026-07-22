@@ -46,6 +46,7 @@ type configResponse struct {
 	Forward          configForwardResponse    `json:"forward"`
 	Auth             configAuthResponse       `json:"auth"`
 	RequestLog       configRequestLogResponse `json:"request_log"`
+	Storage          configStorageResponse    `json:"storage"`
 }
 
 type configReceiveLogResponse struct {
@@ -86,6 +87,15 @@ type configRequestLogResponse struct {
 	Enabled configFieldMeta `json:"enabled"`
 }
 
+type configStorageResponse struct {
+	SQLitePath          configFieldMeta `json:"sqlite_path"`
+	PurgeInterval       configFieldMeta `json:"purge_interval"`
+	ReceiveLogRetention configFieldMeta `json:"receive_log_retention"`
+	PublicChatRetention configFieldMeta `json:"public_chat_retention"`
+	NodesRetention      configFieldMeta `json:"nodes_retention"`
+	TelemetryRetention  configFieldMeta `json:"telemetry_retention"`
+}
+
 // -------- Update request DTO --------
 
 // configUpdateRequest accepts a partial config update.
@@ -105,6 +115,7 @@ type configUpdateRequest struct {
 	Forward    *configUpdateForward    `json:"forward,omitempty"`
 	Auth       *configUpdateAuth       `json:"auth,omitempty"`
 	RequestLog *configUpdateRequestLog `json:"request_log,omitempty"`
+	Storage    *configUpdateStorage    `json:"storage,omitempty"`
 }
 
 type configUpdateReceiveLog struct {
@@ -143,6 +154,15 @@ type configUpdateAuth struct {
 
 type configUpdateRequestLog struct {
 	Enabled *bool `json:"enabled,omitempty"`
+}
+
+type configUpdateStorage struct {
+	SQLitePath          *string `json:"sqlite_path,omitempty"`
+	PurgeInterval       *string `json:"purge_interval,omitempty"`
+	ReceiveLogRetention *string `json:"receive_log_retention,omitempty"`
+	PublicChatRetention *string `json:"public_chat_retention,omitempty"`
+	NodesRetention      *string `json:"nodes_retention,omitempty"`
+	TelemetryRetention  *string `json:"telemetry_retention,omitempty"`
 }
 
 // passwordMask is the sentinel value returned for the password field in GET responses.
@@ -218,6 +238,14 @@ func buildConfigResponse(cfg config.Config, env config.EnvOverrides, version str
 		},
 		RequestLog: configRequestLogResponse{
 			Enabled: field(cfg.RequestLog.Enabled, "REQUEST_LOG_ENABLED", env, false),
+		},
+		Storage: configStorageResponse{
+			SQLitePath:          field(cfg.Storage.SQLitePath, "STORAGE_SQLITE_PATH", env, true),
+			PurgeInterval:       durationField(cfg.Storage.PurgeInterval, "STORAGE_PURGE_INTERVAL", env, true),
+			ReceiveLogRetention: durationField(cfg.Storage.ReceiveLogRetention, "STORAGE_RECEIVE_LOG_RETENTION", env, true),
+			PublicChatRetention: durationField(cfg.Storage.PublicChatRetention, "STORAGE_PUBLIC_CHAT_RETENTION", env, true),
+			NodesRetention:      durationField(cfg.Storage.NodesRetention, "STORAGE_NODES_RETENTION", env, true),
+			TelemetryRetention:  durationField(cfg.Storage.TelemetryRetention, "STORAGE_TELEMETRY_RETENTION", env, true),
 		},
 	}
 }
@@ -400,6 +428,58 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 			candidate.RequestLog.Enabled = *req.RequestLog.Enabled
 		}
 	}
+	if req.Storage != nil {
+		st := req.Storage
+		if st.SQLitePath != nil {
+			candidate.Storage.SQLitePath = *req.Storage.SQLitePath
+			requiresRestart = true
+		}
+		if st.PurgeInterval != nil {
+			d, err := config.ParseDuration(*st.PurgeInterval)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "storage.purge_interval: "+err.Error())
+				return
+			}
+			candidate.Storage.PurgeInterval = d
+			requiresRestart = true
+		}
+		if st.ReceiveLogRetention != nil {
+			d, err := config.ParseDuration(*st.ReceiveLogRetention)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "storage.receive_log_retention: "+err.Error())
+				return
+			}
+			candidate.Storage.ReceiveLogRetention = d
+			requiresRestart = true
+		}
+		if st.PublicChatRetention != nil {
+			d, err := config.ParseDuration(*st.PublicChatRetention)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "storage.public_chat_retention: "+err.Error())
+				return
+			}
+			candidate.Storage.PublicChatRetention = d
+			requiresRestart = true
+		}
+		if st.NodesRetention != nil {
+			d, err := config.ParseDuration(*st.NodesRetention)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "storage.nodes_retention: "+err.Error())
+				return
+			}
+			candidate.Storage.NodesRetention = d
+			requiresRestart = true
+		}
+		if st.TelemetryRetention != nil {
+			d, err := config.ParseDuration(*st.TelemetryRetention)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "storage.telemetry_retention: "+err.Error())
+				return
+			}
+			candidate.Storage.TelemetryRetention = d
+			requiresRestart = true
+		}
+	}
 
 	// Normalize and validate before persisting.
 	if err := config.Validate(candidate); err != nil {
@@ -518,6 +598,17 @@ func checkEnvLocked(req configUpdateRequest, env config.EnvOverrides) error {
 	}
 	if req.RequestLog != nil && req.RequestLog.Enabled != nil {
 		checks = append(checks, check{true, "REQUEST_LOG_ENABLED"})
+	}
+	if req.Storage != nil {
+		st := req.Storage
+		checks = append(checks,
+			check{st.SQLitePath != nil, "STORAGE_SQLITE_PATH"},
+			check{st.PurgeInterval != nil, "STORAGE_PURGE_INTERVAL"},
+			check{st.ReceiveLogRetention != nil, "STORAGE_RECEIVE_LOG_RETENTION"},
+			check{st.PublicChatRetention != nil, "STORAGE_PUBLIC_CHAT_RETENTION"},
+			check{st.NodesRetention != nil, "STORAGE_NODES_RETENTION"},
+			check{st.TelemetryRetention != nil, "STORAGE_TELEMETRY_RETENTION"},
+		)
 	}
 
 	for _, c := range checks {

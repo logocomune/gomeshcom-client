@@ -1,17 +1,17 @@
 // Package stats maintains hourly aggregated counters for packets heard by the
-// local MeshCom node. All buckets are stored in a single JSON file keyed by
-// UTC hour (Unix timestamp). Entries older than RetentionDays are pruned from
-// memory and disk on every periodic flush.
+// local MeshCom node. Buckets are cached in memory and persisted to SQLite.
+// Entries older than RetentionDays are pruned from memory and storage on every periodic flush.
 package stats
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -58,21 +58,18 @@ func DefaultPath(dataDir string) string {
 	return filepath.Join(dataDir, "stats", "stats.json")
 }
 
-// Store accumulates per-hour counters in memory and persists them to a single
-// JSON file.
+// Store accumulates per-hour counters in memory and persists them to storage.
 type Store struct {
 	mu            sync.Mutex
-	path          string
+	db            *sql.DB
 	retentionDays int
 	buckets       map[int64]*Bucket // keyed by truncated-to-hour Unix timestamp
 	dirty         bool
 }
 
-// New constructs a Store. Call Load to restore persisted buckets, then Start to
-// begin periodic flushing.
-func New(cfg Config) *Store {
+func NewSQLite(db *sql.DB, cfg Config) *Store {
 	return &Store{
-		path:          cfg.Path,
+		db:            db,
 		retentionDays: cfg.RetentionDays,
 		buckets:       make(map[int64]*Bucket),
 	}
@@ -81,30 +78,7 @@ func New(cfg Config) *Store {
 // Load reads the stats file into memory, discarding entries outside the
 // retention window.
 func (s *Store) Load() error {
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read stats file: %w", err)
-	}
-
-	var raw map[int64]*Bucket
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("unmarshal stats file: %w", err)
-	}
-
-	cutoff := s.cutoffUnix(time.Now().UTC())
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for k, b := range raw {
-		if k >= cutoff {
-			s.buckets[k] = b
-		}
-	}
-	return nil
+	return s.loadSQLite(context.Background())
 }
 
 // Start runs the periodic flush+prune loop until ctx is cancelled, then
@@ -254,7 +228,208 @@ func (s *Store) save() error {
 	s.dirty = false
 	s.mu.Unlock()
 
-	return writeFileAtomically(s.path, snap)
+	return s.saveSQLite(context.Background(), snap)
+}
+
+func (s *Store) loadSQLite(ctx context.Context) error {
+	cutoff := s.cutoffUnix(time.Now().UTC())
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT hour_unix, dm, dm_ack, public, telemetry, position, errors, total
+		FROM stats_hourly
+		WHERE hour_unix >= ?
+	`, cutoff)
+	if err != nil {
+		return fmt.Errorf("load sqlite stats hourly: %w", err)
+	}
+	defer rows.Close()
+
+	buckets := make(map[int64]*Bucket)
+	for rows.Next() {
+		b := &Bucket{}
+		if err := rows.Scan(&b.HourUnix, &b.DM, &b.DMAck, &b.Public, &b.Telemetry, &b.Position, &b.Errors, &b.Total); err != nil {
+			return fmt.Errorf("scan sqlite stats hourly: %w", err)
+		}
+		buckets[b.HourUnix] = b
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sqlite stats hourly: %w", err)
+	}
+	if err := s.loadSQLiteChannels(ctx, buckets); err != nil {
+		return err
+	}
+	if err := s.loadSQLiteDistance(ctx, buckets); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.buckets = buckets
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) loadSQLiteChannels(ctx context.Context, buckets map[int64]*Bucket) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT hour_unix, kind, target, count FROM stats_channels`)
+	if err != nil {
+		return fmt.Errorf("load sqlite stats channels: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var hour int64
+		var kind, target string
+		var count int
+		if err := rows.Scan(&hour, &kind, &target, &count); err != nil {
+			return fmt.Errorf("scan sqlite stats channels: %w", err)
+		}
+		b := buckets[hour]
+		if b == nil {
+			continue
+		}
+		if b.Channels == nil {
+			b.Channels = make(map[string]int)
+		}
+		b.Channels[channelKey(kind, target)] = count
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sqlite stats channels: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) loadSQLiteDistance(ctx context.Context, buckets map[int64]*Bucket) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT hour_unix, bucket_start_km, bucket_end_km, count FROM stats_distance`)
+	if err != nil {
+		return fmt.Errorf("load sqlite stats distance: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var hour int64
+		var start, end, count int
+		if err := rows.Scan(&hour, &start, &end, &count); err != nil {
+			return fmt.Errorf("scan sqlite stats distance: %w", err)
+		}
+		b := buckets[hour]
+		if b == nil {
+			continue
+		}
+		if b.DistanceKm == nil {
+			b.DistanceKm = make(map[string]int)
+		}
+		b.DistanceKm[distanceLabel(start, end)] = count
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sqlite stats distance: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) saveSQLite(ctx context.Context, buckets map[int64]*Bucket) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin sqlite stats save: %w", err)
+	}
+	if err := writeSQLiteStats(ctx, tx, buckets); err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("rollback sqlite stats save after %w: %w", err, rollbackErr)
+		}
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sqlite stats save: %w", err)
+	}
+	return nil
+}
+
+func writeSQLiteStats(ctx context.Context, tx *sql.Tx, buckets map[int64]*Bucket) error {
+	for _, stmt := range []string{`DELETE FROM stats_distance`, `DELETE FROM stats_channels`, `DELETE FROM stats_hourly`} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("clear sqlite stats: %w", err)
+		}
+	}
+	for _, b := range buckets {
+		if err := insertSQLiteBucket(ctx, tx, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertSQLiteBucket(ctx context.Context, tx *sql.Tx, b *Bucket) error {
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO stats_hourly(hour_unix, dm, dm_ack, public, telemetry, position, errors, total)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, b.HourUnix, b.DM, b.DMAck, b.Public, b.Telemetry, b.Position, b.Errors, b.Total); err != nil {
+		return fmt.Errorf("insert sqlite stats hourly %d: %w", b.HourUnix, err)
+	}
+	for key, count := range b.Channels {
+		kind, target := channelParts(key)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO stats_channels(hour_unix, kind, target, count) VALUES (?, ?, ?, ?)`, b.HourUnix, kind, target, count); err != nil {
+			return fmt.Errorf("insert sqlite stats channel %d/%s: %w", b.HourUnix, key, err)
+		}
+	}
+	for label, count := range b.DistanceKm {
+		start, end, err := distanceRange(label)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO stats_distance(hour_unix, bucket_start_km, bucket_end_km, count) VALUES (?, ?, ?, ?)`, b.HourUnix, start, end, count); err != nil {
+			return fmt.Errorf("insert sqlite stats distance %d/%s: %w", b.HourUnix, label, err)
+		}
+	}
+	return nil
+}
+
+func channelParts(key string) (string, string) {
+	switch {
+	case key == "broadcast":
+		return "broadcast", "*"
+	case strings.HasPrefix(key, "ch:"):
+		return "channel", strings.TrimPrefix(key, "ch:")
+	case strings.HasPrefix(key, "dm:"):
+		return "dm", strings.TrimPrefix(key, "dm:")
+	default:
+		return "channel", key
+	}
+}
+
+func channelKey(kind, target string) string {
+	switch kind {
+	case "broadcast":
+		return "broadcast"
+	case "dm":
+		return "dm:" + target
+	default:
+		return "ch:" + target
+	}
+}
+
+func distanceRange(label string) (int, int, error) {
+	if strings.HasSuffix(label, "+") {
+		start, err := strconv.Atoi(strings.TrimSuffix(label, "+"))
+		if err != nil {
+			return 0, 0, fmt.Errorf("parse stats distance label %q: %w", label, err)
+		}
+		return start, start + int(distanceBinSizeKm), nil
+	}
+	parts := strings.Split(label, "-")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("parse stats distance label %q", label)
+	}
+	start, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse stats distance label %q: %w", label, err)
+	}
+	end, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse stats distance label %q: %w", label, err)
+	}
+	return start, end, nil
+}
+
+func distanceLabel(start, end int) string {
+	if start >= int(distanceMaxKm) {
+		return fmt.Sprintf("%d+", start)
+	}
+	return fmt.Sprintf("%d-%d", start, end)
 }
 
 func (s *Store) cutoffUnix(now time.Time) int64 {
@@ -267,23 +442,4 @@ func (s *Store) cutoffUnix(now time.Time) int64 {
 func hourKey(t time.Time) int64 {
 	u := t.UTC()
 	return time.Date(u.Year(), u.Month(), u.Day(), u.Hour(), 0, 0, 0, time.UTC).Unix()
-}
-
-func writeFileAtomically(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create stats dir: %w", err)
-	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("marshal stats: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("write stats tmp: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename stats file: %w", err)
-	}
-	return nil
 }

@@ -3,10 +3,10 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -186,9 +186,22 @@ func TestUpdateChannelShowPublishesSSEEvent(t *testing.T) {
 
 func newTestChannelShow(t *testing.T) *channelshow.Store {
 	t.Helper()
-	store, err := channelshow.New(filepath.Join(t.TempDir(), "channel_show.json"))
+	db, err := sql.Open("sqlite", t.TempDir()+"/gomeshcom.db")
 	if err != nil {
-		t.Fatalf("channelshow.New: %v", err)
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, stmt := range []string{
+		`CREATE TABLE channel_show (id INTEGER PRIMARY KEY CHECK (id = 1), mode TEXT NOT NULL)`,
+		`CREATE TABLE channel_show_channels (channel TEXT PRIMARY KEY, last_message_at TEXT)`,
+	} {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			t.Fatalf("create channel show table: %v", err)
+		}
+	}
+	store, err := channelshow.NewSQLite(db)
+	if err != nil {
+		t.Fatalf("channelshow.NewSQLite: %v", err)
 	}
 	return store
 }

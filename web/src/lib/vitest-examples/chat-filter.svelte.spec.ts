@@ -71,7 +71,7 @@ const records: ChatRecord[] = [
 	},
 	{
 		received_at: '2026-05-16T09:01:00Z',
-		src: 'IZ5PFI-1',
+		src: 'QQ5PFI-1',
 		dst: '*',
 		msg: 'beta packet'
 	}

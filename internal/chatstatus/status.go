@@ -2,11 +2,10 @@ package chatstatus
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,16 +23,15 @@ type Entry struct {
 // Store holds per-conversation chat status in memory and persists it periodically.
 type Store struct {
 	mu      sync.Mutex
-	path    string
+	db      *sql.DB
 	entries map[string]*Entry
 	dirty   bool
 	clock   func() time.Time
 }
 
-// New creates a Store backed by path. Existing data is loaded if the file exists.
-func New(path string) (*Store, error) {
+func NewSQLite(db *sql.DB) (*Store, error) {
 	s := &Store{
-		path:    path,
+		db:      db,
 		entries: make(map[string]*Entry),
 		clock:   time.Now,
 	}
@@ -43,46 +41,14 @@ func New(path string) (*Store, error) {
 	return s, nil
 }
 
-// Load reads the status file from disk. A missing file is silently ignored.
+// Load reads chat read markers from SQLite.
 func (s *Store) Load() error {
-	_ = os.Remove(s.path + ".tmp")
-
-	file, err := os.Open(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("open chat status: %w", err)
-	}
-	defer file.Close()
-
-	var entries map[string]*Entry
-	if err := json.NewDecoder(file).Decode(&entries); err != nil {
-		return fmt.Errorf("decode chat status: %w", err)
-	}
-
-	s.mu.Lock()
-	s.entries = entries
-	if s.entries == nil {
-		s.entries = make(map[string]*Entry)
-	}
-	s.dirty = false
-	s.mu.Unlock()
-
-	return nil
+	return s.loadSQLite()
 }
 
 // RecordIncoming increments the unread counter, updates LastMsgReceived, and stores
 // the message text preview for convID.
 func (s *Store) RecordIncoming(convID string, ts time.Time, msg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	e := s.getOrCreate(convID)
-	e.UnreadCount++
-	e.LastMsgReceived = ts.UTC()
-	e.LastMsg = msg
-	s.dirty = true
 }
 
 // MarkRead zeroes the unread counter and sets LastRead for convID.
@@ -110,14 +76,11 @@ func (s *Store) Remove(convID string) {
 
 // Snapshot returns a deep copy of the current status map.
 func (s *Store) Snapshot() map[string]Entry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	out := make(map[string]Entry, len(s.entries))
-	for k, v := range s.entries {
-		out[k] = *v
+	snapshot, err := s.snapshotSQLite()
+	if err != nil {
+		return map[string]Entry{}
 	}
-	return out
+	return snapshot
 }
 
 // Start runs the periodic save loop until ctx is cancelled, then flushes.
@@ -155,13 +118,212 @@ func (s *Store) SaveIfDirty() error {
 	s.dirty = false
 	s.mu.Unlock()
 
-	if err := writeFileAtomically(s.path, snapshot); err != nil {
+	if err := writeSQLite(s.db, snapshot); err != nil {
 		s.mu.Lock()
 		s.dirty = true
 		s.mu.Unlock()
 		return err
 	}
 
+	return nil
+}
+
+func (s *Store) loadSQLite() error {
+	rows, err := s.db.Query(`SELECT conversation_id, last_read FROM chat_reads`)
+	if err != nil {
+		return fmt.Errorf("query chat reads: %w", err)
+	}
+	defer rows.Close()
+
+	entries := make(map[string]*Entry)
+	for rows.Next() {
+		var convID string
+		var lastRead string
+		if err := rows.Scan(&convID, &lastRead); err != nil {
+			return fmt.Errorf("scan chat read: %w", err)
+		}
+		parsedLastRead, err := time.Parse(time.RFC3339Nano, lastRead)
+		if err != nil {
+			return fmt.Errorf("parse chat read %s: %w", convID, err)
+		}
+		entries[convID] = &Entry{LastRead: parsedLastRead}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate chat reads: %w", err)
+	}
+
+	s.mu.Lock()
+	s.entries = entries
+	s.dirty = false
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) snapshotSQLite() (map[string]Entry, error) {
+	reads := s.SnapshotReads()
+	snapshot := make(map[string]Entry)
+	if err := applyPublicSnapshot(s.db, snapshot, reads); err != nil {
+		return nil, err
+	}
+	if err := applyDMSnapshot(s.db, snapshot, reads); err != nil {
+		return nil, err
+	}
+	for convID, read := range reads {
+		entry := snapshot[convID]
+		entry.LastRead = read
+		snapshot[convID] = entry
+	}
+	return snapshot, nil
+}
+
+func (s *Store) SnapshotReads() map[string]time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reads := make(map[string]time.Time, len(s.entries))
+	for convID, entry := range s.entries {
+		reads[convID] = entry.LastRead
+	}
+	return reads
+}
+
+func applyPublicSnapshot(db *sql.DB, snapshot map[string]Entry, reads map[string]time.Time) error {
+	rows, err := db.Query(`
+		SELECT conversation_id, received_at, msg
+		FROM chats_public
+		ORDER BY received_at, id
+	`)
+	if err != nil {
+		return fmt.Errorf("query public chat status: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var convID string
+		var receivedAt string
+		var msg string
+		if err := rows.Scan(&convID, &receivedAt, &msg); err != nil {
+			return fmt.Errorf("scan public chat status: %w", err)
+		}
+		at, err := time.Parse(time.RFC3339Nano, receivedAt)
+		if err != nil {
+			return fmt.Errorf("parse public chat status time: %w", err)
+		}
+		applySnapshotRecord(snapshot, reads, convID, at, msg)
+	}
+	return rows.Err()
+}
+
+func applyDMSnapshot(db *sql.DB, snapshot map[string]Entry, reads map[string]time.Time) error {
+	rows, err := db.Query(`
+		SELECT conversation_id, received_at, src, dst, msg
+		FROM chats_dm
+		ORDER BY received_at, id
+	`)
+	if err != nil {
+		return fmt.Errorf("query dm chat status: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var convID string
+		var receivedAt string
+		var src sql.NullString
+		var dst string
+		var msg string
+		if err := rows.Scan(&convID, &receivedAt, &src, &dst, &msg); err != nil {
+			return fmt.Errorf("scan dm chat status: %w", err)
+		}
+		at, err := time.Parse(time.RFC3339Nano, receivedAt)
+		if err != nil {
+			return fmt.Errorf("parse dm chat status time: %w", err)
+		}
+		statusKey := dmStatusKey(convID, src.String, dst)
+		if statusKey == "" {
+			continue
+		}
+		applySnapshotRecord(snapshot, reads, statusKey, at, msg)
+	}
+	return rows.Err()
+}
+
+func applySnapshotRecord(snapshot map[string]Entry, reads map[string]time.Time, convID string, receivedAt time.Time, msg string) {
+	entry := snapshot[convID]
+	entry.LastRead = reads[convID]
+	entry.LastMsgReceived = receivedAt.UTC()
+	entry.LastMsg = msg
+	if entry.LastRead.IsZero() || receivedAt.After(entry.LastRead) {
+		entry.UnreadCount++
+	}
+	snapshot[convID] = entry
+}
+
+func dmStatusKey(conversationID string, src string, dst string) string {
+	if !strings.HasPrefix(conversationID, "DM_") {
+		return ""
+	}
+	rest := strings.TrimPrefix(conversationID, "DM_")
+	idx := strings.Index(rest, "_")
+	if idx < 0 {
+		return conversationID
+	}
+	localBase := rest[:idx]
+	peer := rest[idx+1:]
+	srcOrigin := strings.ToUpper(strings.SplitN(src, ",", 2)[0])
+	dstUpper := strings.ToUpper(dst)
+	if baseCall(srcOrigin) == localBase {
+		return "DM_" + sanitize(srcOrigin) + "_" + sanitize(peer)
+	}
+	if baseCall(dstUpper) == localBase {
+		return "DM_" + sanitize(dstUpper) + "_" + sanitize(peer)
+	}
+	return conversationID
+}
+
+func baseCall(callsign string) string {
+	if i := strings.LastIndex(callsign, "-"); i >= 0 && isNumeric(callsign[i+1:]) {
+		return callsign[:i]
+	}
+	return callsign
+}
+
+func isNumeric(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+var unsafeStatusChars = strings.NewReplacer("/", "_", "\\", "_", " ", "_")
+
+func sanitize(value string) string {
+	return unsafeStatusChars.Replace(strings.ToUpper(value))
+}
+
+func writeSQLite(db *sql.DB, entries map[string]*Entry) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin chat reads save: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM chat_reads`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("clear chat reads: %w", err)
+	}
+	for convID, entry := range entries {
+		if entry.LastRead.IsZero() {
+			continue
+		}
+		_, err := tx.Exec(`INSERT INTO chat_reads(conversation_id, last_read) VALUES (?, ?)`, convID, entry.LastRead.UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("save chat read %s: %w", convID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit chat reads save: %w", err)
+	}
 	return nil
 }
 
@@ -172,42 +334,4 @@ func (s *Store) getOrCreate(convID string) *Entry {
 		s.entries[convID] = e
 	}
 	return e
-}
-
-func writeFileAtomically(path string, entries map[string]*Entry) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create chat status dir: %w", err)
-	}
-
-	tmpPath := path + ".tmp"
-	temp, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("create temp chat status file: %w", err)
-	}
-
-	encoder := json.NewEncoder(temp)
-	encoder.SetIndent("", "  ")
-	if encErr := encoder.Encode(entries); encErr != nil {
-		temp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("encode chat status: %w", encErr)
-	}
-
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("sync temp chat status file: %w", err)
-	}
-
-	if err := temp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("close temp chat status file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("replace chat status file: %w", err)
-	}
-
-	return nil
 }

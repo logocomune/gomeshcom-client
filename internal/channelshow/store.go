@@ -2,10 +2,9 @@ package channelshow
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,14 +26,14 @@ type Config struct {
 
 type Store struct {
 	mu     sync.Mutex
-	path   string
+	db     *sql.DB
 	config Config
 	dirty  bool
 }
 
-func New(path string) (*Store, error) {
+func NewSQLite(db *sql.DB) (*Store, error) {
 	store := &Store{
-		path:   path,
+		db:     db,
 		config: DefaultConfig(),
 	}
 	if err := store.Load(); err != nil {
@@ -111,33 +110,7 @@ func ValidChannel(channel string) bool {
 }
 
 func (s *Store) Load() error {
-	_ = os.Remove(s.path + ".tmp")
-
-	file, err := os.Open(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("open channel show: %w", err)
-	}
-	defer file.Close()
-
-	var config Config
-	if err := json.NewDecoder(file).Decode(&config); err != nil {
-		return fmt.Errorf("decode channel show: %w", err)
-	}
-
-	normalized, err := Normalize(config)
-	if err != nil {
-		return fmt.Errorf("validate channel show: %w", err)
-	}
-
-	s.mu.Lock()
-	s.config = normalized
-	s.dirty = false
-	s.mu.Unlock()
-
-	return nil
+	return s.loadSQLite()
 }
 
 func (s *Store) Snapshot() Config {
@@ -194,13 +167,76 @@ func (s *Store) SaveIfDirty() error {
 	s.dirty = false
 	s.mu.Unlock()
 
-	if err := writeFileAtomically(s.path, snapshot); err != nil {
+	if err := writeSQLite(s.db, snapshot); err != nil {
 		s.mu.Lock()
 		s.dirty = true
 		s.mu.Unlock()
 		return err
 	}
 
+	return nil
+}
+
+func (s *Store) loadSQLite() error {
+	var mode string
+	err := s.db.QueryRow(`SELECT mode FROM channel_show WHERE id = 1`).Scan(&mode)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("query channel show: %w", err)
+	}
+	config := DefaultConfig()
+	if err != sql.ErrNoRows {
+		config.Mode = mode
+	}
+
+	rows, err := s.db.Query(`SELECT channel FROM channel_show_channels ORDER BY channel`)
+	if err != nil {
+		return fmt.Errorf("query channel show channels: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var channel string
+		if err := rows.Scan(&channel); err != nil {
+			return fmt.Errorf("scan channel show channel: %w", err)
+		}
+		config.Channels = append(config.Channels, channel)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate channel show channels: %w", err)
+	}
+
+	normalized, err := Normalize(config)
+	if err != nil {
+		return fmt.Errorf("validate channel show: %w", err)
+	}
+	s.mu.Lock()
+	s.config = normalized
+	s.dirty = false
+	s.mu.Unlock()
+	return nil
+}
+
+func writeSQLite(db *sql.DB, config Config) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin channel show save: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO channel_show(id, mode) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET mode = excluded.mode`, config.Mode); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("save channel show mode: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM channel_show_channels`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("clear channel show channels: %w", err)
+	}
+	for _, channel := range config.Channels {
+		if _, err := tx.Exec(`INSERT INTO channel_show_channels(channel, last_message_at) VALUES (?, NULL)`, channel); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("save channel show channel %s: %w", channel, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit channel show save: %w", err)
+	}
 	return nil
 }
 
@@ -220,42 +256,4 @@ func configsEqual(left, right Config) bool {
 		}
 	}
 	return true
-}
-
-func writeFileAtomically(path string, config Config) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create channel show dir: %w", err)
-	}
-
-	tmpPath := path + ".tmp"
-	temp, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("create temp channel show file: %w", err)
-	}
-
-	encoder := json.NewEncoder(temp)
-	encoder.SetIndent("", "  ")
-	if encErr := encoder.Encode(config); encErr != nil {
-		temp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("encode channel show: %w", encErr)
-	}
-
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("sync temp channel show file: %w", err)
-	}
-
-	if err := temp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("close temp channel show file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("replace channel show file: %w", err)
-	}
-
-	return nil
 }

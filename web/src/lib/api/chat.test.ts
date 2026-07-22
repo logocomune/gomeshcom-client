@@ -151,11 +151,21 @@ describe('loadLastChatTarget / saveLastChatTarget', () => {
 	beforeEach(() => {
 		store = {};
 		vi.stubGlobal('localStorage', {
-			getItem(key: string) { return store[key] ?? null; },
-			setItem(key: string, val: string) { store[key] = val; },
-			key() { return null; },
-			removeItem(key: string) { delete store[key]; },
-			clear() { store = {}; }
+			getItem(key: string) {
+				return store[key] ?? null;
+			},
+			setItem(key: string, val: string) {
+				store[key] = val;
+			},
+			key() {
+				return null;
+			},
+			removeItem(key: string) {
+				delete store[key];
+			},
+			clear() {
+				store = {};
+			}
 		});
 	});
 
@@ -213,8 +223,12 @@ describe('loadLastChatTarget / saveLastChatTarget', () => {
 
 	it('falls back to Broadcast when localStorage throws', () => {
 		vi.stubGlobal('localStorage', {
-			getItem() { throw new Error('SecurityError'); },
-			setItem() { throw new Error('SecurityError'); }
+			getItem() {
+				throw new Error('SecurityError');
+			},
+			setItem() {
+				throw new Error('SecurityError');
+			}
 		});
 		expect(loadLastChatTarget([])).toEqual({ kind: 'channel', value: 'Broadcast' });
 		expect(() => saveLastChatTarget({ kind: 'channel', value: '222' })).not.toThrow();
@@ -260,6 +274,31 @@ describe('fetchHistory', () => {
 			'http://localhost:3000/api/chat/DM_IU5PMP_QQ1ABC-1?scope=basecall',
 			{ credentials: 'same-origin' }
 		);
+	});
+	it('keeps packet ID collisions outside the five minute dedupe window', async () => {
+		vi.stubGlobal('location', { origin: 'http://localhost:3000' });
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			Response.json([
+				{
+					received_at: '2026-06-01T10:00:00Z',
+					src: 'IU5PMP-1',
+					dst: 'XX5YYY-1',
+					msg_id: '42',
+					msg: 'first'
+				},
+				{
+					received_at: '2026-06-01T10:06:00Z',
+					src: 'IU5PMP-1',
+					dst: 'XX5YYY-1',
+					msg_id: '42',
+					msg: 'second'
+				}
+			])
+		);
+
+		const records = await fetchHistory('DM_IU5PMP-1_XX5YYY-1', 168);
+
+		expect(records).toHaveLength(2);
 	});
 });
 

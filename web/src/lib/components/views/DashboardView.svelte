@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { chatRecordKey } from '$lib/api/chat';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
 	import { cleanMessage, messageKind, packetBadge, packetFromEvent, splitSourcePath } from '$lib/api/events';
 	import { mdiForEvent } from '$lib/ui/stream';
@@ -238,7 +239,7 @@
 				<div class="px-4 py-8 text-center text-xs text-ink-muted">No messages yet</div>
 			{:else}
 				<div class="divide-y divide-ink-dim/15">
-					{#each recentMessages as rec (rec.msg_id ?? rec.received_at + (rec.src ?? ''))}
+					{#each recentMessages as rec (chatRecordKey(rec))}
 						<div class="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hi">
 							<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-warm/30 to-blaze/30 font-mono text-xs font-bold text-warm">
 								{originFrom(rec.src).slice(0, 2).toUpperCase()}

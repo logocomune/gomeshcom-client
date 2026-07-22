@@ -56,7 +56,7 @@ describe('ackEntriesForRecord', () => {
 		const ackIndex = buildAckIndex([
 			packetEvent('2026-06-13T09:59:21Z', {
 				type: 'msg',
-				src: 'IU5RCB-12,IW5AKT-10',
+				src: 'QQ5RCB-12,QQ5AKT-10',
 				dst: 'IU5PMP-10',
 				msg: 'IU5PMP-10:ack353'
 			})
@@ -65,13 +65,13 @@ describe('ackEntriesForRecord', () => {
 		const record: import('./types').ChatRecord = {
 			received_at: '2026-06-13T09:58:46Z',
 			src: 'IU5PMP-10',
-			dst: 'IU5RCB-12',
+			dst: 'QQ5RCB-12',
 			msg: 'Ciao ti vedo in mappa{353'
 		};
 
 		// basecall scope: IU5PMP-1 matches IU5PMP-10 (same base IU5PMP)
 		expect(ackEntriesForRecord(ackIndex, '353', record, 'IU5PMP-1', 'basecall')).toMatchObject([
-			{ source: 'IU5RCB-12' }
+			{ source: 'QQ5RCB-12' }
 		]);
 
 		// mycall scope: IU5PMP-1 does NOT match IU5PMP-10
@@ -163,11 +163,12 @@ function packetEvent(receivedAt: string, packet: Record<string, unknown>): Strea
 describe('buildAckIndexFromChatRecords', () => {
 	it('indexes ACKs already loaded from chat history', () => {
 		const ackIndex = buildAckIndexFromChatRecords([
-			sentRecord('IZ5PFI-12', 'Prova invio{916'),
+			sentRecord('QQ5PFI-12', 'Prova invio{916'),
 			{
 				received_at: '2026-05-20T10:09:30.522559329Z',
-				src: 'IZ5PFI-12,IK5FCK-10',
+				src: 'QQ5PFI-12',
 				src_type: 'lora',
+				via: ['QQ5FCK-10'],
 				dst: 'IU5PMP-1',
 				msg_id: '1AE10322',
 				msg: 'IU5PMP-1 :ack916',
@@ -184,19 +185,19 @@ describe('buildAckIndexFromChatRecords', () => {
 					received_at: '2026-05-20T10:06:39.937257857Z',
 					src: 'IU5PMP-1',
 					src_type: 'node',
-					dst: 'IZ5PFI-12',
+					dst: 'QQ5PFI-12',
 					msg_id: 'E4B9D394',
 					msg: 'Prova invio{916'
 				},
 				'IU5PMP-1'
 			)
-		).toMatchObject([{ source: 'IZ5PFI-12', via: ['IK5FCK-10'], rssi: -37, snr: 5 }]);
+		).toMatchObject([{ source: 'QQ5PFI-12', via: ['QQ5FCK-10'], rssi: -37, snr: 5 }]);
 	});
 
 	it('deduplicates duplicate ACKs inside chat history only', () => {
 		const duplicateAck = {
 			received_at: '2026-05-20T10:14:01.69911781Z',
-			src: 'IK5FCK-10',
+			src: 'QQ5FCK-10',
 			dst: 'IU5PMP-1',
 			msg_id: 'E4C491B8',
 			msg: 'IU5PMP-1 :ack918',
@@ -205,7 +206,7 @@ describe('buildAckIndexFromChatRecords', () => {
 		};
 		const secondAck = {
 			received_at: '2026-05-20T10:14:35.903623675Z',
-			src: 'IK5FCK-10',
+			src: 'QQ5FCK-10',
 			dst: 'IU5PMP-1',
 			msg_id: 'E4C491B9',
 			msg: 'IU5PMP-1 :ack918',
@@ -220,7 +221,7 @@ describe('buildAckIndexFromChatRecords', () => {
 		]);
 
 		expect(
-			ackEntriesForRecord(ackIndex, '918', sentRecord('IK5FCK-10', 'Prova invio 1{918'), 'IU5PMP-1')
+			ackEntriesForRecord(ackIndex, '918', sentRecord('QQ5FCK-10', 'Prova invio 1{918'), 'IU5PMP-1')
 		).toHaveLength(2);
 	});
 
@@ -228,7 +229,7 @@ describe('buildAckIndexFromChatRecords', () => {
 		const liveIndex = buildAckIndex([
 			packetEvent('2026-05-20T10:14:01.69911781Z', {
 				type: 'msg',
-				src: 'IK5FCK-10',
+				src: 'QQ5FCK-10',
 				dst: 'IU5PMP-1',
 				msg_id: 'E4C491B8',
 				msg: 'IU5PMP-1 :ack918',
@@ -237,7 +238,7 @@ describe('buildAckIndexFromChatRecords', () => {
 			}),
 			packetEvent('2026-05-20T10:14:35.903623675Z', {
 				type: 'msg',
-				src: 'IK5FCK-10',
+				src: 'QQ5FCK-10',
 				dst: 'IU5PMP-1',
 				msg_id: 'E4C491B9',
 				msg: 'IU5PMP-1 :ack918',
@@ -248,7 +249,7 @@ describe('buildAckIndexFromChatRecords', () => {
 		const historyIndex = buildAckIndexFromChatRecords([
 			{
 				received_at: '2026-05-20T10:14:01.69911781Z',
-				src: 'IK5FCK-10',
+				src: 'QQ5FCK-10',
 				dst: 'IU5PMP-1',
 				msg_id: 'E4C491B8',
 				msg: 'IU5PMP-1 :ack918',
@@ -257,7 +258,7 @@ describe('buildAckIndexFromChatRecords', () => {
 			},
 			{
 				received_at: '2026-05-20T10:14:35.903623675Z',
-				src: 'IK5FCK-10',
+				src: 'QQ5FCK-10',
 				dst: 'IU5PMP-1',
 				msg_id: 'E4C491B9',
 				msg: 'IU5PMP-1 :ack918',
@@ -269,7 +270,7 @@ describe('buildAckIndexFromChatRecords', () => {
 		const merged = mergeAckIndexes(liveIndex, historyIndex);
 
 		expect(
-			ackEntriesForRecord(merged, '918', sentRecord('IK5FCK-10', 'Prova invio 1{918'), 'IU5PMP-1')
+			ackEntriesForRecord(merged, '918', sentRecord('QQ5FCK-10', 'Prova invio 1{918'), 'IU5PMP-1')
 		).toHaveLength(2);
 	});
 

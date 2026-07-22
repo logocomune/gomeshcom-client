@@ -218,7 +218,7 @@ ASCII string, fields are positional or key-value:
 | APRS symbol | positional | char (e.g. `&`) |
 | Additional text | positional after symbol | free text up to 25 chars |
 | Battery | `/B=` | % |
-| Altitude | `/A=` | meters |
+| Altitude | `/A=` | feet |
 | Pressure (station) | `/P=` | hPa |
 | Humidity | `/H=` | % |
 | Temperature 1 | `/T=` | °C |

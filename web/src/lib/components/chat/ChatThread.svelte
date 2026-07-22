@@ -195,7 +195,8 @@
 		{:else}
 			<div class="space-y-2">
 				{#each displayChatRecords as record (chatRecordKey(record))}
-					{@const sourcePath = splitSourcePath(record.src)}
+					{@const parsedSourcePath = splitSourcePath(record.src)}
+					{@const sourcePath = { origin: parsedSourcePath.origin, relays: record.via ?? parsedSourcePath.relays }}
 					{@const dmScope = chatState.dmScope}
 					{@const isSent =
 						dmScope === 'basecall'

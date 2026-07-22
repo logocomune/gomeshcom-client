@@ -64,15 +64,15 @@ describe('buildRealtimeDmTraceSegments', () => {
 
 	it('includes ack packets in realtime DM traces', () => {
 		const positions = [
-			makePosition({ source: 'IU5RTR-02' }),
-			makePosition({ source: 'IZ5CND-10' }),
+			makePosition({ source: 'QQ5RTR-02' }),
+			makePosition({ source: 'QQ5CND-10' }),
 			makePosition({ source: 'IU5PMP-1' })
 		];
 		const nowMs = Date.parse('2026-05-20T20:31:50Z');
 		const events: StreamEvent[] = [
 			makeMsgEvent(
 				'2026-05-20T20:31:37.162625521Z',
-				'IU5RTR-02,IZ5CND-10',
+				'QQ5RTR-02,QQ5CND-10',
 				'IU5PMP-1',
 				'IU5PMP-1 :ack950'
 			)
@@ -80,8 +80,8 @@ describe('buildRealtimeDmTraceSegments', () => {
 
 		const segments = buildRealtimeDmTraceSegments(positions, events, nowMs);
 		const paths = segments.map((segment) => segment.from.source + '>' + segment.to.source);
-		expect(paths).toContain('IU5RTR-02>IZ5CND-10');
-		expect(paths).toContain('IZ5CND-10>IU5PMP-1');
+		expect(paths).toContain('QQ5RTR-02>QQ5CND-10');
+		expect(paths).toContain('QQ5CND-10>IU5PMP-1');
 		expect(segments).toHaveLength(2);
 		expect(segments.every((segment) => segment.isAck)).toBe(true);
 	});

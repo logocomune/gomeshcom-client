@@ -2,8 +2,6 @@ package dmstats
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -12,7 +10,7 @@ import (
 // ---- table-driven unit tests ------------------------------------------------
 
 func TestRecordSent_WithSSID(t *testing.T) {
-	s := New("")
+	s := NewSQLite(openDMStatsTestDB(t))
 
 	s.RecordSent("CALL-1")
 
@@ -29,7 +27,7 @@ func TestRecordSent_WithSSID(t *testing.T) {
 }
 
 func TestRecordSent_WithoutSSID(t *testing.T) {
-	s := New("")
+	s := NewSQLite(openDMStatsTestDB(t))
 
 	s.RecordSent("CALL")
 
@@ -43,7 +41,7 @@ func TestRecordSent_WithoutSSID(t *testing.T) {
 }
 
 func TestRecordSent_LowercaseNormalized(t *testing.T) {
-	s := New("")
+	s := NewSQLite(openDMStatsTestDB(t))
 
 	s.RecordSent("call-1")
 
@@ -57,7 +55,7 @@ func TestRecordSent_LowercaseNormalized(t *testing.T) {
 }
 
 func TestRecordAck_WithSSID(t *testing.T) {
-	s := New("")
+	s := NewSQLite(openDMStatsTestDB(t))
 	s.RecordSent("CALL-1")
 	s.RecordAck("CALL-1")
 
@@ -75,7 +73,7 @@ func TestRecordAck_WithSSID(t *testing.T) {
 }
 
 func TestRecordAck_WithoutSSID(t *testing.T) {
-	s := New("")
+	s := NewSQLite(openDMStatsTestDB(t))
 	s.RecordSent("CALL")
 	s.RecordAck("CALL")
 
@@ -90,7 +88,7 @@ func TestRecordAck_WithoutSSID(t *testing.T) {
 }
 
 func TestRecordAck_MultipleAccumulate(t *testing.T) {
-	s := New("")
+	s := NewSQLite(openDMStatsTestDB(t))
 	s.RecordSent("CALL-2")
 	s.RecordSent("CALL-2")
 	s.RecordAck("CALL-2")
@@ -103,57 +101,8 @@ func TestRecordAck_MultipleAccumulate(t *testing.T) {
 	}
 }
 
-// ---- persistence round-trip -------------------------------------------------
-
-func TestLoadRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dm_stats.json")
-
-	s1 := New(path)
-	s1.RecordSent("QQ0XX-1")
-	s1.RecordAck("QQ0XX-1")
-
-	if err := s1.save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	s2 := New(path)
-	if err := s2.Load(); err != nil {
-		t.Fatalf("load: %v", err)
-	}
-
-	snap := s2.Snapshot()
-	full := snap["QQ0XX-1"]
-	if full.Sent != 1 || full.Ack != 1 {
-		t.Errorf("round-trip: unexpected full entry %+v", full)
-	}
-	base := snap["QQ0XX"]
-	if base.Sent != 1 || base.Ack != 1 {
-		t.Errorf("round-trip: unexpected base entry %+v", base)
-	}
-}
-
-func TestLoad_MissingFileOK(t *testing.T) {
-	s := New(filepath.Join(t.TempDir(), "nonexistent.json"))
-	if err := s.Load(); err != nil {
-		t.Errorf("missing file should not error: %v", err)
-	}
-}
-
-func TestLoad_CorruptFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dm_stats.json")
-	if err := os.WriteFile(path, []byte("not-json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	s := New(path)
-	if err := s.Load(); err == nil {
-		t.Error("expected error on corrupt file")
-	}
-}
-
 func TestSnapshot_ReturnsCopy(t *testing.T) {
-	s := New("")
+	s := NewSQLite(openDMStatsTestDB(t))
 	s.RecordSent("CALL-1")
 	snap := s.Snapshot()
 	snap["CALL-1"] = Entry{Sent: 99}
@@ -188,7 +137,7 @@ func TestProperty_SentCountMatchesRecordCalls(t *testing.T) {
 		callsign := rapid.StringMatching(`^[A-Z0-9]{3,6}-[1-9]$`).Draw(rt, "callsign")
 		n := rapid.IntRange(1, 50).Draw(rt, "n")
 
-		s := New("")
+		s := NewSQLite(openDMStatsTestDB(t))
 		for i := 0; i < n; i++ {
 			s.RecordSent(callsign)
 		}
@@ -209,7 +158,7 @@ func TestProperty_AckNeverExceedsSent(t *testing.T) {
 		sent := rapid.IntRange(0, 20).Draw(rt, "sent")
 		acked := rapid.IntRange(0, 20).Draw(rt, "acked")
 
-		s := New("")
+		s := NewSQLite(openDMStatsTestDB(t))
 		for i := 0; i < sent; i++ {
 			s.RecordSent(callsign)
 		}

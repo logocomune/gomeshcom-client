@@ -116,21 +116,38 @@ func TestParsePacket_TypePreservedInJSON(t *testing.T) {
 	}
 }
 
+func TestParseTelemetryPreservesMissingAndZeroValues(t *testing.T) {
+	envelope, err := ParsePacket([]byte(`{"type":"tele","src":"QQ1ABC-1","temp1":0}`))
+	if err != nil {
+		t.Fatalf("ParsePacket() error = %v", err)
+	}
+	packet, ok := envelope.Packet.(Telemetry)
+	if !ok {
+		t.Fatalf("packet type = %T, want Telemetry", envelope.Packet)
+	}
+	if packet.Temp1 == nil || *packet.Temp1 != 0 {
+		t.Fatalf("Temp1 = %#v, want explicit zero", packet.Temp1)
+	}
+	if packet.Humidity != nil {
+		t.Fatalf("Humidity = %#v, want nil for missing field", packet.Humidity)
+	}
+}
+
 func TestIsAckOrReject(t *testing.T) {
 	tests := map[string]struct {
 		msg  string
 		want bool
 	}{
-		"bare ack":            {msg: "ack571", want: true},
-		"colon ack":           {msg: ":ack571", want: true},
-		"callsign space ack":  {msg: "QQ1ABC-1 :ack571", want: true},
-		"callsign colon ack":  {msg: "QQ1ABC-1:ack571", want: true},
-		"uppercase ACK":       {msg: "ACK42", want: true},
-		"bare rej":            {msg: "rej99", want: true},
-		"colon rej":           {msg: ":rej99", want: true},
-		"callsign space rej":  {msg: "QQ1ABC-1 :rej99", want: true},
-		"uppercase REJ":       {msg: "REJ7", want: true},
-		"plain text message":  {msg: "hello world", want: false},
+		"bare ack":                 {msg: "ack571", want: true},
+		"colon ack":                {msg: ":ack571", want: true},
+		"callsign space ack":       {msg: "QQ1ABC-1 :ack571", want: true},
+		"callsign colon ack":       {msg: "QQ1ABC-1:ack571", want: true},
+		"uppercase ACK":            {msg: "ACK42", want: true},
+		"bare rej":                 {msg: "rej99", want: true},
+		"colon rej":                {msg: ":rej99", want: true},
+		"callsign space rej":       {msg: "QQ1ABC-1 :rej99", want: true},
+		"uppercase REJ":            {msg: "REJ7", want: true},
+		"plain text message":       {msg: "hello world", want: false},
 		"message with ack in word": {msg: "acknowledge receipt", want: false},
 		"ack followed by letters":  {msg: "ack123abc", want: false},
 		"rej followed by letters":  {msg: "CALL:rej42test", want: false},

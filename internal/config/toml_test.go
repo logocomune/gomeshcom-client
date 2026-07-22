@@ -32,6 +32,12 @@ max_message_length = 100
 enabled = false
 retention_days = 7
 replay_window = "30m"
+
+[storage]
+purge_interval = "4h"
+receive_log_retention = "30d"
+public_chat_retention = "30d"
+nodes_retention = "7d"
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -62,6 +68,12 @@ replay_window = "30m"
 	if tf.ReceiveLog.ReplayWindow == nil || tf.ReceiveLog.ReplayWindow.Duration != 30*time.Minute {
 		t.Errorf("ReceiveLog.ReplayWindow = %v, want 30m", tf.ReceiveLog.ReplayWindow)
 	}
+	if tf.Storage == nil {
+		t.Fatal("expected non-nil Storage section")
+	}
+	if tf.Storage.ReceiveLogRetention == nil || tf.Storage.ReceiveLogRetention.Duration != 30*24*time.Hour {
+		t.Errorf("Storage.ReceiveLogRetention = %v, want 30d", tf.Storage.ReceiveLogRetention)
+	}
 }
 
 func TestLoadTomlFileInvalid(t *testing.T) {
@@ -85,6 +97,16 @@ func TestLoadTomlFileInvalidDuration(t *testing.T) {
 	_, err := loadTomlFile(path)
 	if err == nil {
 		t.Fatal("expected error for invalid duration")
+	}
+}
+
+func TestTomlDurationAcceptsDaySuffix(t *testing.T) {
+	var d tomlDuration
+	if err := d.UnmarshalText([]byte("2d")); err != nil {
+		t.Fatalf("UnmarshalText() error = %v", err)
+	}
+	if d.Duration != 48*time.Hour {
+		t.Fatalf("Duration = %s, want 48h", d.Duration)
 	}
 }
 
@@ -156,6 +178,42 @@ func TestMergeTomlDataDirNeverOverwritten(t *testing.T) {
 	}
 }
 
+func TestMergeTomlAppliesStorageWhenNoEnv(t *testing.T) {
+	cfg := Config{Storage: Storage{SQLitePath: "./data/gomeshcom.db"}}
+	sqlitePath := "./custom/gomeshcom.db"
+	purgeInterval := tomlDuration{Duration: 2 * time.Hour}
+	nodesRetention := tomlDuration{Duration: 7 * 24 * time.Hour}
+	tf := &tomlFile{Storage: &tomlStorage{
+		SQLitePath:     &sqlitePath,
+		PurgeInterval:  &purgeInterval,
+		NodesRetention: &nodesRetention,
+	}}
+
+	mergeToml(&cfg, tf, EnvOverrides{})
+
+	if cfg.Storage.SQLitePath != sqlitePath {
+		t.Fatalf("Storage.SQLitePath = %q, want %q", cfg.Storage.SQLitePath, sqlitePath)
+	}
+	if cfg.Storage.PurgeInterval != 2*time.Hour {
+		t.Fatalf("Storage.PurgeInterval = %s, want 2h", cfg.Storage.PurgeInterval)
+	}
+	if cfg.Storage.NodesRetention != 7*24*time.Hour {
+		t.Fatalf("Storage.NodesRetention = %s, want 7d", cfg.Storage.NodesRetention)
+	}
+}
+
+func TestMergeTomlSkipsEnvStorage(t *testing.T) {
+	cfg := Config{Storage: Storage{SQLitePath: "./env/gomeshcom.db"}}
+	sqlitePath := "./toml/gomeshcom.db"
+	tf := &tomlFile{Storage: &tomlStorage{SQLitePath: &sqlitePath}}
+
+	mergeToml(&cfg, tf, EnvOverrides{"STORAGE_SQLITE_PATH": true})
+
+	if cfg.Storage.SQLitePath != "./env/gomeshcom.db" {
+		t.Fatalf("Storage.SQLitePath = %q, want env value", cfg.Storage.SQLitePath)
+	}
+}
+
 // -------- WriteDefaultToml --------
 
 func TestWriteDefaultTomlCreatesFile(t *testing.T) {
@@ -188,6 +246,7 @@ func TestWriteDefaultTomlCreatesFile(t *testing.T) {
 		Send:       Send{DedupTTL: 2 * time.Second},
 		Auth:       Auth{SessionTTL: 24 * time.Hour, CookieName: "meshcom_session"},
 		RequestLog: RequestLog{Enabled: false},
+		Storage:    Storage{SQLitePath: "./data/gomeshcom.db"},
 	}
 
 	if err := WriteDefaultToml(path, cfg); err != nil {
@@ -208,6 +267,24 @@ func TestWriteDefaultTomlCreatesFile(t *testing.T) {
 	}
 	if !strings.Contains(content, `[receive_log]`) {
 		t.Errorf("expected [receive_log] section, got:\n%s", content)
+	}
+	if !strings.Contains(content, `[storage]`) {
+		t.Errorf("expected [storage] section, got:\n%s", content)
+	}
+	if !strings.Contains(content, `sqlite_path = "./data/gomeshcom.db"`) {
+		t.Errorf("expected sqlite_path in TOML, got:\n%s", content)
+	}
+	if !strings.Contains(content, `purge_interval = "4h"`) {
+		t.Errorf("expected purge_interval in TOML, got:\n%s", content)
+	}
+	if !strings.Contains(content, `receive_log_retention = "30d"`) {
+		t.Errorf("expected receive_log_retention in TOML, got:\n%s", content)
+	}
+	if !strings.Contains(content, `public_chat_retention = "30d"`) {
+		t.Errorf("expected public_chat_retention in TOML, got:\n%s", content)
+	}
+	if !strings.Contains(content, `nodes_retention = "7d"`) {
+		t.Errorf("expected nodes_retention in TOML, got:\n%s", content)
 	}
 	// Password must never appear in the default file.
 	if strings.Contains(content, `password = "secret"`) {
@@ -260,6 +337,7 @@ func TestWriteDefaultTomlDeterministic(t *testing.T) {
 		Send:       Send{DedupTTL: 2 * time.Second},
 		Auth:       Auth{SessionTTL: 24 * time.Hour, CookieName: "meshcom_session"},
 		RequestLog: RequestLog{Enabled: false},
+		Storage:    Storage{SQLitePath: "./data/gomeshcom.db"},
 	}
 
 	a := buildTomlContent(cfg)

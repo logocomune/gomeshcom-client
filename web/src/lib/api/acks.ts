@@ -106,12 +106,13 @@ export function buildAckIndexFromChatRecords(records: ChatRecord[]): AckIndex {
 		if (kind !== 'ack' && kind !== 'reject') continue;
 
 		const { relays, origin } = splitSourcePath(record.src);
+		const via = record.via ?? relays;
 		const entry: AckEntry = {
 			receivedAt: record.received_at,
 			msgId: record.msg_id,
 			rssi: record.rssi,
 			snr: record.snr,
-			via: relays,
+			via,
 			source: origin,
 			ackSource: ackSource(record),
 			target: ackTargetCallsign(record)

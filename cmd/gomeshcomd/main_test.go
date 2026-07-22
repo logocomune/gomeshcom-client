@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/logocomune/gomeshcom-client/internal/config"
 )
@@ -153,5 +157,97 @@ func TestWebInterfaceURL(t *testing.T) {
 				t.Fatalf("webInterfaceURL(%q) = %q, want %q", tt.httpAddr, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestOpenStorageAndImportImportsLegacyFilesOnce(t *testing.T) {
+	dataDir := t.TempDir()
+	now := time.Now().UTC().Truncate(time.Second)
+	cfg := config.Config{
+		DataDir: dataDir,
+		MyCall:  "QQ0QQ-1",
+		ReceiveLog: config.ReceiveLog{
+			Path: filepath.Join(dataDir, "raw"),
+		},
+		ChatLog: config.ChatLog{
+			Path: filepath.Join(dataDir, "chat"),
+		},
+		Stats: config.Stats{
+			Path: filepath.Join(dataDir, "stats", "stats.json"),
+		},
+		Storage: config.Storage{
+			SQLitePath: filepath.Join(dataDir, "gomeshcom.db"),
+		},
+	}
+
+	writeStartupFile(t, filepath.Join(dataDir, "nodes", "positions.json"), fmt.Sprintf(`{"NODE-1":{"lat":43.7,"lng":10.4,"lastseen":%q}}`, now.Format(time.RFC3339Nano)))
+	writeStartupFile(t, filepath.Join(dataDir, "raw", "received.20260701.jsonl"), fmt.Sprintf(`{"received_at":%q,"remote_addr":"127.0.0.1:1799","bytes":1,"raw":"{}"}`+"\n", now.Format(time.RFC3339Nano)))
+	writeStartupFile(t, filepath.Join(dataDir, "chat", "P_broadcast.jsonl"), fmt.Sprintf(`{"received_at":%q,"src":"SRC-1","dst":"*","msg":"hello"}`+"\n", now.Format(time.RFC3339Nano)))
+	writeStartupFile(t, filepath.Join(dataDir, "chat", "DM_QQ1ABC-1.jsonl"), fmt.Sprintf(`{"received_at":%q,"src":"QQ1ABC-1","dst":"QQ0QQ-1","msg":"legacy dm"}`+"\n", now.Format(time.RFC3339Nano)))
+	writeStartupFile(t, filepath.Join(dataDir, "chat", "msg_idx.json"), fmt.Sprintf(`{"P_broadcast":{"lastRead":%q},"DM_QQ1ABC-1":{"lastRead":%q}}`, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)))
+	writeStartupFile(t, filepath.Join(dataDir, "stats", "dm_stats.json"), `{"QQ1ABC-1":{"sent":2,"ack":1}}`)
+	writeStartupFile(t, filepath.Join(dataDir, "stats", "stats.json"), fmt.Sprintf(`{"%d":{"hour":%d,"public":1,"total":1}}`, now.Truncate(time.Hour).Unix(), now.Truncate(time.Hour).Unix()))
+	writeStartupFile(t, filepath.Join(dataDir, "channel_show.json"), `{"mode":"allowlist","channels":["*"]}`)
+	writeStartupFile(t, filepath.Join(dataDir, "configs", "station.json"), `{"callsign":"QQ9XYZ-1"}`)
+	writeStartupFile(t, filepath.Join(dataDir, "http-sessions.json"), fmt.Sprintf(`{"sessions":{"token-hash":%q}}`, now.Add(time.Hour).Format(time.RFC3339Nano)))
+
+	if err := runLegacyDataMigration(cfg); err != nil {
+		t.Fatalf("runLegacyDataMigration() error = %v", err)
+	}
+	db, err := openStorageAndImport(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("openStorageAndImport() error = %v", err)
+	}
+	defer db.Close()
+
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM nodes`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM receive_log`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM chats_public`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM chats_dm`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM chat_reads`, 2)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM chats_dm WHERE conversation_id = 'DM_QQ9XYZ_QQ1ABC-1'`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM chat_reads WHERE conversation_id = 'DM_QQ9XYZ-1_QQ1ABC-1'`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM dm_stats`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM stats_hourly`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM channel_show_channels`, 1)
+	if _, err := os.Stat(filepath.Join(dataDir, "configs", "channel_show.json")); err != nil {
+		t.Fatalf("legacy channel_show not moved before import: %v", err)
+	}
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM station_identity`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM http_sessions`, 1)
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM data_imports`, 9)
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close first db: %v", err)
+	}
+	writeStartupFile(t, filepath.Join(dataDir, "chat", "P_broadcast.jsonl"), fmt.Sprintf(`{"received_at":%q,"src":"SRC-2","dst":"*","msg":"second"}`+"\n", now.Add(time.Minute).Format(time.RFC3339Nano)))
+	db, err = openStorageAndImport(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("second openStorageAndImport() error = %v", err)
+	}
+	defer db.Close()
+	assertStartupCount(t, db.SQL(), `SELECT COUNT(*) FROM chats_public`, 1)
+}
+
+func writeStartupFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertStartupCount(t *testing.T, db interface {
+	QueryRow(query string, args ...any) *sql.Row
+}, query string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Fatalf("query %q: %v", query, err)
+	}
+	if got != want {
+		t.Fatalf("%s = %d, want %d", query, got, want)
 	}
 }

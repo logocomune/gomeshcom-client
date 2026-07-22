@@ -2,14 +2,40 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/station"
 )
+
+func newHTTPStationIdentity(t *testing.T, fallback string) *station.Identity {
+	t.Helper()
+	id, _ := newHTTPStationIdentityWithDB(t, fallback)
+	return id
+}
+
+func newHTTPStationIdentityWithDB(t *testing.T, fallback string) (*station.Identity, *sql.DB) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gomeshcom.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE station_identity (id INTEGER PRIMARY KEY CHECK (id = 1), callsign TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create station_identity: %v", err)
+	}
+	id, err := station.NewSQLite(db, fallback)
+	if err != nil {
+		t.Fatalf("NewSQLite() error = %v", err)
+	}
+	return id, db
+}
 
 func TestGetMyCall(t *testing.T) {
 	id := station.NewInMemory("IU5PMP-1")
@@ -136,11 +162,7 @@ func TestGetMyCallRequiresAuth(t *testing.T) {
 }
 
 func TestUpdateMyCallPersistsBeforeResponding(t *testing.T) {
-	dir := t.TempDir()
-	id, err := station.New(station.DefaultPath(dir), "IU5PMP-1")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	id, db := newHTTPStationIdentityWithDB(t, "IU5PMP-1")
 	srv := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil,
 		WithStationIdentity(id))
 
@@ -153,13 +175,12 @@ func TestUpdateMyCallPersistsBeforeResponding(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 
-	// File must exist after response — no crash window.
-	id2, err := station.New(station.DefaultPath(dir), "FALLBACK-1")
-	if err != nil {
-		t.Fatalf("reload: %v", err)
+	var persisted string
+	if err := db.QueryRowContext(context.Background(), `SELECT callsign FROM station_identity WHERE id = 1`).Scan(&persisted); err != nil {
+		t.Fatalf("query station_identity: %v", err)
 	}
-	if id2.Current() != "QQ0QQ-2" {
-		t.Errorf("reloaded = %q, want QQ0QQ-2 (should be persisted before response)", id2.Current())
+	if persisted != "QQ0QQ-2" {
+		t.Errorf("persisted = %q, want QQ0QQ-2", persisted)
 	}
 }
 

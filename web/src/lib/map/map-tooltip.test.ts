@@ -48,6 +48,12 @@ describe('buildTooltipHtml', () => {
 		expect(html).toContain('A&amp;B');
 		expect(html).not.toContain('<CALL&1>');
 	});
+
+	it('converts ExtUDP altitude from feet to meters', () => {
+		const html = buildTooltipHtml(makePosition({ altitude: 161 }), NOW);
+
+		expect(html).toContain('49 m');
+	});
 });
 
 describe('buildOwnMarkerTooltipHtml', () => {

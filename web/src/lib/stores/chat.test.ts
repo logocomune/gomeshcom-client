@@ -110,6 +110,18 @@ describe('appendLiveChatRecord — DM', () => {
 		expect(chatState.chatHistory['DM_XX5YYY-1_IU5PMP-1']).toHaveLength(1);
 	});
 
+	it('keeps same packet ID when records are more than five minutes apart', () => {
+		chatState.appendLiveChatRecord(
+			packet({ src: 'IU5PMP-1', dst: 'XX5YYY-1', msg_id: '42', msg: 'first' }),
+			'2026-06-01T10:00:00Z'
+		);
+		chatState.appendLiveChatRecord(
+			packet({ src: 'IU5PMP-1', dst: 'XX5YYY-1', msg_id: '42', msg: 'second' }),
+			'2026-06-01T10:06:00Z'
+		);
+		expect(chatState.chatHistory['DM_XX5YYY-1_IU5PMP-1']).toHaveLength(2);
+	});
+
 	it('removes matching pending record on receive', () => {
 		const convId = 'DM_XX5YYY-1_IU5PMP-1';
 		chatState.chatHistory = {

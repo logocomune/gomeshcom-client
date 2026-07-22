@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ type tomlFile struct {
 	Auth             *tomlAuth        `toml:"auth"`
 	RequestLog       *tomlRequestLog  `toml:"request_log"`
 	Compression      *tomlCompression `toml:"compression"`
+	Storage          *tomlStorage     `toml:"storage"`
 }
 
 type tomlReceiveLog struct {
@@ -82,11 +84,20 @@ type tomlCompression struct {
 	MinimumSize *int  `toml:"minimum_size"`
 }
 
+type tomlStorage struct {
+	SQLitePath          *string       `toml:"sqlite_path"`
+	PurgeInterval       *tomlDuration `toml:"purge_interval"`
+	ReceiveLogRetention *tomlDuration `toml:"receive_log_retention"`
+	PublicChatRetention *tomlDuration `toml:"public_chat_retention"`
+	NodesRetention      *tomlDuration `toml:"nodes_retention"`
+	TelemetryRetention  *tomlDuration `toml:"telemetry_retention"`
+}
+
 // tomlDuration encodes time.Duration as a human-readable string (e.g. "40s").
 type tomlDuration struct{ time.Duration }
 
 func (d *tomlDuration) UnmarshalText(b []byte) error {
-	v, err := time.ParseDuration(string(b))
+	v, err := ParseDuration(string(b))
 	if err != nil {
 		return fmt.Errorf("invalid duration %q: %w", string(b), err)
 	}
@@ -96,6 +107,18 @@ func (d *tomlDuration) UnmarshalText(b []byte) error {
 
 func (d tomlDuration) MarshalText() ([]byte, error) {
 	return []byte(d.String()), nil
+}
+
+func ParseDuration(value string) (time.Duration, error) {
+	trimmed := strings.TrimSpace(value)
+	if strings.HasSuffix(trimmed, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(trimmed, "d"))
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(trimmed)
 }
 
 // -------- Load --------
@@ -158,6 +181,12 @@ var knownEnvSuffixes = []string{
 	"REQUEST_LOG_ENABLED",
 	"COMPRESSION_ENABLED",
 	"COMPRESSION_MINIMUM_SIZE",
+	"STORAGE_SQLITE_PATH",
+	"STORAGE_PURGE_INTERVAL",
+	"STORAGE_RECEIVE_LOG_RETENTION",
+	"STORAGE_PUBLIC_CHAT_RETENTION",
+	"STORAGE_NODES_RETENTION",
+	"STORAGE_TELEMETRY_RETENTION",
 }
 
 // DetectEnvOverrides returns the set of config fields that are explicitly
@@ -284,6 +313,27 @@ func mergeToml(cfg *Config, tf *tomlFile, env EnvOverrides) {
 			cfg.Compression.MinimumSize = *c.MinimumSize
 		}
 	}
+
+	if s := tf.Storage; s != nil {
+		if s.SQLitePath != nil && !env["STORAGE_SQLITE_PATH"] {
+			cfg.Storage.SQLitePath = *s.SQLitePath
+		}
+		if s.PurgeInterval != nil && !env["STORAGE_PURGE_INTERVAL"] {
+			cfg.Storage.PurgeInterval = s.PurgeInterval.Duration
+		}
+		if s.ReceiveLogRetention != nil && !env["STORAGE_RECEIVE_LOG_RETENTION"] {
+			cfg.Storage.ReceiveLogRetention = s.ReceiveLogRetention.Duration
+		}
+		if s.PublicChatRetention != nil && !env["STORAGE_PUBLIC_CHAT_RETENTION"] {
+			cfg.Storage.PublicChatRetention = s.PublicChatRetention.Duration
+		}
+		if s.NodesRetention != nil && !env["STORAGE_NODES_RETENTION"] {
+			cfg.Storage.NodesRetention = s.NodesRetention.Duration
+		}
+		if s.TelemetryRetention != nil && !env["STORAGE_TELEMETRY_RETENTION"] {
+			cfg.Storage.TelemetryRetention = s.TelemetryRetention.Duration
+		}
+	}
 }
 
 // -------- Write --------
@@ -331,6 +381,7 @@ func writeTomlAtomically(path, content string) error {
 // buildTomlContent renders cfg as a deterministic, fully-commented TOML string.
 // auth.password is always rendered as "" regardless of cfg.Auth.Password.
 func buildTomlContent(cfg Config) string {
+	cfg = normalize(cfg)
 	var b strings.Builder
 
 	w := func(comment, key, value string) {
@@ -387,9 +438,27 @@ func buildTomlContent(cfg Config) string {
 	b.WriteString("\n[compression]\n")
 	w("Enable HTTP gzip response compression (live-apply)", "enabled", tomlBool(cfg.Compression.Enabled))
 	w("Minimum response body size in bytes before gzip is applied", "minimum_size", tomlInt(cfg.Compression.MinimumSize))
+
+	b.WriteString("\n[storage]\n")
+	w("Path to SQLite database file", "sqlite_path", tomlStr(cfg.Storage.SQLitePath))
+	w("Interval between SQLite purge runs", "purge_interval", tomlStr(formatTomlDuration(cfg.Storage.PurgeInterval)))
+	w("Retention window for SQLite receive_log rows", "receive_log_retention", tomlStr(formatTomlDuration(cfg.Storage.ReceiveLogRetention)))
+	w("Retention window for SQLite public chat rows", "public_chat_retention", tomlStr(formatTomlDuration(cfg.Storage.PublicChatRetention)))
+	w("Retention window for SQLite node rows based on lastseen", "nodes_retention", tomlStr(formatTomlDuration(cfg.Storage.NodesRetention)))
+	w("Retention window for SQLite telemetry rows", "telemetry_retention", tomlStr(formatTomlDuration(cfg.Storage.TelemetryRetention)))
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+func formatTomlDuration(d time.Duration) string {
+	if d > 0 && d%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+	}
+	if d > 0 && d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	}
+	return d.String()
 }
 
 func tomlStr(s string) string {

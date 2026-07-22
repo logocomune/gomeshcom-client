@@ -11,6 +11,7 @@ import {
 	conversationIdFor,
 	conversationIdForRecord,
 	chatRecordKey,
+	isDuplicateChatRecord,
 	loadLastChatTarget,
 	saveLastChatTarget,
 	markConversationRead,
@@ -419,8 +420,7 @@ class ChatStore {
 
 	appendChatRecordToConversation(convId: string, rec: ChatRecord) {
 		const existing = this.chatHistory[convId] ?? [];
-		const key = chatRecordKey(rec);
-		if (existing.some((r) => chatRecordKey(r) === key)) return;
+		if (existing.some((r) => isDuplicateChatRecord(r, rec))) return;
 		this.chatHistory = {
 			...this.chatHistory,
 			[convId]: [...existing, rec].sort((a, b) => a.received_at.localeCompare(b.received_at))
@@ -442,15 +442,12 @@ class ChatStore {
 
 	mergeHistory(id: string, records: ChatRecord[]) {
 		const live = this.chatHistory[id] ?? [];
-		const seen = new Set<string>();
-		const merged = [...records, ...live]
-			.filter((r) => {
-				const key = chatRecordKey(r);
-				if (seen.has(key)) return false;
-				seen.add(key);
-				return true;
-			})
-			.sort((a, b) => a.received_at.localeCompare(b.received_at));
+		const merged: ChatRecord[] = [];
+		for (const record of [...records, ...live]) {
+			if (merged.some((existing) => isDuplicateChatRecord(existing, record))) continue;
+			merged.push(record);
+		}
+		merged.sort((a, b) => a.received_at.localeCompare(b.received_at));
 		this.chatHistory = { ...this.chatHistory, [id]: merged };
 		this.fetchedConvIds = new Set([...this.fetchedConvIds, id]);
 	}

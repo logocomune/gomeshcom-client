@@ -8,13 +8,13 @@ The frontend resolves known group numbers to a human-readable label and a flag e
 
 | Group       | Prefix    | Note                          | Reach                              |
 |-------------|-----------|-------------------------------|------------------------------------|
-| 2           | EU        | Europa                        | Europaweit                         |
-| 3           | US        | USA                           | US-weit                            |
+| 2           | EU        | Europe                        | Europe-wide                        |
+| 3           | US        | United States                 | United States-wide                 |
 | 9           | LOC       | Local group                   | MeshCom HF cloud only              |
-| 10          | WW-GE     | Worldwide German              | Deutschsprachige Meldungen         |
-| 13          | WW-EN     | Worldwide English             | Englischsprachige Meldungen        |
+| 10          | WW-GE     | Worldwide German              | German-language messages           |
+| 13          | WW-EN     | Worldwide English             | English-language messages          |
 | 19000       | F         | France dép. 19 & 87           |                                    |
-| 20          | DACH      | D-A-CH                        | Deutschland, Österreich, Schweiz   |
+| 20          | DACH      | D-A-CH                        | Germany, Austria, Switzerland      |
 | 204         | PA        | Netherlands                   |                                    |
 | 206         | ON        | Belgium                       |                                    |
 | 208         | F         | France                        |                                    |
@@ -39,34 +39,34 @@ The frontend resolves known group numbers to a human-readable label and a flag e
 | 22283       | I         | Campania                      |                                    |
 | 22284       | I         | Molise                        |                                    |
 | 22291       | I         | Sicilia                       |                                    |
-| 22299       | I         | Meteo/data/sensors            |                                    |
+| 22299       | I         | Weather/data/sensors          |                                    |
 | 226         | YO        | Romania                       |                                    |
 | 228         | HB        | Switzerland                   |                                    |
 | 232         | OE        | Austria                       |                                    |
-| 2321–2329   | OE1–OE9   | OE Bundesländer               |                                    |
+| 2321–2329   | OE1–OE9   | Austrian federal states       |                                    |
 | 234         | G         | Great Britain                 |                                    |
 | 238         | OZ        | Denmark                       |                                    |
 | 240         | SA        | Sweden                        |                                    |
 | 260         | SP        | Poland                        |                                    |
 | 262         | DL        | Germany                       |                                    |
-| 26200–26299 | DL00–DL99 | Germany regional              | Deutschsprachige Meldungen         |
+| 26200–26299 | DL00–DL99 | German regional groups        | German-language messages           |
 | 2622        | DL 2      | Schleswig-Holstein            |                                    |
-| 26206       | DL 06     | DARC Ortsverband Dachau C06   |                                    |
-| 26207       | DL 07     | Sachsen-Anhalt                |                                    |
+| 26206       | DL 06     | DARC Dachau local chapter C06 |                                    |
+| 26207       | DL 07     | Saxony-Anhalt                 |                                    |
 | 26216       | DL 16     | Chiemgau                      |                                    |
-| 26220       | DL 20     | Großraum Hamburg              |                                    |
-| 26221       | DL 21     | Stadt Hamburg                 |                                    |
+| 26220       | DL 20     | Greater Hamburg               |                                    |
+| 26221       | DL 21     | City of Hamburg               |                                    |
 | 26225       | DL 25     | AFU Nord                      |                                    |
-| 26235       | DL 35     | NI-Südheide                   |                                    |
+| 26235       | DL 35     | Lower Saxony South Heath      |                                    |
 | 26242       | DL 42     | Münsterland                   |                                    |
 | 26244       | DL 44     | Freising                      |                                    |
-| 26251       | DL 51     | Rhein-Berg                    | Rheinisch-Bergischer-Kreis         |
+| 26251       | DL 51     | Rhine-Berg                    | Rhine-Berg district                |
 | 26255       | DL 55     | Pfalz                         |                                    |
 | 26266       | DL 66     | Saar                          |                                    |
-| 26269       | DL 69     | Hessen/Rheinland Pfalz        |                                    |
-| 26289       | DL 89     | München Stadt                 |                                    |
-| 26295       | DL 95     | Ostthüringen                  |                                    |
-| 26298       | DL 98     | Thüringen                     |                                    |
+| 26269       | DL 69     | Hesse/Rhineland-Palatinate    |                                    |
+| 26289       | DL 89     | City of Munich                |                                    |
+| 26295       | DL 95     | Eastern Thuringia             |                                    |
+| 26298       | DL 98     | Thuringia                     |                                    |
 | 26379       | DL3 79    | Hochrhein                     |                                    |
 | 292         | T7        | San Marino                    |                                    |
 | 293         | S5        | Slovenia                      |                                    |

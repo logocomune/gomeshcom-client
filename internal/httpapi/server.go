@@ -3,6 +3,7 @@ package httpapi
 import (
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,6 +61,7 @@ type Server struct {
 	sendCache    *sendcache.Cache
 	outbox       *outbox.Outbox
 	sessions     *sessionStore
+	sessionDB    *sql.DB
 	cancel       context.CancelFunc
 	envOverrides config.EnvOverrides
 	tomlPath     string
@@ -99,6 +101,12 @@ func WithStats(store *stats.Store) ServerOption {
 func WithDMStats(store *dmstats.Store) ServerOption {
 	return func(server *Server) {
 		server.dmStats = store
+	}
+}
+
+func WithSessionDB(db *sql.DB) ServerOption {
+	return func(server *Server) {
+		server.sessionDB = db
 	}
 }
 
@@ -158,7 +166,11 @@ func NewServer(cfg config.Config, version string, bus *events.Bus, positionStore
 	server.outbox = outbox.New(outgoingEchoTimeout, server.handleOutgoingTimeout)
 	server.watchOutgoingEchoes(ctx)
 	if authEnabled(cfg) {
-		server.sessions = newSessionStore(sessionPersistencePath(cfg.DataDir))
+		if server.sessionDB != nil {
+			server.sessions = newSQLiteSessionStore(server.sessionDB)
+		} else {
+			server.sessions = newMemorySessionStore()
+		}
 		server.sessions.start(ctx)
 	}
 	return server

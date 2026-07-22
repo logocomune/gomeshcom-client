@@ -5,13 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -20,19 +19,19 @@ import (
 
 var errUnauthorized = errors.New("unauthorized")
 
-type persistedSessions struct {
-	Sessions map[string]time.Time `json:"sessions"`
-}
-
 type sessionStore struct {
 	mu       sync.Mutex
-	path     string
+	db       *sql.DB
 	sessions map[string]time.Time
 }
 
-func newSessionStore(path string) *sessionStore {
+func newMemorySessionStore() *sessionStore {
+	return &sessionStore{sessions: make(map[string]time.Time)}
+}
+
+func newSQLiteSessionStore(db *sql.DB) *sessionStore {
 	store := &sessionStore{
-		path:     path,
+		db:       db,
 		sessions: make(map[string]time.Time),
 	}
 	store.load()
@@ -40,23 +39,29 @@ func newSessionStore(path string) *sessionStore {
 }
 
 func (s *sessionStore) load() {
-	if s.path == "" {
-		return
+	if s.db != nil {
+		s.loadSQLite(context.Background())
 	}
+}
 
-	file, err := os.Open(s.path)
+func (s *sessionStore) loadSQLite(ctx context.Context) {
+	rows, err := s.db.QueryContext(ctx, `SELECT token_hash, expires_at FROM http_sessions`)
 	if err != nil {
 		return
 	}
-	defer file.Close()
-
-	var persisted persistedSessions
-	if err := json.NewDecoder(file).Decode(&persisted); err != nil {
-		return
-	}
+	defer rows.Close()
 
 	now := time.Now().UTC()
-	for tokenHash, expiresAt := range persisted.Sessions {
+	for rows.Next() {
+		var tokenHash string
+		var expiresRaw string
+		if err := rows.Scan(&tokenHash, &expiresRaw); err != nil {
+			return
+		}
+		expiresAt, err := time.Parse(time.RFC3339Nano, expiresRaw)
+		if err != nil {
+			continue
+		}
 		if expiresAt.After(now) {
 			s.sessions[tokenHash] = expiresAt
 		}
@@ -146,48 +151,31 @@ func (s *sessionStore) evictExpired() {
 }
 
 func (s *sessionStore) persistLocked() error {
-	if s.path == "" {
+	if s.db == nil {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create session directory: %w", err)
-	}
-
-	tmpPath := s.path + ".tmp"
-	temp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("create temporary session file: %w", err)
-	}
-
-	cleanup := func() {
-		_ = temp.Close()
-		_ = os.Remove(tmpPath)
-	}
-	encoder := json.NewEncoder(temp)
-	if err := encoder.Encode(persistedSessions{Sessions: s.sessions}); err != nil {
-		cleanup()
-		return fmt.Errorf("encode sessions: %w", err)
-	}
-	if err := temp.Sync(); err != nil {
-		cleanup()
-		return fmt.Errorf("sync sessions: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close sessions: %w", err)
-	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("replace sessions: %w", err)
-	}
-	return nil
+	return s.persistSQLiteLocked(context.Background())
 }
 
-func sessionPersistencePath(dataDir string) string {
-	if dataDir == "" {
-		return ""
+func (s *sessionStore) persistSQLiteLocked(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin sqlite sessions: %w", err)
 	}
-	return filepath.Join(dataDir, "http-sessions.json")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM http_sessions`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("clear sqlite sessions: %w", err)
+	}
+	for tokenHash, expiresAt := range s.sessions {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO http_sessions(token_hash, expires_at) VALUES (?, ?)`, tokenHash, expiresAt.UTC().Format(time.RFC3339Nano)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("insert sqlite session: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sqlite sessions: %w", err)
+	}
+	return nil
 }
 
 func hashSessionToken(token string) string {

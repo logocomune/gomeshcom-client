@@ -119,7 +119,7 @@ simulator adds `{123` before sending echo and ACK responses.
 | `-lat` | `43.7303` | Base latitude for position packets. |
 | `-long` | `10.3956` | Base longitude for position packets. |
 | `-jitter` | `0.0005` | Maximum random coordinate offset in decimal degrees. |
-| `-alt` | `12` | Simulated altitude in meters. |
+| `-alt` | `12` | Simulated altitude in feet. |
 | `-batt` | `95` | Simulated battery percentage. |
 | `-hw-id` | `IOT-SIM` | Simulated hardware identifier. |
 | `-firmware` | `sim` | Simulated firmware version. |

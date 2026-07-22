@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +17,7 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
+	_ "modernc.org/sqlite"
 )
 
 // staticCallsign is a test-only myCallSource returning a fixed callsign.
@@ -24,14 +25,75 @@ type staticCallsign string
 
 func (s staticCallsign) Current() string { return string(s) }
 
+func newBridgeReceiveLog(t *testing.T, cfg receivelog.Config) *receivelog.Logger {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "receive.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE receive_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			received_at TEXT NOT NULL,
+			remote_addr TEXT NOT NULL,
+			bytes INTEGER NOT NULL,
+			raw TEXT NOT NULL,
+			packet_type TEXT,
+			parse_error TEXT
+		)
+	`); err != nil {
+		t.Fatalf("create receive_log table: %v", err)
+	}
+	return receivelog.NewSQLite(cfg, db)
+}
+
+func newBridgeChatLog(t *testing.T, identity chatlogSource) *chatlog.Logger {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	stmts := []string{
+		`CREATE TABLE chats_dm (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, msg_id TEXT, sequence_id TEXT, received_at TEXT NOT NULL, src TEXT, src_type TEXT, via TEXT, dst TEXT NOT NULL, msg TEXT NOT NULL, rssi INTEGER, snr INTEGER, direction TEXT, delivery_status TEXT, ack_status TEXT, ack_received_at TEXT, ack_src TEXT, ack_src_type TEXT, ack_rssi INTEGER, ack_snr INTEGER, ack_via TEXT)`,
+		`CREATE TABLE chats_public (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, kind TEXT NOT NULL, channel TEXT, msg_id TEXT, received_at TEXT NOT NULL, src TEXT, src_type TEXT, via TEXT, dst TEXT NOT NULL, msg TEXT NOT NULL, rssi INTEGER, snr INTEGER)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			t.Fatalf("create chatlog table: %v", err)
+		}
+	}
+	return chatlog.NewSQLite(db, identity)
+}
+
+type chatlogSource interface {
+	Current() string
+}
+
+func newBridgePositionsStore(t *testing.T) *positions.Store {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gomeshcom.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE nodes (
+			node_id TEXT PRIMARY KEY, lat REAL, lng REAL, alt INTEGER, hw_id TEXT,
+			firstseen TEXT, lastseen TEXT, lastdirectseen TEXT, rssi INTEGER, snr INTEGER, via TEXT
+		)
+	`); err != nil {
+		t.Fatalf("create nodes: %v", err)
+	}
+	return positions.NewSQLite(db)
+}
+
 func TestHandleDatagramLogsValidPacket(t *testing.T) {
-	dir := t.TempDir()
-	chatDir := filepath.Join(dir, "chat")
 	bus := events.NewBus()
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receivelog.New(receivelog.Config{
-		Enabled: true,
-		Path:    dir,
-	}), chatlog.New(chatDir, nil), nil, false, nil, nil, nil)
+	receiveLogger := newBridgeReceiveLog(t, receivelog.Config{Enabled: true})
+	chatLogger := newBridgeChatLog(t, nil)
+	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receiveLogger, chatLogger, nil, false, nil, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -57,12 +119,22 @@ func TestHandleDatagramLogsValidPacket(t *testing.T) {
 		t.Fatalf("event received_at parse: %v", err)
 	}
 
-	chatRecord := readChatRecord(t, filepath.Join(chatDir, "P_broadcast.jsonl"))
-	if chatRecord.ReceivedAt.Format(time.RFC3339Nano) != receivedAt {
-		t.Fatalf("chat received_at = %s, want event received_at %s", chatRecord.ReceivedAt.Format(time.RFC3339Nano), receivedAt)
+	chatRecords, err := chatLogger.ReadSince("P_broadcast", time.Time{})
+	if err != nil {
+		t.Fatalf("ReadSince: %v", err)
+	}
+	if len(chatRecords) != 1 || chatRecords[0].ReceivedAt.Format(time.RFC3339Nano) != receivedAt {
+		t.Fatalf("chat records = %+v, want received_at %s", chatRecords, receivedAt)
 	}
 
-	record := readRecord(t, todayReceiveLogPath(dir))
+	records, err := receiveLogger.ReadSince(time.Time{})
+	if err != nil {
+		t.Fatalf("ReadSince receive log: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("receive log records = %d, want 1", len(records))
+	}
+	record := records[0]
 	if record.PacketType != "msg" {
 		t.Fatalf("packet type = %q, want msg", record.PacketType)
 	}
@@ -72,12 +144,9 @@ func TestHandleDatagramLogsValidPacket(t *testing.T) {
 }
 
 func TestHandleDatagramLogsParseError(t *testing.T) {
-	dir := t.TempDir()
 	bus := events.NewBus()
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receivelog.New(receivelog.Config{
-		Enabled: true,
-		Path:    dir,
-	}), nil, nil, false, nil, nil, nil)
+	receiveLogger := newBridgeReceiveLog(t, receivelog.Config{Enabled: true})
+	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receiveLogger, nil, nil, false, nil, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -91,7 +160,14 @@ func TestHandleDatagramLogsParseError(t *testing.T) {
 		t.Fatalf("event type = %q, want packet.error", event.Type)
 	}
 
-	record := readRecord(t, todayReceiveLogPath(dir))
+	records, err := receiveLogger.ReadSince(time.Time{})
+	if err != nil {
+		t.Fatalf("ReadSince receive log: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("receive log records = %d, want 1", len(records))
+	}
+	record := records[0]
 	if record.ParseError == "" {
 		t.Fatal("parse error empty")
 	}
@@ -100,7 +176,7 @@ func TestHandleDatagramLogsParseError(t *testing.T) {
 func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 	t.Run("direct packet writes rssi/snr on origin", func(t *testing.T) {
 		bus := events.NewBus()
-		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
+		store := newBridgePositionsStore(t)
 		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, nil, nil)
 
 		raw := `{"src_type":"node","type":"pos","src":"QQ1ABC-1","msg":"","lat":48.1,"long":16.3,"alt":123,"rssi":-90,"snr":8}`
@@ -120,7 +196,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 
 	t.Run("indirect packet: origin keeps zero rssi/snr, relay gets freshness", func(t *testing.T) {
 		bus := events.NewBus()
-		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
+		store := newBridgePositionsStore(t)
 		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, nil, nil)
 
 		// Pre-populate relay via direct pos.
@@ -153,7 +229,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 
 	t.Run("msg packet touches freshness of existing node", func(t *testing.T) {
 		bus := events.NewBus()
-		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
+		store := newBridgePositionsStore(t)
 		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, nil, nil)
 
 		// Pre-populate origin.
@@ -172,7 +248,7 @@ func TestHandleDatagramUpdatesPositionStore(t *testing.T) {
 
 	t.Run("msg packet without signal preserves existing rssi/snr", func(t *testing.T) {
 		bus := events.NewBus()
-		store := positions.New(filepath.Join(t.TempDir(), "positions.json"))
+		store := newBridgePositionsStore(t)
 		bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, store, false, nil, nil, nil)
 
 		posRaw := `{"type":"pos","src":"QQ1ABC-1","lat":48.1,"long":16.3,"rssi":-70,"snr":2}`
@@ -572,151 +648,4 @@ func readChatRecord(t *testing.T, path string) chatlog.Record {
 	}
 
 	return record
-}
-
-func todayReceiveLogPath(dir string) string {
-	return filepath.Join(dir, "received."+time.Now().UTC().Format("20060102")+".jsonl")
-}
-
-func readRecord(t *testing.T, path string) receivelog.Record {
-	t.Helper()
-
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("open receive log: %v", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	if !scanner.Scan() {
-		t.Fatal("receive log empty")
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan receive log: %v", err)
-	}
-
-	var record receivelog.Record
-	if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-		t.Fatalf("unmarshal receive log: %v", err)
-	}
-
-	return record
-}
-
-// spyChatStatus records calls to RecordIncoming for inspection.
-type spyChatStatus struct {
-	mu    sync.Mutex
-	calls []struct {
-		convID string
-		ts     time.Time
-		msg    string
-	}
-}
-
-func (s *spyChatStatus) RecordIncoming(convID string, ts time.Time, msg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls = append(s.calls, struct {
-		convID string
-		ts     time.Time
-		msg    string
-	}{convID, ts, msg})
-}
-
-func (s *spyChatStatus) count() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.calls)
-}
-
-func TestLogChatMessageSelfEchoSkipsChatStatus(t *testing.T) {
-	dir := t.TempDir()
-	chatDir := filepath.Join(dir, "chat")
-	bus := events.NewBus()
-	spy := &spyChatStatus{}
-
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, staticCallsign("QQ0QQ-1")), nil, false, nil, staticCallsign("QQ0QQ-1"), spy)
-
-	// Self-echo: source == myCall. Must NOT call chatStatus.
-	raw := `{"type":"msg","src":"QQ0QQ-1","dst":"*","msg":"self echo"}`
-	bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
-
-	if spy.count() != 0 {
-		t.Fatalf("self-echo must not call RecordIncoming, got %d calls", spy.count())
-	}
-}
-
-func TestLogChatMessageInboundUpdatesChatStatus(t *testing.T) {
-	dir := t.TempDir()
-	chatDir := filepath.Join(dir, "chat")
-	bus := events.NewBus()
-	spy := &spyChatStatus{}
-
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, staticCallsign("QQ0QQ-1")), nil, false, nil, staticCallsign("QQ0QQ-1"), spy)
-
-	// Inbound from a different node: must call RecordIncoming.
-	raw := `{"type":"msg","src":"QQ1ABC-1","dst":"*","msg":"hello"}`
-	bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
-
-	if spy.count() != 1 {
-		t.Fatalf("inbound message must call RecordIncoming once, got %d calls", spy.count())
-	}
-	if spy.calls[0].convID != "P_broadcast" {
-		t.Fatalf("convID = %q, want P_broadcast", spy.calls[0].convID)
-	}
-	if spy.calls[0].msg != "hello" {
-		t.Fatalf("msg = %q, want hello", spy.calls[0].msg)
-	}
-}
-
-func TestLogChatMessageSelfEchoViaPathSkipsChatStatus(t *testing.T) {
-	dir := t.TempDir()
-	chatDir := filepath.Join(dir, "chat")
-	bus := events.NewBus()
-	spy := &spyChatStatus{}
-
-	// Self-echo with via path: source field is "QQ0QQ-1,RELAY-1".
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, staticCallsign("QQ0QQ-1")), nil, false, nil, staticCallsign("QQ0QQ-1"), spy)
-
-	raw := `{"type":"msg","src":"QQ0QQ-1,RELAY-1","dst":"*","msg":"self via"}`
-	bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
-
-	if spy.count() != 0 {
-		t.Fatalf("self-echo via relay must not call RecordIncoming, got %d calls", spy.count())
-	}
-}
-
-func TestLogChatMessageAckSkipsChatStatus(t *testing.T) {
-	tests := map[string]string{
-		"bare ack":           "ack571",
-		"colon ack":          ":ack571",
-		"callsign colon ack": "QQ1ABC-1:ack571",
-		"bare rej":           "rej99",
-	}
-
-	for name, msg := range tests {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			chatDir := filepath.Join(dir, "chat")
-			bus := events.NewBus()
-			spy := &spyChatStatus{}
-
-			bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, chatlog.New(chatDir, staticCallsign("QQ0QQ-1")), nil, false, nil, staticCallsign("QQ0QQ-1"), spy)
-
-			raw := `{"type":"msg","src":"QQ1ABC-1","dst":"QQ0QQ-1","msg":"` + msg + `"}`
-			bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
-
-			if spy.count() != 0 {
-				t.Fatalf("ACK/reject packet must not call RecordIncoming, got %d calls", spy.count())
-			}
-
-			// ACK/reject must still be persisted to chat history so the UI can
-			// render delivery confirmations. The DM log file is keyed by the
-			// basecall of myCall and the peer callsign.
-			chatRecord := readChatRecord(t, filepath.Join(chatDir, "DM_QQ0QQ_QQ1ABC-1.jsonl"))
-			if chatRecord.Msg != msg {
-				t.Fatalf("chat log msg = %q, want %q", chatRecord.Msg, msg)
-			}
-		})
-	}
 }

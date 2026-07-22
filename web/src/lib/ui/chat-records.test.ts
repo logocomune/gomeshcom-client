@@ -20,7 +20,8 @@ function record(overrides: Partial<ChatRecord> = {}): ChatRecord {
 describe('chat record UI helpers', () => {
 	it('extracts sequence id and strips node sequence suffix', () => {
 		expect(chatRecordSeqId(record())).toBe('42');
-		expect(chatRecordSeqId(record({ msg: 'hello {43}' }))).toBe('43');
+		expect(chatRecordSeqId(record({ sequence_id: '44', msg: 'hello' }))).toBe('44');
+		expect(chatRecordSeqId(record({ msg: 'hello {43}' }))).toBeNull();
 		expect(chatRecordSeqId(record({ msg: 'hello' }))).toBeNull();
 		expect(stripNodeSequence('hello{42}')).toBe('hello');
 		expect(stripNodeSequence('hello {42}')).toBe('hello ');

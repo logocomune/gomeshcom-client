@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { formatTime, formatRtt, formatChatTimestamp } from './format';
+import { formatAltitude, formatChatTimestamp, formatRtt, formatTime } from './format';
+
+describe('formatAltitude', () => {
+	it.each([
+		[0, '0 m'],
+		[161, '49 m'],
+		[3281, '1000 m']
+	])('converts %i feet to %s', (feet, expected) => {
+		expect(formatAltitude(feet)).toBe(expected);
+	});
+});
 
 describe('formatTime', () => {
 	it('formats ISO string to HH:MM:SS', () => {

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,89 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 )
+
+func newHTTPChatLog(t *testing.T, identity staticCallsign) *chatlog.Logger {
+	t.Helper()
+	return newHTTPChatLogWithDB(t, openHTTPChatLogDB(t), identity)
+}
+
+func newHTTPChatLogWithDB(t *testing.T, db *sql.DB, identity staticCallsign) *chatlog.Logger {
+	t.Helper()
+	return chatlog.NewSQLite(db, identity)
+}
+
+func openHTTPChatLogDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gomeshcom.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	stmts := []string{
+		`CREATE TABLE chats_dm (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, msg_id TEXT, sequence_id TEXT, received_at TEXT NOT NULL, src TEXT, src_type TEXT, via TEXT, dst TEXT NOT NULL, msg TEXT NOT NULL, rssi INTEGER, snr INTEGER, direction TEXT, delivery_status TEXT, ack_status TEXT, ack_received_at TEXT, ack_src TEXT, ack_src_type TEXT, ack_rssi INTEGER, ack_snr INTEGER, ack_via TEXT)`,
+		`CREATE TABLE chats_public (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, kind TEXT NOT NULL, channel TEXT, msg_id TEXT, received_at TEXT NOT NULL, src TEXT, src_type TEXT, via TEXT, dst TEXT NOT NULL, msg TEXT NOT NULL, rssi INTEGER, snr INTEGER)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			t.Fatalf("create chatlog table: %v", err)
+		}
+	}
+	return db
+}
+
+func newHTTPReceiveLog(t *testing.T, cfg receivelog.Config) *receivelog.Logger {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gomeshcom.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE receive_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			received_at TEXT NOT NULL,
+			remote_addr TEXT NOT NULL,
+			bytes INTEGER NOT NULL,
+			raw TEXT NOT NULL,
+			packet_type TEXT,
+			parse_error TEXT
+		)
+	`); err != nil {
+		t.Fatalf("create receive_log table: %v", err)
+	}
+	return receivelog.NewSQLite(cfg, db)
+}
+
+func newHTTPPositionsStore(t *testing.T) *positions.Store {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gomeshcom.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE nodes (
+			node_id TEXT PRIMARY KEY, lat REAL, lng REAL, alt INTEGER, hw_id TEXT,
+			firstseen TEXT, lastseen TEXT, lastdirectseen TEXT, rssi INTEGER, snr INTEGER, via TEXT
+		)
+	`); err != nil {
+		t.Fatalf("create nodes: %v", err)
+	}
+	return positions.NewSQLite(db)
+}
+
+func openHTTPDMStatsDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gomeshcom.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE dm_stats (callsign TEXT PRIMARY KEY, sent INTEGER NOT NULL, ack INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("create dm_stats: %v", err)
+	}
+	return db
+}
 
 // staticCallsign is a test-only myCallSource returning a fixed callsign.
 // It satisfies chatlog.myCallSource (unexported interface) via structural typing.
@@ -278,10 +362,8 @@ func TestCreateMessage(t *testing.T) {
 
 func TestCreateMessagePersistsFailedWhenEchoMissing(t *testing.T) {
 	cfg := testConfig()
-	dir := t.TempDir()
-	cfg.ChatLog.Path = dir
 	bus := events.NewBus()
-	log := chatlog.New(dir, staticCallsign(cfg.MyCall))
+	log := newHTTPChatLog(t, staticCallsign(cfg.MyCall))
 	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil, nil)
 	server.outbox = outbox.New(10*time.Millisecond, server.handleOutgoingTimeout)
 
@@ -319,10 +401,8 @@ func TestCreateMessagePersistsFailedWhenEchoMissing(t *testing.T) {
 
 func TestCreateMessageDoesNotFailWhenEchoArrives(t *testing.T) {
 	cfg := testConfig()
-	dir := t.TempDir()
-	cfg.ChatLog.Path = dir
 	bus := events.NewBus()
-	log := chatlog.New(dir, staticCallsign(cfg.MyCall))
+	log := newHTTPChatLog(t, staticCallsign(cfg.MyCall))
 	server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, log, &stubBridge{}, nil, nil)
 	server.outbox = outbox.New(30*time.Millisecond, server.handleOutgoingTimeout)
 
@@ -446,7 +526,8 @@ func TestAuthSessionSurvivesServerRestart(t *testing.T) {
 		CookieName: "meshcom_session",
 	}
 
-	firstServer := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+	sessionDB := openSessionTestDB(t)
+	firstServer := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil, WithSessionDB(sessionDB))
 	loginBody, err := json.Marshal(map[string]string{"username": "admin", "password": "secret"})
 	if err != nil {
 		t.Fatalf("marshal login body: %v", err)
@@ -463,7 +544,7 @@ func TestAuthSessionSurvivesServerRestart(t *testing.T) {
 	}
 	firstServer.Close()
 
-	restartedServer := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+	restartedServer := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil, WithSessionDB(sessionDB))
 	defer restartedServer.Close()
 	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/session", nil)
 	sessionRequest.AddCookie(cookies[0])
@@ -588,7 +669,7 @@ func TestCreateMessageDedup(t *testing.T) {
 func intPtr(value int) *int { return &value }
 
 func TestListPositions(t *testing.T) {
-	positionStore := positions.New(t.TempDir() + "/positions.json")
+	positionStore := newHTTPPositionsStore(t)
 	seenAt := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	positionStore.Update(meshcom.Position{
 		Source:    "QQ1ABC-1",
@@ -622,8 +703,7 @@ func TestListPositions(t *testing.T) {
 }
 
 func TestListConversations(t *testing.T) {
-	dir := t.TempDir()
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{
 		Destination: "*",
 		Message:     "hello",
@@ -649,8 +729,7 @@ func TestListConversations(t *testing.T) {
 }
 
 func TestGetConversation(t *testing.T) {
-	dir := t.TempDir()
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{
 		Destination: "*",
 		Message:     "hello",
@@ -693,8 +772,7 @@ func TestGetConversationInvalid(t *testing.T) {
 }
 
 func TestGetConversationWithHours(t *testing.T) {
-	dir := t.TempDir()
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 
 	now := time.Now().UTC()
 	log.Append(meshcom.TextMessage{Destination: "*", Message: "recent"}, now.Add(-10*time.Minute))
@@ -732,8 +810,7 @@ func TestGetConversationWithHours(t *testing.T) {
 }
 
 func TestGetConversationUsesThirtyDaysForDMDefault(t *testing.T) {
-	dir := t.TempDir()
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 
 	now := time.Now().UTC()
 	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "dm recent"}, now.Add(-29*24*time.Hour))
@@ -797,7 +874,7 @@ func TestSPARouting(t *testing.T) {
 }
 
 func TestStreamEventsHeartbeatAndIdentity(t *testing.T) {
-	positionStore := positions.New(t.TempDir() + "/positions.json")
+	positionStore := newHTTPPositionsStore(t)
 	positionStore.Update(meshcom.Position{
 		Source:    "QQ1ABC-1",
 		Latitude:  48.1,
@@ -879,8 +956,7 @@ func TestStreamEventsStationIdentityTxEnabledByDefault(t *testing.T) {
 }
 
 func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "raw")
-	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})
+	logger := newHTTPReceiveLog(t, receivelog.Config{Enabled: true})
 	recentTime := time.Now().UTC().Add(-2 * time.Minute)
 	if err := logger.Append(receivelog.Record{
 		ReceivedAt: recentTime,
@@ -910,7 +986,6 @@ func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 	cfg := testConfig()
 	cfg.ReceiveLog = config.ReceiveLog{
 		Enabled:      true,
-		Path:         dir,
 		ReplayWindow: 6 * time.Hour,
 	}
 	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil, nil)
@@ -934,8 +1009,7 @@ func TestStreamEventsReplaysRecentReceiveLogPackets(t *testing.T) {
 }
 
 func TestStreamEventsReplayFromQueryCappedByReplayWindow(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "raw")
-	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})
+	logger := newHTTPReceiveLog(t, receivelog.Config{Enabled: true})
 	oldTime := time.Now().UTC().Add(-2 * time.Hour)
 	if err := logger.Append(receivelog.Record{
 		ReceivedAt: oldTime,
@@ -949,7 +1023,6 @@ func TestStreamEventsReplayFromQueryCappedByReplayWindow(t *testing.T) {
 	cfg := testConfig()
 	cfg.ReceiveLog = config.ReceiveLog{
 		Enabled:      true,
-		Path:         dir,
 		ReplayWindow: time.Hour,
 	}
 	bus := events.NewBus()
@@ -970,8 +1043,7 @@ func TestStreamEventsReplayFromQueryCappedByReplayWindow(t *testing.T) {
 }
 
 func TestStreamEventsReplayFromQueryWithinReplayWindow(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "raw")
-	logger := receivelog.New(receivelog.Config{Enabled: true, Path: dir})
+	logger := newHTTPReceiveLog(t, receivelog.Config{Enabled: true})
 
 	// Packet 1: 90 minutes ago (within 2h ReplayWindow)
 	packet1Time := time.Now().UTC().Add(-90 * time.Minute)
@@ -998,7 +1070,6 @@ func TestStreamEventsReplayFromQueryWithinReplayWindow(t *testing.T) {
 	cfg := testConfig()
 	cfg.ReceiveLog = config.ReceiveLog{
 		Enabled:      true,
-		Path:         dir,
 		ReplayWindow: 2 * time.Hour,
 	}
 	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, logger, nil, nil, nil, nil)
@@ -1031,8 +1102,7 @@ func TestStreamEventsRejectsInvalidReplayFromQuery(t *testing.T) {
 }
 
 func TestDeleteConversation(t *testing.T) {
-	dir := t.TempDir()
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{Destination: "*", Message: "hello"}, testTime())
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
@@ -1068,7 +1138,7 @@ func TestDeleteConversationInvalidID(t *testing.T) {
 }
 
 func TestDeleteConversationMissingFile(t *testing.T) {
-	log := chatlog.New(t.TempDir(), staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/api/chat/P_999", nil)
 	request.SetPathValue("conversation", "P_999")
@@ -1082,8 +1152,7 @@ func TestDeleteConversationMissingFile(t *testing.T) {
 }
 
 func TestDeleteBroadcast(t *testing.T) {
-	dir := t.TempDir()
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{Destination: "*", Message: "test"}, testTime())
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
@@ -1217,20 +1286,61 @@ func testTime() time.Time {
 
 func newTestChatStatus(t *testing.T) *chatstatus.Store {
 	t.Helper()
-	s, err := chatstatus.New(filepath.Join(t.TempDir(), "msg_idx.json"))
+	store, _ := newTestChatStatusWithDB(t)
+	return store
+}
+
+func newTestChatStatusWithDB(t *testing.T) (*chatstatus.Store, *sql.DB) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gomeshcom.db"))
 	if err != nil {
-		t.Fatalf("chatstatus.New: %v", err)
+		t.Fatalf("sql.Open: %v", err)
 	}
-	return s
+	t.Cleanup(func() { _ = db.Close() })
+	stmts := []string{
+		`CREATE TABLE chat_reads (conversation_id TEXT PRIMARY KEY, last_read TEXT NOT NULL)`,
+		`CREATE TABLE chats_public (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, kind TEXT NOT NULL, channel TEXT, msg_id TEXT, received_at TEXT NOT NULL, src TEXT, src_type TEXT, via TEXT, dst TEXT NOT NULL, msg TEXT NOT NULL, rssi INTEGER, snr INTEGER)`,
+		`CREATE TABLE chats_dm (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, msg_id TEXT, sequence_id TEXT, received_at TEXT NOT NULL, src TEXT, src_type TEXT, via TEXT, dst TEXT NOT NULL, msg TEXT NOT NULL, rssi INTEGER, snr INTEGER, direction TEXT, delivery_status TEXT, ack_status TEXT, ack_received_at TEXT, ack_src TEXT, ack_src_type TEXT, ack_rssi INTEGER, ack_snr INTEGER, ack_via TEXT)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			t.Fatalf("create chatstatus table: %v", err)
+		}
+	}
+	s, err := chatstatus.NewSQLite(db)
+	if err != nil {
+		t.Fatalf("chatstatus.NewSQLite: %v", err)
+	}
+	return s, db
+}
+
+func insertChatStatusPublicRow(t *testing.T, db *sql.DB, convID string, receivedAt time.Time, msg string) {
+	t.Helper()
+	kind := "broadcast"
+	var channel any
+	if strings.HasPrefix(convID, "P_") && convID != "P_broadcast" {
+		kind = "channel"
+		channel = strings.TrimPrefix(convID, "P_")
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO chats_public(conversation_id, kind, channel, received_at, dst, msg) VALUES (?, ?, ?, ?, '*', ?)`, convID, kind, channel, receivedAt.UTC().Format(time.RFC3339Nano), msg); err != nil {
+		t.Fatalf("insert public chat row: %v", err)
+	}
+}
+
+func insertChatStatusDMRow(t *testing.T, db *sql.DB, convID string, src string, dst string, receivedAt time.Time, msg string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO chats_dm(conversation_id, received_at, src, dst, msg) VALUES (?, ?, ?, ?, ?)`, convID, receivedAt.UTC().Format(time.RFC3339Nano), src, dst, msg); err != nil {
+		t.Fatalf("insert dm chat row: %v", err)
+	}
 }
 
 func TestDeleteConversationRemovesChatStatusEntry(t *testing.T) {
-	chatDir := t.TempDir()
-	log := chatlog.New(chatDir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 	cs := newTestChatStatus(t)
-
-	// Pre-populate the status entry.
-	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+	cs.MarkRead("P_broadcast", time.Now())
+	if err := cs.SaveIfDirty(); err != nil {
+		t.Fatalf("SaveIfDirty: %v", err)
+	}
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, cs)
 
@@ -1249,12 +1359,9 @@ func TestDeleteConversationRemovesChatStatusEntry(t *testing.T) {
 }
 
 func TestMarkConversationRead(t *testing.T) {
-	chatDir := t.TempDir()
-	log := chatlog.New(chatDir, staticCallsign("QQ0QQ-1"))
-	cs := newTestChatStatus(t)
-
-	cs.RecordIncoming("P_broadcast", time.Now(), "test")
-	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
+	cs, statusDB := newTestChatStatusWithDB(t)
+	insertChatStatusPublicRow(t, statusDB, "P_broadcast", time.Now(), "test")
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, cs)
 
@@ -1308,11 +1415,9 @@ func TestMarkConversationReadRequiresAuth(t *testing.T) {
 }
 
 func TestGetConversationDoesNotAlterUnreadCount(t *testing.T) {
-	chatDir := t.TempDir()
-	log := chatlog.New(chatDir, staticCallsign("QQ0QQ-1"))
-	cs := newTestChatStatus(t)
-
-	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
+	cs, statusDB := newTestChatStatusWithDB(t)
+	insertChatStatusPublicRow(t, statusDB, "P_broadcast", time.Now(), "test")
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, cs)
 
@@ -1331,9 +1436,10 @@ func TestGetConversationDoesNotAlterUnreadCount(t *testing.T) {
 }
 
 func TestStreamEventsChatStatusSnapshot(t *testing.T) {
-	cs := newTestChatStatus(t)
-	cs.RecordIncoming("P_broadcast", time.Now(), "test")
-	cs.RecordIncoming("P_broadcast", time.Now(), "test")
+	cs, statusDB := newTestChatStatusWithDB(t)
+	now := time.Now()
+	insertChatStatusPublicRow(t, statusDB, "P_broadcast", now, "test")
+	insertChatStatusPublicRow(t, statusDB, "P_broadcast", now.Add(time.Second), "test")
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, cs)
 	body := streamBodyUntil(t, server, "event: chatstatus.snapshot")
@@ -1406,9 +1512,8 @@ func TestRequestLogUsesXForwardedForWhenCFHeaderMissing(t *testing.T) {
 // ---- scope-aware API tests --------------------------------------------------
 
 func TestListConversationsMycallScope(t *testing.T) {
-	dir := t.TempDir()
 	// testConfig().MyCall = "QQ0QQ-1", basecall = "QQ0QQ"
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 	// Write a DM from peer to us: file lands in DM_QQ0QQ_QQ1ABC-1.jsonl
 	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "hi"}, testTime())
 
@@ -1435,8 +1540,7 @@ func TestListConversationsMycallScope(t *testing.T) {
 }
 
 func TestListConversationsBasecallScope(t *testing.T) {
-	dir := t.TempDir()
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
 	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "hi"}, testTime())
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
@@ -1462,9 +1566,8 @@ func TestListConversationsBasecallScope(t *testing.T) {
 }
 
 func TestListConversationsMycallScopeExcludesOtherSSID(t *testing.T) {
-	dir := t.TempDir()
 	// Write a DM from peer to QQ0QQ-2, landing in the shared DM_QQ0QQ_QQ1ABC-1.jsonl.
-	logOther := chatlog.New(dir, staticCallsign("QQ0QQ-2"))
+	logOther := newHTTPChatLog(t, staticCallsign("QQ0QQ-2"))
 	logOther.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-2", Message: "hi"}, testTime())
 
 	// Server is configured as QQ0QQ-1 — a different SSID sharing the same basecall.
@@ -1489,15 +1592,15 @@ func TestListConversationsMycallScopeExcludesOtherSSID(t *testing.T) {
 }
 
 func TestGetConversationMycallScopeFiltersRecords(t *testing.T) {
-	dir := t.TempDir()
 	// testConfig().MyCall = "QQ0QQ-1"
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	db := openHTTPChatLogDB(t)
+	log := newHTTPChatLogWithDB(t, db, staticCallsign("QQ0QQ-1"))
 	now := time.Now().UTC()
 	// Both messages land in DM_QQ0QQ_QQ1ABC-1.jsonl (basecall file).
 	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "to ssid-1"}, now.Add(-time.Minute))
 	// Simulate a record from peer to a different device of ours (QQ0QQ-2).
 	// We write directly via the chatlog to bypass filter.
-	logOther := chatlog.New(dir, staticCallsign("QQ0QQ-2"))
+	logOther := newHTTPChatLogWithDB(t, db, staticCallsign("QQ0QQ-2"))
 	logOther.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-2", Message: "to ssid-2"}, now)
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
@@ -1526,13 +1629,13 @@ func TestGetConversationMycallScopeFiltersRecords(t *testing.T) {
 }
 
 func TestGetConversationBasecallScopeReturnsAll(t *testing.T) {
-	dir := t.TempDir()
-	log := chatlog.New(dir, staticCallsign("QQ0QQ-1"))
+	db := openHTTPChatLogDB(t)
+	log := newHTTPChatLogWithDB(t, db, staticCallsign("QQ0QQ-1"))
 	now := time.Now().UTC()
 	log.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-1", Message: "hi1"}, now.Add(-2*time.Minute))
 
 	// Write a second record directly to the same basecall file from a different SSID logger.
-	logOther := chatlog.New(dir, staticCallsign("QQ0QQ-2"))
+	logOther := newHTTPChatLogWithDB(t, db, staticCallsign("QQ0QQ-2"))
 	logOther.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "QQ0QQ-2", Message: "hi2"}, now.Add(-time.Minute))
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, nil)
@@ -1556,13 +1659,13 @@ func TestGetConversationBasecallScopeReturnsAll(t *testing.T) {
 }
 
 func TestMarkConversationReadBasecallScope(t *testing.T) {
-	chatDir := t.TempDir()
-	log := chatlog.New(chatDir, staticCallsign("QQ0QQ-1"))
-	cs := newTestChatStatus(t)
+	log := newHTTPChatLog(t, staticCallsign("QQ0QQ-1"))
+	cs, statusDB := newTestChatStatusWithDB(t)
 
 	// Two per-SSID status keys for the same peer.
-	cs.RecordIncoming("DM_QQ0QQ-1_QQ1ABC-1", time.Now(), "msg1")
-	cs.RecordIncoming("DM_QQ0QQ-2_QQ1ABC-1", time.Now(), "msg2")
+	baseTime := time.Now().Add(-time.Minute)
+	insertChatStatusDMRow(t, statusDB, "DM_QQ0QQ_QQ1ABC-1", "QQ1ABC-1", "QQ0QQ-1", baseTime, "msg1")
+	insertChatStatusDMRow(t, statusDB, "DM_QQ0QQ_QQ1ABC-1", "QQ1ABC-1", "QQ0QQ-2", baseTime.Add(time.Second), "msg2")
 
 	server := NewServer(testConfig(), "v0.0.0-test", events.NewBus(), nil, nil, log, nil, nil, cs)
 
@@ -1608,7 +1711,7 @@ func TestListDMStats(t *testing.T) {
 	t.Run("records sent and ack via echo", func(t *testing.T) {
 		cfg := testConfig()
 		bus := events.NewBus()
-		dmStore := dmstats.New("")
+		dmStore := dmstats.NewSQLite(openHTTPDMStatsDB(t))
 
 		server := NewServer(cfg, "v0.0.0-test", bus, nil, nil, nil, &stubBridge{}, nil, nil,
 			WithDMStats(dmStore),

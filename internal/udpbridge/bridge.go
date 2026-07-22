@@ -16,6 +16,7 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
+	"github.com/logocomune/gomeshcom-client/internal/telemetry"
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
 
@@ -40,6 +41,7 @@ type Bridge struct {
 	chatStatus      chatStatusTracker
 	identity        myCallSource
 	positions       *positions.Store
+	telemetry       *telemetry.Store
 	disableTx       bool
 	forwarder       *udpforward.Forwarder
 }
@@ -57,6 +59,10 @@ func NewBridge(listenAddr, nodeAddr string, bus *events.Bus, logger *receivelog.
 		disableTx:  disableTx,
 		forwarder:  forwarder,
 	}
+}
+
+func (b *Bridge) SetTelemetryStore(store *telemetry.Store) {
+	b.telemetry = store
 }
 
 // myCall returns the current local callsign, or "" if no identity is configured.
@@ -131,6 +137,7 @@ func (b *Bridge) handleDatagram(remoteAddr string, data []byte, rawPacket string
 		b.touchPositionFreshness(typed.Source, typed.RSSI, typed.SNR)
 	case meshcom.Telemetry:
 		b.touchPositionFreshness(typed.Source, typed.RSSI, typed.SNR)
+		b.logTelemetry(typed, receivedAt)
 	}
 
 	b.bus.Publish(events.Event{
@@ -175,6 +182,15 @@ func (b *Bridge) touchPositionFreshness(src string, rssi, snr *int) {
 	}
 	if b.positions.TouchFromPacket(src, rssi, snr, time.Now().UTC()) {
 		slog.Debug("position freshness touched", "source", src)
+	}
+}
+
+func (b *Bridge) logTelemetry(packet meshcom.Telemetry, receivedAt time.Time) {
+	if b.telemetry == nil {
+		return
+	}
+	if err := b.telemetry.Append(context.Background(), packet, receivedAt); err != nil {
+		slog.Error("telemetry write failed", "error", err)
 	}
 }
 

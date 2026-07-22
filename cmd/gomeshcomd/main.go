@@ -31,6 +31,8 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
 	"github.com/logocomune/gomeshcom-client/internal/station"
 	"github.com/logocomune/gomeshcom-client/internal/stats"
+	"github.com/logocomune/gomeshcom-client/internal/storage"
+	"github.com/logocomune/gomeshcom-client/internal/telemetry"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
@@ -110,39 +112,50 @@ func run() (bool, error) {
 	if err := ensureDataDirs(cfg.DataDir); err != nil {
 		return false, err
 	}
+	if err := runLegacyDataMigration(cfg); err != nil {
+		return false, err
+	}
+
+	sqliteDB, err := openStorageAndImport(ctx, cfg)
+	if err != nil {
+		return false, err
+	}
+	defer sqliteDB.Close()
+	go sqliteDB.StartPurge(ctx, storage.PurgePolicy{
+		Interval:            cfg.Storage.PurgeInterval,
+		ReceiveLogRetention: cfg.Storage.ReceiveLogRetention,
+		PublicChatRetention: cfg.Storage.PublicChatRetention,
+		NodesRetention:      cfg.Storage.NodesRetention,
+		TelemetryRetention:  cfg.Storage.TelemetryRetention,
+	})
 
 	// Runtime station identity: persisted value wins over GOMESHCOM_MY_CALL default.
-	stationIdentity, err := station.New(station.DefaultPath(cfg.DataDir), cfg.MyCall)
+	stationIdentity, err := station.NewSQLite(sqliteDB.SQL(), cfg.MyCall)
 	if err != nil {
 		return false, fmt.Errorf("load station identity: %w", err)
 	}
 	go stationIdentity.Start(ctx)
 
-	// DEPRECATED: one-time legacy data migration; remove after migration window closes.
-	if err := legacymigrate.Run(cfg.DataDir, cfg.ChatLog.Path, stationIdentity.Current()); err != nil {
-		return false, fmt.Errorf("legacy migration: %w", err)
-	}
-
 	bus := events.NewBus()
-	positionStore := positions.New(positions.DefaultPath(cfg.DataDir))
+	positionStore := positions.NewSQLite(sqliteDB.SQL())
 	if err := positionStore.Load(); err != nil {
 		return false, fmt.Errorf("load positions: %w", err)
 	}
 	go positionStore.Start(ctx)
 
-	receiveLogger := receivelog.New(receivelog.Config{
+	receiveLogger := receivelog.NewSQLite(receivelog.Config{
 		Enabled:       cfg.ReceiveLog.Enabled,
 		Path:          cfg.ReceiveLog.Path,
 		RetentionDays: cfg.ReceiveLog.RetentionDays,
-	})
-	chatLogger := chatlog.New(cfg.ChatLog.Path, stationIdentity)
-	chatStatus, err := chatstatus.New(filepath.Join(cfg.ChatLog.Path, "msg_idx.json"))
+	}, sqliteDB.SQL())
+	chatLogger := chatlog.NewSQLite(sqliteDB.SQL(), stationIdentity)
+	chatStatus, err := chatstatus.NewSQLite(sqliteDB.SQL())
 	if err != nil {
 		return false, fmt.Errorf("load chat status: %w", err)
 	}
 	go chatStatus.Start(ctx)
 
-	channelShow, err := channelshow.New(channelshow.DefaultPath(cfg.DataDir))
+	channelShow, err := channelshow.NewSQLite(sqliteDB.SQL())
 	if err != nil {
 		return false, fmt.Errorf("load channel show: %w", err)
 	}
@@ -150,7 +163,7 @@ func run() (bool, error) {
 
 	var statsStore *stats.Store
 	if cfg.Stats.Enabled {
-		statsStore = stats.New(stats.Config{
+		statsStore = stats.NewSQLite(sqliteDB.SQL(), stats.Config{
 			Enabled:       true,
 			Path:          cfg.Stats.Path,
 			RetentionDays: cfg.Stats.RetentionDays,
@@ -163,7 +176,7 @@ func run() (bool, error) {
 		go collector.Run(ctx, bus)
 	}
 
-	dmStatsStore := dmstats.New(dmstats.DefaultPath(cfg.DataDir))
+	dmStatsStore := dmstats.NewSQLite(sqliteDB.SQL())
 	if err := dmStatsStore.Load(); err != nil {
 		return false, fmt.Errorf("load dm stats: %w", err)
 	}
@@ -183,6 +196,7 @@ func run() (bool, error) {
 	}
 
 	bridge := udpbridge.NewBridge(cfg.UDPListenAddr, cfg.NodeAddr, bus, receiveLogger, chatLogger, positionStore, cfg.DemoMode, fwd, stationIdentity, chatStatus)
+	bridge.SetTelemetryStore(telemetry.NewSQLite(sqliteDB.SQL()))
 	go func() {
 		if err := bridge.Listen(ctx); err != nil {
 			slog.Error("udp bridge stopped", "error", err)
@@ -193,6 +207,7 @@ func run() (bool, error) {
 	serverOpts := []httpapi.ServerOption{
 		httpapi.WithChannelShow(channelShow),
 		httpapi.WithStationIdentity(stationIdentity),
+		httpapi.WithSessionDB(sqliteDB.SQL()),
 	}
 	if statsStore != nil {
 		serverOpts = append(serverOpts, httpapi.WithStats(statsStore))
@@ -230,6 +245,55 @@ func run() (bool, error) {
 	}
 
 	return restartRequested.Load(), nil
+}
+
+func runLegacyDataMigration(cfg config.Config) error {
+	// DEPRECATED: one-time legacy data migration; remove after migration window closes.
+	legacyCallsign, err := station.LoadLegacy(station.DefaultPath(cfg.DataDir), cfg.MyCall)
+	if err != nil {
+		return fmt.Errorf("load legacy station identity: %w", err)
+	}
+	if err := legacymigrate.Run(cfg.DataDir, cfg.ChatLog.Path, legacyCallsign); err != nil {
+		return fmt.Errorf("legacy migration: %w", err)
+	}
+	return nil
+}
+
+func openStorageAndImport(ctx context.Context, cfg config.Config) (*storage.DB, error) {
+	sqliteDB, err := storage.Open(ctx, cfg.Storage.SQLitePath)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite storage: %w", err)
+	}
+
+	imports := []struct {
+		name string
+		run  func(context.Context) error
+	}{
+		{name: "nodes", run: func(ctx context.Context) error { return sqliteDB.ImportNodes(ctx, positions.DefaultPath(cfg.DataDir)) }},
+		{name: "receive log", run: func(ctx context.Context) error { return sqliteDB.ImportReceiveLog(ctx, cfg.ReceiveLog.Path) }},
+		{name: "chat history", run: func(ctx context.Context) error { return sqliteDB.ImportChatHistory(ctx, cfg.ChatLog.Path) }},
+		{name: "chat reads", run: func(ctx context.Context) error {
+			return sqliteDB.ImportChatReads(ctx, filepath.Join(cfg.ChatLog.Path, "msg_idx.json"))
+		}},
+		{name: "dm stats", run: func(ctx context.Context) error { return sqliteDB.ImportDMStats(ctx, dmstats.DefaultPath(cfg.DataDir)) }},
+		{name: "stats", run: func(ctx context.Context) error { return sqliteDB.ImportStats(ctx, cfg.Stats.Path) }},
+		{name: "channel show", run: func(ctx context.Context) error {
+			return sqliteDB.ImportChannelShow(ctx, channelshow.DefaultPath(cfg.DataDir))
+		}},
+		{name: "station identity", run: func(ctx context.Context) error {
+			return sqliteDB.ImportStationIdentity(ctx, station.DefaultPath(cfg.DataDir))
+		}},
+		{name: "http sessions", run: func(ctx context.Context) error {
+			return sqliteDB.ImportHTTPSessions(ctx, filepath.Join(cfg.DataDir, "http-sessions.json"))
+		}},
+	}
+	for _, item := range imports {
+		if err := item.run(ctx); err != nil {
+			_ = sqliteDB.Close()
+			return nil, fmt.Errorf("import %s: %w", item.name, err)
+		}
+	}
+	return sqliteDB, nil
 }
 
 func ensureDataDirs(dataDir string) error {

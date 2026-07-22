@@ -3,8 +3,6 @@ package channelshow
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -12,8 +10,13 @@ import (
 	"testing/quick"
 )
 
+func newChannelShowTestStore(t *testing.T) (*Store, error) {
+	t.Helper()
+	return NewSQLite(openChannelShowTestDB(t))
+}
+
 func TestStoreDefaultSnapshot(t *testing.T) {
-	store, err := New(filepath.Join(t.TempDir(), "channel_show.json"))
+	store, err := newChannelShowTestStore(t)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -26,7 +29,7 @@ func TestStoreDefaultSnapshot(t *testing.T) {
 }
 
 func TestUpdateNormalizesAllowlist(t *testing.T) {
-	store, err := New(filepath.Join(t.TempDir(), "channel_show.json"))
+	store, err := newChannelShowTestStore(t)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -55,7 +58,7 @@ func TestUpdateRejectsInvalidInput(t *testing.T) {
 
 	for name, input := range tests {
 		t.Run(name, func(t *testing.T) {
-			store, err := New(filepath.Join(t.TempDir(), "channel_show.json"))
+			store, err := newChannelShowTestStore(t)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -68,12 +71,12 @@ func TestUpdateRejectsInvalidInput(t *testing.T) {
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "channel_show.json")
-	store, err := New(path)
+	db := openChannelShowTestDB(t)
+	store, err := NewSQLite(db)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("NewSQLite: %v", err)
 	}
-	want, err := store.Update(Config{Mode: ModeAllowlist, Channels: []string{"*", "9", "22201"}})
+	want, err := store.Update(Config{Mode: ModeAllowlist, Channels: []string{"*", "22201", "9"}})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -81,9 +84,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("SaveIfDirty: %v", err)
 	}
 
-	loaded, err := New(path)
+	loaded, err := NewSQLite(db)
 	if err != nil {
-		t.Fatalf("New loaded: %v", err)
+		t.Fatalf("NewSQLite loaded: %v", err)
 	}
 	got := loaded.Snapshot()
 	if !reflect.DeepEqual(got, want) {
@@ -92,22 +95,17 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestSaveIfDirtyNoop(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "channel_show.json")
-	store, err := New(path)
+	store, err := newChannelShowTestStore(t)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("NewSQLite: %v", err)
 	}
-
 	if err := store.SaveIfDirty(); err != nil {
 		t.Fatalf("SaveIfDirty: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("file exists after noop SaveIfDirty: %v", err)
 	}
 }
 
 func TestSnapshotIsImmutable(t *testing.T) {
-	store, err := New(filepath.Join(t.TempDir(), "channel_show.json"))
+	store, err := newChannelShowTestStore(t)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -124,34 +122,11 @@ func TestSnapshotIsImmutable(t *testing.T) {
 	}
 }
 
-func TestLoadCleansTmpFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "channel_show.json")
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(`{"mode":"allowlist","channels":["999"]}`), 0o644); err != nil {
-		t.Fatalf("write tmp: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(`{"mode":"allowlist","channels":["222"]}`), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	store, err := New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
-		t.Fatalf("tmp file still exists: %v", err)
-	}
-	if got := store.Snapshot().Channels; !reflect.DeepEqual(got, []string{"222"}) {
-		t.Fatalf("channels = %+v, want [222]", got)
-	}
-}
-
 func TestStartFlushesOnCancel(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "channel_show.json")
-	store, err := New(path)
+	db := openChannelShowTestDB(t)
+	store, err := NewSQLite(db)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("NewSQLite: %v", err)
 	}
 	if _, err := store.Update(Config{Mode: ModeAllowlist, Channels: []string{"222"}}); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -166,17 +141,17 @@ func TestStartFlushesOnCancel(t *testing.T) {
 	cancel()
 	<-done
 
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM channel_show_channels WHERE channel = '222'`).Scan(&count); err != nil {
+		t.Fatalf("query channel show: %v", err)
 	}
-	if !strings.Contains(string(content), `"222"`) {
-		t.Fatalf("saved content = %s, want channel 222", content)
+	if count != 1 {
+		t.Fatalf("channel count = %d, want 1", count)
 	}
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	store, err := New(filepath.Join(t.TempDir(), "channel_show.json"))
+	store, err := newChannelShowTestStore(t)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -5,6 +5,7 @@
 		mdiCrosshairsGps,
 		mdiGrid,
 		mdiGridOff,
+		mdiGraphOutline,
 		mdiLayersTriple,
 		mdiLayersTripleOutline,
 		mdiMapMarkerPath,
@@ -28,6 +29,7 @@
 	import { buildOwnMarkerTooltipHtml, buildTooltipHtml, escHtml } from './map-tooltip';
 	import { buildRulerLinks } from './ruler';
 	import { buildRealtimeDmTraceSegments } from './realtime-trace';
+	import { buildActiveMapPathSegments } from './map-paths';
 	import { eventsState } from '$lib/stores/events.svelte';
 
 	const STORAGE_CENTER = 'meshcom:map:center';
@@ -37,13 +39,19 @@
 	const STORAGE_CLUSTERING = 'meshcom:map:clustering';
 	const STORAGE_RULER = 'meshcom:map:ruler';
 	const STORAGE_DM_TRACKING = 'meshcom:map:dm-tracking';
+	const STORAGE_GRAPH_PATHS = 'meshcom:map:graph-paths';
 
 	let {
 		positions = [],
 		myCall = '',
 		events = [],
 		dmTracking = $bindable(false)
-	}: { positions?: MapPosition[]; myCall?: string; events?: StreamEvent[]; dmTracking?: boolean } = $props();
+	}: {
+		positions?: MapPosition[];
+		myCall?: string;
+		events?: StreamEvent[];
+		dmTracking?: boolean;
+	} = $props();
 
 	let mapElement: HTMLDivElement;
 	let tooltipElement: HTMLDivElement;
@@ -51,6 +59,8 @@
 	let markerSource: any;
 	let rulerSource: any;
 	let rulerLayer: any;
+	let graphPathSource: any;
+	let graphPathLayer: any;
 	let dmTraceSource: any;
 	let dmTraceLayer: any;
 	let clusterBubbleLayer: any;
@@ -62,12 +72,13 @@
 	let showClustering = $state(true);
 	let showRuler = $state(false);
 	let showDmTracking = $state(false);
+	let showGraphPaths = $state(false);
+	let selectedGraphNodeId = $state<string | null>(null);
 	let now = $state(Date.now());
 	let tickerHandle: ReturnType<typeof setInterval> | null = null;
 	let dmTraceTickerHandle: ReturnType<typeof setInterval> | null = null;
 	let activePulseOverlay: any = null;
 	const activeMsgPulseOverlays = new Set<any>();
-
 
 	let myCallPosition = $derived(
 		myCall !== ''
@@ -81,6 +92,8 @@
 		showLabels;
 		myCall;
 		showRuler;
+		showGraphPaths;
+		selectedGraphNodeId;
 		if (initialized) updateMarkers();
 	});
 
@@ -99,7 +112,10 @@
 		const packet = payload.packet;
 		if (!packet) return;
 
-		const hops = (packet.src ?? '').split(',').map((h) => h.trim().toUpperCase()).filter(Boolean);
+		const hops = (packet.src ?? '')
+			.split(',')
+			.map((h) => h.trim().toUpperCase())
+			.filter(Boolean);
 		const origin = hops[0];
 		if (!origin) return;
 
@@ -166,6 +182,8 @@
 		markerSource = new VectorSource();
 		rulerSource = new VectorSource();
 		rulerLayer = new VectorLayer({ source: rulerSource });
+		graphPathSource = new VectorSource();
+		graphPathLayer = new VectorLayer({ source: graphPathSource });
 		dmTraceSource = new VectorSource();
 		dmTraceLayer = new VectorLayer({ source: dmTraceSource });
 		const clusterSource = new Cluster({ source: markerSource, distance: 30 });
@@ -204,6 +222,7 @@
 				new TileLayer({ source: new OSM() }),
 				maidenheadLayer,
 				dmTraceLayer,
+				graphPathLayer,
 				rulerLayer,
 				new VectorLayer({ source: markerSource }),
 				clusterBubbleLayer
@@ -224,6 +243,7 @@
 
 		map.on('pointermove', (event: any) => {
 			const feature = map.forEachFeatureAtPixel(event.pixel, (candidate: any) => candidate);
+			updateHoveredGraphPath(positionFromFeature(feature));
 			if (!feature) {
 				tooltip.setPosition(undefined);
 				tooltipElement.classList.add('hidden');
@@ -306,7 +326,9 @@
 
 		const el = document.createElement('div');
 		el.style.cssText = [
-			'width:32px', 'height:32px', 'border-radius:50%',
+			'width:32px',
+			'height:32px',
+			'border-radius:50%',
 			'background:rgba(52,211,153,0.35)',
 			'border:2px solid rgb(52,211,153)',
 			'animation:meshcom-pulse 0.9s ease-out 5',
@@ -348,7 +370,9 @@
 		const cycles = Math.max(1, Math.round(durationMs / 1000));
 		const el = document.createElement('div');
 		el.style.cssText = [
-			'width:28px', 'height:28px', 'border-radius:50%',
+			'width:28px',
+			'height:28px',
+			'border-radius:50%',
 			`background:${hexColor}4d`,
 			`border:2px solid ${hexColor}`,
 			`animation:meshcom-pulse 1s ease-out ${cycles}`,
@@ -422,6 +446,11 @@
 			showDmTracking = dmTrackingStr === 'true';
 			dmTracking = showDmTracking;
 		}
+
+		const graphPathsStr = localStorage.getItem(STORAGE_GRAPH_PATHS);
+		if (graphPathsStr !== null) {
+			showGraphPaths = graphPathsStr === 'true';
+		}
 	}
 
 	function saveMapState() {
@@ -440,6 +469,7 @@
 		localStorage.setItem(STORAGE_CLUSTERING, String(showClustering));
 		localStorage.setItem(STORAGE_RULER, String(showRuler));
 		localStorage.setItem(STORAGE_DM_TRACKING, String(showDmTracking));
+		localStorage.setItem(STORAGE_GRAPH_PATHS, String(showGraphPaths));
 	}
 
 	function updateMarkers() {
@@ -448,6 +478,7 @@
 		if (!markerSource || !fromLonLat || !Feature) return;
 		markerSource.clear();
 		rulerSource?.clear();
+		updateGraphPathLayer();
 
 		if (showRuler && rulerSource && LineString) {
 			for (const link of buildRulerLinks(myCallPosition, positions, now)) {
@@ -538,6 +569,54 @@
 		}
 	}
 
+	function updateGraphPathLayer() {
+		const { fromLonLat, Feature, LineString, Style, Fill, Stroke, Text } = olContext;
+		if (!graphPathSource || !fromLonLat || !Feature || !LineString) {
+			graphPathSource?.clear();
+			return;
+		}
+		graphPathSource.clear();
+		if (!showGraphPaths) return;
+
+		const segments = buildActiveMapPathSegments(myCall, positions, now, selectedGraphNodeId);
+		for (const segment of segments) {
+			const feature = new Feature({
+				geometry: new LineString([
+					fromLonLat([segment.from.lon, segment.from.lat]),
+					fromLonLat([segment.to.lon, segment.to.lat])
+				])
+			});
+			feature.setStyle(
+				new Style({
+					zIndex: segment.highlighted ? 6 : 1,
+					stroke: new Stroke({
+						color: segment.highlighted ? 'rgba(168,85,247,0.95)' : 'rgba(168,85,247,0.65)',
+						width: segment.highlighted ? 4 : 2
+					}),
+					text: segment.highlighted
+						? new Text({
+								text: segment.label,
+								placement: 'line',
+								overflow: true,
+								font: '700 11px Inter, sans-serif',
+								fill: new Fill({ color: '#fefce8' }),
+								stroke: new Stroke({ color: '#713f12', width: 4 })
+							})
+						: undefined
+				})
+			);
+			graphPathSource.addFeature(feature);
+		}
+	}
+
+	function updateHoveredGraphPath(position: MapPosition | null) {
+		if (!showGraphPaths) return;
+		const nextNodeId = position?.source?.toUpperCase() ?? null;
+		if (selectedGraphNodeId === nextNodeId) return;
+		selectedGraphNodeId = nextNodeId;
+		updateGraphPathLayer();
+	}
+
 	function zoomBy(delta: number) {
 		const view = map?.getView();
 		if (!view) return;
@@ -573,10 +652,27 @@
 		saveMapState();
 	}
 
+	function toggleGraphPaths() {
+		showGraphPaths = !showGraphPaths;
+		if (!showGraphPaths) selectedGraphNodeId = null;
+		updateGraphPathLayer();
+		saveMapState();
+	}
+
 	function toggleRuler() {
 		showRuler = !showRuler;
 		updateMarkers();
 		saveMapState();
+	}
+
+	function positionFromFeature(feature: any): MapPosition | null {
+		if (!feature) return null;
+		const clustered = feature.get('features') as any[] | undefined;
+		if (clustered === undefined) {
+			return feature.get('position') ?? null;
+		}
+		if (clustered.length !== 1) return null;
+		return clustered[0].get('position') ?? null;
 	}
 
 	function toggleMaidenhead() {
@@ -644,6 +740,15 @@
 			onclick={toggleDmTracking}
 		>
 			<MdiIcon path={mdiMapMarkerPath} size={16} />
+		</button>
+		<button
+			class="flex h-7 w-7 items-center justify-center border-b border-ink-dim/30 bg-surface hover:bg-surface-hi {showGraphPaths
+				? 'text-ink'
+				: 'text-ink-dim opacity-60'}"
+			title="Toggle active node graph paths"
+			onclick={toggleGraphPaths}
+		>
+			<MdiIcon path={mdiGraphOutline} size={16} />
 		</button>
 		<button
 			class="flex h-7 w-7 items-center justify-center rounded-b bg-surface hover:bg-surface-hi {showRuler

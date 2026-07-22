@@ -30,6 +30,7 @@ type Config struct {
 	Auth             Auth
 	RequestLog       RequestLog
 	Compression      Compression
+	Storage          Storage
 	LogLevel         string `conf:"default:info,help:log level: debug|info|warn|error"`
 }
 
@@ -75,6 +76,15 @@ type RequestLog struct {
 type Compression struct {
 	Enabled     bool `conf:"default:true,help:enable HTTP gzip response compression"`
 	MinimumSize int  `conf:"default:1024,help:minimum response body size in bytes before gzip is applied"`
+}
+
+type Storage struct {
+	SQLitePath          string        `conf:"default:./data/gomeshcom.db,help:path to the SQLite database file"`
+	PurgeInterval       time.Duration `conf:"default:4h,help:interval between SQLite purge runs"`
+	ReceiveLogRetention time.Duration `conf:"default:720h,help:SQLite receive_log retention window"`
+	PublicChatRetention time.Duration `conf:"default:720h,help:SQLite public chat retention window"`
+	NodesRetention      time.Duration `conf:"default:168h,help:SQLite nodes retention window based on last seen time"`
+	TelemetryRetention  time.Duration `conf:"default:720h,help:SQLite telemetry retention window"`
 }
 
 // Load parses configuration from built-in defaults, a TOML file, and environment
@@ -179,15 +189,36 @@ func builtInDefaultConfig() Config {
 		Auth:        Auth{SessionTTL: 24 * time.Hour, CookieName: "meshcom_session"},
 		RequestLog:  RequestLog{Enabled: false},
 		Compression: Compression{Enabled: true, MinimumSize: 1024},
+		Storage: Storage{
+			SQLitePath:          "./data/gomeshcom.db",
+			PurgeInterval:       4 * time.Hour,
+			ReceiveLogRetention: 30 * 24 * time.Hour,
+			PublicChatRetention: 30 * 24 * time.Hour,
+			NodesRetention:      7 * 24 * time.Hour,
+			TelemetryRetention:  30 * 24 * time.Hour,
+		},
 	}
 }
 
 func normalize(cfg Config) Config {
 	cfg.MyCall = callsign.Normalize(cfg.MyCall)
+	cfg.Storage = normalizeStorage(cfg.Storage)
 	return cfg
 }
 
+func normalizeStorage(storage Storage) Storage {
+	if storage.PurgeInterval != 0 || storage.ReceiveLogRetention != 0 || storage.PublicChatRetention != 0 || storage.NodesRetention != 0 {
+		return storage
+	}
+	storage.PurgeInterval = 4 * time.Hour
+	storage.ReceiveLogRetention = 30 * 24 * time.Hour
+	storage.PublicChatRetention = 30 * 24 * time.Hour
+	storage.NodesRetention = 7 * 24 * time.Hour
+	return storage
+}
+
 func Validate(cfg Config) error {
+	cfg = normalize(cfg)
 	if _, err := net.ResolveTCPAddr("tcp", cfg.HTTPAddr); err != nil {
 		return fmt.Errorf("http addr: %w", err)
 	}
@@ -267,6 +298,25 @@ func Validate(cfg Config) error {
 	case "debug", "info", "warn", "error":
 	default:
 		return errors.New("log level must be debug, info, warn, or error")
+	}
+
+	if cfg.Storage.SQLitePath == "" {
+		return errors.New("storage sqlite path is required")
+	}
+	if cfg.Storage.PurgeInterval <= 0 {
+		return errors.New("storage purge interval must be greater than zero")
+	}
+	if cfg.Storage.ReceiveLogRetention < 0 {
+		return errors.New("storage receive log retention must not be negative")
+	}
+	if cfg.Storage.PublicChatRetention < 0 {
+		return errors.New("storage public chat retention must not be negative")
+	}
+	if cfg.Storage.NodesRetention < 0 {
+		return errors.New("storage nodes retention must not be negative")
+	}
+	if cfg.Storage.TelemetryRetention < 0 {
+		return errors.New("storage telemetry retention must not be negative")
 	}
 
 	return nil

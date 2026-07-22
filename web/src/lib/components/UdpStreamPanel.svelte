@@ -3,7 +3,7 @@
 	import { eventSummary, packetBadge, packetFromEvent, splitSourcePath } from '$lib/api/events';
 	import { hardwareHumanName } from '$lib/api/hardware';
 	import type { StreamEvent } from '$lib/api/types';
-	import { formatTime } from '$lib/ui/format';
+	import { formatAltitude, formatTime } from '$lib/ui/format';
 	import {
 		iconTooltip,
 		isMessageEvent,
@@ -147,9 +147,7 @@
 									>
 										<MdiIcon path={mdiForEvent(event)} size={17} />
 									</span>
-									<span class="shrink-0 text-xs md:text-sm font-bold text-ink"
-										>{route.origin}</span
-									>
+									<span class="shrink-0 text-xs md:text-sm font-bold text-ink">{route.origin}</span>
 									{#if route.relays.length > 0}
 										<span class="hidden md:inline shrink-0 text-[11px] text-ink-muted"
 											>(via {route.relays.join(', ')})</span
@@ -162,8 +160,7 @@
 										>{route.destination}</span
 									>
 									<span class="mx-0.5 shrink-0 text-ink-dim">·</span>
-									<span class="min-w-0 truncate italic text-xs md:text-sm text-ink">"{text}"</span
-									>
+									<span class="min-w-0 truncate italic text-xs md:text-sm text-ink">"{text}"</span>
 									{#if packet?.rssi != null || packet?.snr != null}
 										{@render QualityValues(packet)}
 									{/if}
@@ -173,8 +170,7 @@
 								{@const source = splitSourcePath(packet?.src)}
 								<div class="flex min-w-0 items-center gap-1.5">
 									{@render EventIcon(event)}
-									<span class="shrink-0 text-xs md:text-sm font-bold text-ink"
-										>{source.origin}</span
+									<span class="shrink-0 text-xs md:text-sm font-bold text-ink">{source.origin}</span
 									>
 									{#if source.relays.length > 0}
 										<span class="hidden md:inline shrink-0 text-[11px] text-ink-muted"
@@ -193,8 +189,7 @@
 											<span
 												class="hidden md:flex shrink-0 items-center gap-0.5 text-[11px] text-ink-muted"
 											>
-												<span class="text-ink-dim"
-													><MdiIcon path={mdiThermometer} size={12} /></span
+												<span class="text-ink-dim"><MdiIcon path={mdiThermometer} size={12} /></span
 												>
 												{packet.temp1}°C
 											</span>
@@ -228,8 +223,7 @@
 								{@const hardware = hardwareHumanName(packet?.hw_id)}
 								<div class="flex min-w-0 items-center gap-1.5">
 									{@render EventIcon(event)}
-									<span class="shrink-0 text-xs md:text-sm font-bold text-ink"
-										>{source.origin}</span
+									<span class="shrink-0 text-xs md:text-sm font-bold text-ink">{source.origin}</span
 									>
 									{#if source.relays.length > 0}
 										<span class="hidden md:inline shrink-0 text-[11px] text-ink-muted"
@@ -248,7 +242,7 @@
 										{/if}
 										{#if packet?.alt != null}
 											<span class="hidden md:inline shrink-0 font-mono text-[11px] text-ink-muted"
-												>{packet.alt} m</span
+												>{formatAltitude(packet.alt)}</span
 											>
 										{/if}
 										{#if packet?.batt != null}
@@ -297,7 +291,7 @@
 											{/if}
 											{#if packet.alt != null}
 												<span class="hidden md:inline shrink-0 font-mono text-[11px] text-ink-muted"
-													>{packet.alt} m</span
+													>{formatAltitude(packet.alt)}</span
 												>
 											{/if}
 											{#if packet.batt != null}
@@ -315,7 +309,8 @@
 											{/if}
 										</span>
 									{:else}
-										<span class="min-w-0 truncate text-sm text-ink-muted">{eventSummary(event)}</span
+										<span class="min-w-0 truncate text-sm text-ink-muted"
+											>{eventSummary(event)}</span
 										>
 									{/if}
 									{#if packet?.rssi != null || packet?.snr != null}

@@ -1,4 +1,5 @@
 import { hardwareHumanName } from '$lib/api/hardware';
+import { formatAltitude } from '$lib/ui/format';
 import { nodeFreshness } from './node-state';
 import type { MapPosition } from './types';
 
@@ -27,7 +28,7 @@ export function buildTooltipHtml(position: MapPosition, now = Date.now()): strin
 		if (position.snr != null) signalParts.push(`SNR ${position.snr}`);
 		if (signalParts.length > 0) lines.push(signalParts.join(' · '));
 	}
-	if (position.altitude != null) lines.push(`↑ ${position.altitude} m`);
+	if (position.altitude != null) lines.push(`↑ ${formatAltitude(position.altitude)}`);
 	if (position.battery != null) lines.push(`🔋 ${position.battery}%`);
 	return lines.join('<br>');
 }

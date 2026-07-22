@@ -12,6 +12,7 @@ import type {
 } from './types';
 import { hardwareHumanName } from './hardware';
 import type { MapPosition } from '$lib/map/types';
+import { formatAltitude } from '$lib/ui/format';
 
 export const API_BASE = env.PUBLIC_API_BASE || '/api';
 
@@ -269,7 +270,7 @@ export function eventDetail(event: StreamEvent): string {
 	if (packet.type === 'pos') {
 		const relays = source.relays.length > 0 ? `via ${source.relays.join(', ')}` : '';
 		const hardware = hardwareHumanName(packet.hw_id);
-		const altitude = packet.alt != null ? `${packet.alt} m` : '';
+		const altitude = packet.alt != null ? formatAltitude(packet.alt) : '';
 		const battery = packet.batt != null ? `${packet.batt}% battery` : '';
 		const quality = formatQuality(packet);
 		return [relays, hardware, altitude, battery, quality].filter(Boolean).join(' · ');
@@ -344,12 +345,12 @@ export function splitSourcePath(source?: string): { origin: string; relays: stri
 
 export function messageKind(message?: string): { kind: string; label: string; icon: string } {
 	const text = message ?? '';
-	// ACK format: "ack571", ":ack571", "CALLSIGN :ack571", or "CALLSIGN:ack571" (no space)
-	if (/(?:^|[:\s])ack\d+(?!\w)/i.test(text)) return { kind: 'ack', label: 'ACK', icon: '✓' };
-	// REJ format: "rej571", ":rej571", "CALLSIGN :rej571", or "CALLSIGN:rej571" (no space)
-	if (/(?:^|[:\s])rej\d+(?!\w)/i.test(text)) return { kind: 'reject', label: 'Reject', icon: '!' };
 	if (text.startsWith('{CET}')) return { kind: 'time', label: 'Network time', icon: '◷' };
 	if (text.startsWith('{SET}')) return { kind: 'config', label: 'Config', icon: '⚙' };
+	// ACK format: ":571", "ack571", ":ack571", "CALLSIGN :ack571", or "CALLSIGN:ack571".
+	if (/(?:(?:^|[:\s])ack|:)\d+(?!\w)/i.test(text)) return { kind: 'ack', label: 'ACK', icon: '✓' };
+	// REJ format: "rej571", ":rej571", "CALLSIGN :rej571", or "CALLSIGN:rej571" (no space)
+	if (/(?:^|[:\s])rej\d+(?!\w)/i.test(text)) return { kind: 'reject', label: 'Reject', icon: '!' };
 	return { kind: 'message', label: 'Message', icon: '✉' };
 }
 
@@ -373,13 +374,13 @@ export function msgSeqId(packet: MeshcomPacket | null): string | null {
 	if (!packet) return null;
 	// msg_id is a hex packet ID (e.g. "E4B9D23B"), not the seq number.
 	// The seq number is always embedded as {NNN at the end of the message text.
-	const match = (packet.msg ?? '').match(/\{(\d+)\}?\s*$/);
+	const match = (packet.msg ?? '').match(/\{(\d+)\s*$/);
 	return match?.[1] ?? null;
 }
 
 export function ackSeqId(packet: MeshcomPacket | null): string | null {
 	// Handles: "ack571", ":ack571", "QQ5PMP-1 :ack571", "QQ5PMP-1:ack571" (no space)
-	const match = (packet?.msg ?? '').match(/(?:^|[:\s])ack(\d+)(?!\w)/i);
+	const match = (packet?.msg ?? '').match(/(?:(?:^|[:\s])ack|:)(\d+)(?!\w)/i);
 	return match?.[1] ?? null;
 }
 

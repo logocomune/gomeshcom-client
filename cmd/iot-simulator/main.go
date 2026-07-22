@@ -123,7 +123,7 @@ func parseFlags() config {
 	flag.Float64Var(&cfg.latitude, "lat", defaultLatitude, "base latitude")
 	flag.Float64Var(&cfg.longitude, "long", defaultLongitude, "base longitude")
 	flag.Float64Var(&cfg.jitter, "jitter", defaultJitter, "maximum random coordinate offset in decimal degrees")
-	flag.IntVar(&cfg.altitude, "alt", 12, "simulated altitude in meters")
+	flag.IntVar(&cfg.altitude, "alt", 12, "simulated altitude in feet")
 	flag.IntVar(&cfg.battery, "batt", 95, "simulated battery percentage")
 	flag.StringVar(&cfg.hardwareID, "hw-id", "IOT-SIM", "simulated hardware identifier")
 	flag.StringVar(&cfg.firmware, "firmware", "sim", "simulated firmware version")

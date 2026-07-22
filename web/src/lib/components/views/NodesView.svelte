@@ -12,6 +12,7 @@
 	import { goto } from '$app/navigation';
 	import type { MapPosition } from '$lib/map/types';
 	import { calculateDistanceKm } from '$lib/map/ruler';
+	import { nodeFreshness, type NodeFreshness } from '$lib/map/node-state';
 
 	type SortKey = 'callsign' | 'lastHeard' | 'hops' | 'rssi' | 'snr' | 'distance';
 	type SortDir = 'asc' | 'desc';
@@ -32,6 +33,7 @@
 		lng: number | null;
 		sourcePath: string;
 		distanceKm: number | null;
+		freshness: NodeFreshness;
 	}
 
 	// Own station position — derived reactively from the same mapPositions list.
@@ -53,6 +55,7 @@
 		myCallsign: string
 	): NodeRow[] {
 		const posMap = new Map(positions.map((p) => [p.id.toUpperCase(), p]));
+		const nowMs = Date.now();
 
 		return positions
 			.filter((pos) => pos.id.toUpperCase() !== myCallsign.toUpperCase())
@@ -97,7 +100,8 @@
 					lat: pos.lat,
 					lng: pos.lon,
 					sourcePath,
-					distanceKm
+					distanceKm,
+					freshness: nodeFreshness(pos, nowMs)
 				};
 			});
 	}
@@ -246,7 +250,7 @@
 					{#each sorted as row (row.callsign)}
 						<tr class="border-b border-gray-700/30 transition-colors hover:bg-gray-700/20">
 							<td
-								class="px-3 py-2 font-mono font-semibold {row.hops === 0
+								class="px-3 py-2 font-mono font-semibold {row.freshness === 'direct'
 									? 'text-emerald-400'
 									: 'text-blue-300'}"
 							>
@@ -262,7 +266,7 @@
 								{row.snr != null ? row.snr : '—'}
 							</td>
 							<td class="px-3 py-2">
-								{#if row.hops === 0 && row.lastHeard && Date.now() - new Date(row.lastHeard).getTime() < 2 * 60 * 60 * 1000}
+								{#if row.freshness === 'direct'}
 									<span class="font-semibold text-emerald-400">direct</span>
 								{:else}
 									<span class="text-gray-400">{row.hops}</span>
