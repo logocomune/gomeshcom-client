@@ -1,16 +1,19 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
+	import EmojiPicker from '$lib/components/chat/EmojiPicker.svelte';
 	import { chatRecordKey, baseCallFrom } from '$lib/api/chat';
 	import type { AckIndex } from '$lib/api/acks';
 	import { ackEntriesForRecord, rejectEntriesForRecord } from '$lib/api/acks';
 	import { cleanMessage, splitSourcePath } from '$lib/api/events';
 	import { resolveGroup } from '$lib/api/groups';
 	import { getSendComposerState } from '$lib/ui/send';
+	import { insertAtSelection, limitRunes, runeCount } from '$lib/ui/emoji';
 	import { formatRtt, formatChatTimestamp } from '$lib/ui/format';
 	import { chatIconTooltip, chatMdiIcon, chatRecordSeqId } from '$lib/ui/chat-records';
 	import {
 		mdiArrowLeft,
+		mdiEmoticonOutline,
 		mdiNotificationClearAll,
 		mdiSignalVariant,
 		mdiTrashCanOutline,
@@ -20,6 +23,9 @@
 	import { connectionState } from '$lib/stores/connection.svelte';
 	import { fetchDMStats } from '$lib/api/dmstats';
 	import type { DmStatsEntry } from '$lib/api/dmstats';
+	import { goto } from '$app/navigation';
+	import { eventsState } from '$lib/stores/events.svelte';
+	import { hasNumericSsid, positionForCallsign, splitChatContent } from '$lib/ui/chat-mentions';
 
 	interface Props {
 		ackIndex: AckIndex;
@@ -32,6 +38,9 @@
 
 	let chatScrollEl = $state<HTMLDivElement | null>(null);
 	let messageInputEl = $state<HTMLInputElement | null>(null);
+	let emojiPickerOpen = $state(false);
+	let activeMentionId = $state<string | null>(null);
+	const maxMessageLength = 149;
 
 	$effect(() => {
 		const _deps = [chatState.chatTarget, chatState.displayChatRecords];
@@ -49,6 +58,46 @@
 			event.preventDefault();
 			void handleSend();
 		}
+	}
+
+	function limitDraftMessage(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		chatState.draftMessage = limitRunes(input.value, maxMessageLength);
+	}
+
+	function insertEmoji(emoji: string) {
+		if (!messageInputEl) return;
+		const { message, cursor } = insertAtSelection(
+			chatState.draftMessage,
+			messageInputEl.selectionStart ?? 0,
+			messageInputEl.selectionEnd ?? 0,
+			emoji
+		);
+		chatState.draftMessage = limitRunes(message, maxMessageLength);
+		emojiPickerOpen = false;
+		void tick().then(() => {
+			messageInputEl?.focus();
+			messageInputEl?.setSelectionRange(cursor, cursor);
+		});
+	}
+
+	function openMentionChat(callsign: string) {
+		chatState.selectContact(callsign);
+		activeMentionId = null;
+		void goto('/chat');
+	}
+
+	function openMentionMap(callsign: string) {
+		const position = positionForCallsign(eventsState.mapPositions, callsign);
+		if (!position) return;
+		eventsState.focusOnNode(callsign, position.lat, position.lon);
+		activeMentionId = null;
+		void goto('/map');
+	}
+
+	function followLink(href: string) {
+		window.open(href, '_blank', 'noopener,noreferrer');
+		activeMentionId = null;
 	}
 
 	let chatTarget = $derived(chatState.chatTarget);
@@ -159,6 +208,17 @@
 			{/if}
 		</div>
 		<div class="flex items-center gap-1.5">
+			{#if isBroadcastTarget}
+				<label class="flex items-center gap-1 text-[10px] text-ink-muted">
+					<input
+						type="checkbox"
+						class="accent-azure"
+						checked={chatState.showTimeBeacons}
+						onchange={() => chatState.toggleTimeBeacons()}
+					/>
+					<span>Show time beacons</span>
+				</label>
+			{/if}
 			<label>
 				<span class="sr-only">Filter messages</span>
 				<input
@@ -195,8 +255,13 @@
 		{:else}
 			<div class="space-y-2">
 				{#each displayChatRecords as record (chatRecordKey(record))}
+					{@const recordKey = chatRecordKey(record)}
+					{@const message = cleanMessage(record.msg) || record.msg}
 					{@const parsedSourcePath = splitSourcePath(record.src)}
-					{@const sourcePath = { origin: parsedSourcePath.origin, relays: record.via ?? parsedSourcePath.relays }}
+					{@const sourcePath = {
+						origin: parsedSourcePath.origin,
+						relays: record.via ?? parsedSourcePath.relays
+					}}
 					{@const dmScope = chatState.dmScope}
 					{@const isSent =
 						dmScope === 'basecall'
@@ -288,7 +353,79 @@
 						<div
 							class="mt-2 rounded-lg border border-ink-dim/20 bg-base px-3 py-2 text-[11px] md:text-sm leading-relaxed text-ink"
 						>
-							{cleanMessage(record.msg) || record.msg}
+							{#each splitChatContent(message) as part, partIndex (part.kind + '-' + partIndex)}
+								{#if part.kind === 'text'}
+									{part.value}
+								{:else if part.kind === 'mention' && hasNumericSsid(part.callsign)}
+									{@const mentionId = `${recordKey}-${partIndex}`}
+									{@const hasPosition =
+										positionForCallsign(eventsState.mapPositions, part.callsign) != null}
+									<span class="relative inline-block">
+										<button
+											type="button"
+											class="font-semibold text-azure underline decoration-azure/60 underline-offset-2 hover:text-azure/80"
+											aria-expanded={activeMentionId === mentionId}
+											onclick={() =>
+												(activeMentionId = activeMentionId === mentionId ? null : mentionId)}
+										>
+											{part.value}
+										</button>
+										{#if activeMentionId === mentionId}
+											<span
+												class="absolute left-0 top-full z-20 mt-1 flex min-w-24 flex-col overflow-hidden rounded-lg border border-ink-dim/30 bg-surface py-1 text-left shadow-lg"
+											>
+												<button
+													type="button"
+													class="px-3 py-1.5 text-left text-xs hover:bg-surface-hi"
+													onclick={() => openMentionChat(part.callsign)}
+												>
+													Chat
+												</button>
+												{#if hasPosition}
+													<button
+														type="button"
+														class="px-3 py-1.5 text-left text-xs hover:bg-surface-hi"
+														onclick={() => openMentionMap(part.callsign)}
+													>
+														Map
+													</button>
+												{/if}
+											</span>
+										{/if}
+									</span>
+								{:else if part.kind === 'mention'}
+									<span
+										class="font-semibold text-azure underline decoration-azure/60 underline-offset-2"
+									>
+										{part.value}
+									</span>
+								{:else}
+									{@const linkId = `${recordKey}-${partIndex}`}
+									<span class="relative inline-block">
+										<button
+											type="button"
+											class="font-semibold text-azure underline decoration-azure/60 underline-offset-2 hover:text-azure/80"
+											aria-expanded={activeMentionId === linkId}
+											onclick={() => (activeMentionId = activeMentionId === linkId ? null : linkId)}
+										>
+											{part.value}
+										</button>
+										{#if activeMentionId === linkId}
+											<span
+												class="absolute left-0 top-full z-20 mt-1 flex min-w-28 flex-col overflow-hidden rounded-lg border border-ink-dim/30 bg-surface py-1 text-left shadow-lg"
+											>
+												<button
+													type="button"
+													class="px-3 py-1.5 text-left text-xs hover:bg-surface-hi"
+													onclick={() => followLink(part.href)}
+												>
+													Follow link
+												</button>
+											</span>
+										{/if}
+									</span>
+								{/if}
+							{/each}
 						</div>
 						{#if isSent && chatTarget.kind === 'contact' && sequenceId && ackEntries.length > 0}
 							<div class="mt-1 space-y-0.5 font-mono text-[10px] text-mint/70">
@@ -359,14 +496,23 @@
 			</div>
 		{/if}
 		<div class="flex gap-2">
+			<button
+				class="h-10 shrink-0 rounded-lg border border-ink-dim/30 bg-base px-2 text-ink-muted hover:border-azure/60 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+				type="button"
+				disabled={sending || txDisabled}
+				aria-label="Open emoji picker"
+				onclick={() => (emojiPickerOpen = true)}
+			>
+				<MdiIcon path={mdiEmoticonOutline} size={20} />
+			</button>
 			<div class="relative min-w-0 flex-1">
 				<input
 					class="h-10 w-full rounded-lg border border-ink-dim/30 bg-base px-3 text-sm text-ink outline-none placeholder:text-ink-dim focus:border-azure/60"
 					bind:this={messageInputEl}
 					bind:value={chatState.draftMessage}
 					placeholder="Type a message…"
-					maxlength={149}
 					disabled={sending || txDisabled}
+					oninput={limitDraftMessage}
 					onkeydown={sendOnEnter}
 				/>
 				<span
@@ -375,7 +521,7 @@
 						? 'text-coral'
 						: 'text-ink-muted'}"
 				>
-					{draftMessage.length}/149
+					{runeCount(draftMessage)}/{maxMessageLength}
 				</span>
 			</div>
 			<div class="flex flex-col items-center gap-1">
@@ -394,4 +540,11 @@
 			</div>
 		</div>
 	</div>
+	{#if emojiPickerOpen}
+		<EmojiPicker
+			disabled={sending || txDisabled}
+			onSelect={insertEmoji}
+			onClose={() => (emojiPickerOpen = false)}
+		/>
+	{/if}
 </div>

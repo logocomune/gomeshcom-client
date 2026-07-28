@@ -4,6 +4,8 @@ import {
 	chatSidebarGridStyle,
 	chatSidebarNewDmLabel,
 	loadChatChannelsCollapsed,
+	loadShowTimeBeacons,
+	saveShowTimeBeacons,
 	saveChatChannelsCollapsed
 } from './chat-layout';
 
@@ -39,6 +41,15 @@ describe('chat layout helpers', () => {
 		expect(store['meshcom:chatChannelsCollapsed']).toBe('1');
 		saveChatChannelsCollapsed(storage(), false);
 		expect(store['meshcom:chatChannelsCollapsed']).toBe('0');
+	});
+
+	it('defaults time beacons to hidden and persists selection', () => {
+		expect(loadShowTimeBeacons(storage())).toBe(false);
+		saveShowTimeBeacons(storage(), true);
+		expect(store['meshcom:chatShowTimeBeacons']).toBe('1');
+		expect(loadShowTimeBeacons(storage())).toBe(true);
+		saveShowTimeBeacons(storage(), false);
+		expect(store['meshcom:chatShowTimeBeacons']).toBe('0');
 	});
 
 	it('returns narrower columns when collapsed', () => {

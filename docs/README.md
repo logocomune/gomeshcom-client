@@ -13,6 +13,7 @@ Documentation describes current, supported behavior. Design notes and unimplemen
 - [Graph View](graph.md): graph page and Map graph overlay behavior.
 - [Statistics](statistics.md): hourly traffic aggregates and retention.
 - [Chat Status Tracking](chat_status.md): unread state and conversation IDs.
+- [Chat Text Actions](chat.md): callsign and web-link actions in chat messages.
 - [IoT UDP Simulator](iot-simulator.md): local packet simulator flags and behavior.
 
 ## MeshCom Reference

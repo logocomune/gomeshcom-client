@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.12.0] 2026-07-28
+
+### Added
+
+- **Chat callsign mentions**: radio-amateur callsigns in public and direct-message text are underlined. Callsigns with numeric SSID, such as `@IU5PMP-12`, additionally open a direct-chat/Map menu; Map appears when coordinates are known.
+- **Chat web links**: HTTP and HTTPS links in public and direct-message text are underlined and offer a `Follow link` action that opens a separate page.
+- **Broadcast time-beacon filter**: Broadcast hides `{CET}` network-time beacons by default; `Show time beacons` reveals them without affecting other channels or direct messages.
+- **Chat emoji picker**: chat composer now opens a wider, vertically scrollable modal with Smile, Animal, Places & Travel, Flags, and Objects tabs, and inserts selected emoji at cursor position.
+
+### Fixed
+
+- **Live node identity**: Nodes and node selectors keep displaying the origin callsign after live position packets instead of replacing it with the packet message ID. ([#3](https://github.com/logocomune/gomeshcom-client/issues/3))
+- **Chat composer character counter**: counts Unicode runes, matching backend message validation.
+
 ## [0.11.0] 2026-07-22
 
 ### Added
@@ -16,8 +30,6 @@ All notable changes to this project are documented in this file.
 - **Documentation and OpenAPI**: removed obsolete and non-English documentation, added a documentation index, and aligned API contract with authentication, SQLite persistence, and chat metadata.
 
 ## [0.10.0] - 2026-06-17
-
-
 
 - **Tests for `ChatStore` and `ToastStore`**: added unit tests covering `appendLiveChatRecord` (broadcast, channel, DM routing, deduplication, pending removal, ACK suppression), `appendChatRecord` (DM/mention toast and sound triggers, outbound/pending suppression, failed delivery cleanup), and `ToastStore` (`addDm`, `addMention`, `dismiss`, auto-dismiss timer).
 

@@ -28,12 +28,39 @@ beforeEach(() => {
 	chatState.chatTarget = { kind: 'channel', value: 'Broadcast' };
 	chatState.chatStatus = {};
 	chatState.dmScope = 'mycall';
+	chatState.showTimeBeacons = false;
 	connectionState.stationCallsign = 'XX5YYY-1';
 	uiPrefs.dmSoundEnabled = false;
 	uiPrefs.dmToastEnabled = false;
 	uiPrefs.mentionToastEnabled = false;
 	toastStore.toasts = [];
 	vi.clearAllMocks();
+});
+
+describe('broadcast time beacons', () => {
+	it('hides CET time beacons by default and shows them when enabled', () => {
+		chatState.chatHistory = {
+			P_broadcast: [
+				record({ msg: '{CET}2026-07-23 10:06:35' }),
+				record({ msg: 'normal broadcast' })
+			]
+		};
+
+		expect(chatState.displayChatRecords.map((item) => item.msg)).toEqual(['normal broadcast']);
+
+		chatState.showTimeBeacons = true;
+		expect(chatState.displayChatRecords.map((item) => item.msg)).toEqual([
+			'{CET}2026-07-23 10:06:35',
+			'normal broadcast'
+		]);
+	});
+
+	it('does not hide CET time beacons in a non-Broadcast channel', () => {
+		chatState.selectChannel('9');
+		chatState.chatHistory = { P_9: [record({ dst: '9', msg: '{CET}2026-07-23 10:06:35' })] };
+
+		expect(chatState.displayChatRecords).toHaveLength(1);
+	});
 });
 
 // ---------------------------------------------------------------------------

@@ -23,7 +23,12 @@ import { messageKind, splitSourcePath } from '$lib/api/events';
 import { partitionChannels } from '$lib/api/groups';
 import { chatRecordMatchesFilter, stripNodeSequence } from '$lib/ui/chat-records';
 import { normalizeCallsign } from '$lib/ui/callsign';
-import { loadChatChannelsCollapsed, saveChatChannelsCollapsed } from '$lib/ui/chat-layout';
+import {
+	loadChatChannelsCollapsed,
+	loadShowTimeBeacons,
+	saveChatChannelsCollapsed,
+	saveShowTimeBeacons
+} from '$lib/ui/chat-layout';
 import { connectionState } from '$lib/stores/connection.svelte';
 import { uiPrefs } from '$lib/stores/ui-prefs.svelte';
 import { playDmAlert } from '$lib/ui/sound';
@@ -87,6 +92,7 @@ class ChatStore {
 	chatStatus = $state<Record<string, ChatStatusEntry>>({});
 	dmScope = $state<DmScope>('mycall');
 	chatFilter = $state('');
+	showTimeBeacons = $state(false);
 	fetchedConvIds = $state(new Set<string>());
 	historyHours = $state(168);
 	draftMessage = $state('');
@@ -160,6 +166,7 @@ class ChatStore {
 		(this.chatHistory[this.currentConvId] ?? []).filter((rec) => {
 			const kind = messageKind(rec.msg).kind;
 			if (kind === 'ack' || kind === 'reject') return false;
+			if (this.isBroadcastTarget && !this.showTimeBeacons && kind === 'time') return false;
 			return chatRecordMatchesFilter(rec, this.chatFilter);
 		})
 	);
@@ -168,6 +175,7 @@ class ChatStore {
 		const w = parseFloat(localStorage.getItem(STORAGE_CHAT_WIDTH) ?? '');
 		if (!isNaN(w) && w >= 20 && w <= 80) this.chatWidthPct = w;
 		this.channelsCollapsed = loadChatChannelsCollapsed(localStorage);
+		this.showTimeBeacons = loadShowTimeBeacons(localStorage);
 		const lw = parseInt(localStorage.getItem(STORAGE_CHAT_LIST_WIDTH) ?? '', 10);
 		if (!isNaN(lw) && lw >= CHAT_LIST_MIN_PX && lw <= CHAT_LIST_MAX_PX) this.chatListWidthPx = lw;
 	}
@@ -186,6 +194,11 @@ class ChatStore {
 
 	saveChannelsCollapsed() {
 		saveChatChannelsCollapsed(localStorage, this.channelsCollapsed);
+	}
+
+	toggleTimeBeacons() {
+		this.showTimeBeacons = !this.showTimeBeacons;
+		saveShowTimeBeacons(localStorage, this.showTimeBeacons);
 	}
 
 	setChatStatus(snapshot: ChatStatusSnapshot) {

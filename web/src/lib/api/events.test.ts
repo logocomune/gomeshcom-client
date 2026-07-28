@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fc from 'fast-check';
 import {
 	applyLiveFreshness,
 	connectEvents,
@@ -169,7 +170,7 @@ describe('event helpers', () => {
 
 		expect(positionsFromEvents([first, second])).toEqual([
 			{
-				id: '2',
+				id: 'QQ5EKX-11',
 				source: 'QQ5EKX-11',
 				lat: 44.5,
 				lon: 11.3,
@@ -183,6 +184,51 @@ describe('event helpers', () => {
 				updatedAt: '2026-05-14T19:01:00Z'
 			}
 		]);
+	});
+
+	it('uses the origin callsign as the stable live position id', () => {
+		const position = positionFromEvent(
+			timedEvent('packet.received', '2026-05-14T19:00:00Z', {
+				packet: {
+					type: 'pos',
+					src: 'QQ5EKX-11,QQ5AKT-10',
+					lat: 43.5,
+					long: 10.3,
+					msg_id: 'AB39600F'
+				}
+			})
+		);
+
+		expect(position).toMatchObject({
+			id: 'QQ5EKX-11',
+			source: 'QQ5EKX-11'
+		});
+	});
+
+	it('keeps live position identity independent from message id', () => {
+		expect(() =>
+			fc.assert(
+				fc.property(
+					fc.stringMatching(/^[A-Z]{1,3}[0-9][A-Z0-9]{1,6}-[0-9]{1,2}$/),
+					fc.stringMatching(/^[A-F0-9]{8}$/),
+					(callsign, messageId) => {
+						const position = positionFromEvent(
+							timedEvent('packet.received', '2026-05-14T19:00:00Z', {
+								packet: {
+									type: 'pos',
+									src: `${callsign},RELAY-1`,
+									lat: 43.5,
+									long: 10.3,
+									msg_id: messageId
+								}
+							})
+						);
+
+						return position?.id === callsign && position.source === callsign;
+					}
+				)
+			)
+		).not.toThrow();
 	});
 
 	it('pos packet keeps rssi/snr only for direct source', () => {
@@ -244,7 +290,7 @@ describe('event helpers', () => {
 
 		expect(mergeMapPositions(stored, live)).toEqual([
 			{
-				id: '2',
+				id: 'QQ1ABC-1',
 				source: 'QQ1ABC-1',
 				lat: 48.2,
 				lon: 16.4,
@@ -482,13 +528,15 @@ describe('applyLiveFreshness', () => {
 					lat: 48.5,
 					long: 16.5,
 					rssi: -88,
-					snr: 4
+					snr: 4,
+					msg_id: 'AB39600F'
 				}
 			}
 		};
 		const result = applyLiveFreshness(s, [posEvent]);
 
 		const origin = result.find((p) => p.source === 'ORIGIN-1')!;
+		expect(origin.id).toBe('ORIGIN-1');
 		expect(origin.lat).toBe(48.5);
 		expect(origin.lon).toBe(16.5);
 		expect(origin.lastDirectSeen).toBeUndefined();

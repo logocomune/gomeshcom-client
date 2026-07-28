@@ -26,6 +26,7 @@
 		chatState.conversations = [];
 		chatState.chatTarget = { kind: 'channel', value: 'Broadcast' };
 		chatState.chatStatus = {};
+		chatState.showTimeBeacons = false;
 		chatState.chatFilter = '';
 		chatState.fetchedConvIds = new Set();
 		chatState.draftMessage = '';

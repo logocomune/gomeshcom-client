@@ -7,6 +7,8 @@ The root node is the active station callsign (`MyCall`). Each position record co
 - Direct position packet: `MyCall -> ORIGIN`
 - Relayed position packet `ORIGIN,R1,R2`: `MyCall -> R2 -> R1 -> ORIGIN`
 
+Node identity always comes from the origin callsign in the packet source path. Packet message IDs and hardware IDs remain metadata and never replace callsigns in the Nodes table, node selectors, or graph labels.
+
 The order is reversed from the packet source path because the graph is shown from the local station outward: the last relay in `via` is the direct radio neighbor, then earlier relays, then the packet origin.
 
 The page uses SVG generated in Svelte and does not require Chart.js or extra graph dependencies.

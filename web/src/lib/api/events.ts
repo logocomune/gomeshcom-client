@@ -510,7 +510,7 @@ export function positionFromEvent(event: StreamEvent): MapPosition | null {
 	const source = splitSourcePath(packet.src);
 	const isDirect = source.relays.length === 0;
 	return {
-		id: packet.msg_id ?? `${source.origin}-${packet.lat}-${packet.long}`,
+		id: source.origin,
 		source: source.origin,
 		lat: packet.lat,
 		lon: packet.long,
