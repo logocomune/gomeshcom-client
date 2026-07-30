@@ -6,6 +6,7 @@
 	import MobileDrawer from '$lib/components/MobileDrawer.svelte';
 	import TopNav from '$lib/components/TopNav.svelte';
 	import TxDisabledBanner from '$lib/components/TxDisabledBanner.svelte';
+	import TransportWarning from '$lib/components/TransportWarning.svelte';
 	import { eventJSON, packetBadge } from '$lib/api/events';
 	import { formatTime } from '$lib/ui/format';
 	import { chatMdiIcon } from '$lib/ui/chat-records';
@@ -102,6 +103,7 @@
 				<span class="h-2.5 w-2.5 rounded-full {app.statusClass[connectionState.state]}"></span>
 				<span class="font-medium text-ink-muted">{app.statusText[connectionState.state]}</span>
 			</div>
+			<TransportWarning />
 		</div>
 
 		<div class="hidden md:flex items-center">
