@@ -36,6 +36,10 @@ jobs:
       - name: Install web dependencies
         run: npm ci --prefix web
 
+      - name: Install Chromium for browser unit tests
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
       - name: Build embedded web UI
         run: npm --prefix web run build
 
