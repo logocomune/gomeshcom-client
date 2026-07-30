@@ -20,6 +20,7 @@ Thumbs.db
 
 # Logs and runtime output
 *.log
+!internal/serialbridge/testdata/firmware-4.35.log
 logs/
 tmp/
 temp/

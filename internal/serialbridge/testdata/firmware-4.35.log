@@ -1,0 +1,22 @@
+[09:18:25]--info
+[09:18:25]--MeshCom 4.35p (build: Jul 20 2026 / 10:48:57)
+[09:18:25]...Call: <QQ0AAA-10> ...ID 00000000 ...NODE 43 <HELTEC_V3>
+[09:18:25]...PASSWD <REDACTED>
+[09:18:25]...BTCODE REDACTED
+[09:18:25]...SSID <REDACTED> / PASSWORD <REDACTED>
+[09:18:25]
+[09:18:43]BLE Connected with: 00:00:00:00:00:00
+[09:18:45]GPS<{"TYP":"G","LAT":43.700000,"LON":10.300000,"ALT":57,"SAT":0,"SFIX":false}>
+[09:18:45][HEAP] 09:18:44 144324 134740 131060 (mon)
+[09:19:09][EXT] Out: {"src_type":"node","type":"msg","src":"QQ0AAA-10","dst":"QQ0BBB-12","msg":"test{659","msg_id":"E4B9D293","firmware":"4.35","fw_sub":"p","rssi":0,"snr":0} Len: 151
+[09:19:17][EXT] Out: {"src_type":"lora","type":"msg","src":"QQ0BBB-12","dst":"QQ0AAA-10","msg":"QQ0AAA-10:ack659","msg_id":"5011E37D","firmware":35,"fw_sub":"p","rssi":-114,"snr":-11} Len: 160
+[09:19:46][EXT] Out: {"src_type":"node","type":"pos","src":"QQ0AAA-10","msg":"","lat":43.7000,"lat_dir":"N","long":10.3000,"long_dir":"E","aprs_symbol":"#","aprs_symbol_group":"/","hw_id":43,"msg_id":"E4B9D294","alt":187,"batt":13,"firmware":"4.35","fw_sub":"p","rssi":0,"snr":0} Len: 258
+[09:19:46][EXT] Tele-Out: {"src_type":"node","type":"tele","src":"QQ0AAA-10","temp1":0,"temp2":0,"hum":0,"qfe":0,"qnh":0,"gas":0,"co2":0} Len: 109
+[09:19:49][EXT] Out: {"src_type":"lora","type":"msg","src":"QQ0CCC-33,QQ0DDD-10","dst":"*","msg":"{CET}2026-07-29 07:19:23","msg_id":"6A63945C","firmware":0,"fw_sub":"#","rssi":-105,"snr":-3} Len: 170
+[09:20:53][EXT] Out: {"src_type":"lora","type":"pos","src":"QQ0EEE-12,QQ0FFF-10,QQ0GGG-12","msg":"","lat":43.500,"lat_dir":"N","long":10.300,"long_dir":"E","aprs_symbol":"_","aprs_symbol_group":"/","hw_id":3,"msg_id":"4EB5538D","alt":13,"batt":100,"firmware":35,"fw_sub":"p","rssi":-98,"snr":3} Len: 273
+[09:20:53][EXT] Tele-Out: {"src_type":"lora","type":"tele","src":"QQ0EEE-12,QQ0FFF-10,QQ0GGG-12","batt":100,"temp1":30.8,"temp2":0,"hum":71.9,"qfe":0,"qnh":0,"gas":41.4,"co2":0} Len: 151
+[09:22:17][EXT] Out: {"src_type":"lora","type":"msg","src":"QQ0HHH-15,QQ0III-12","dst":"22231","msg":"Channel message","msg_id":"1F36E36C","firmware":35,"fw_sub":"p","rssi":-98,"snr":2} Len: 180
+[09:22:46]::{QQ0BBB-12}Direct message
+[09:22:46][EXT] Out: {"src_type":"node","type":"msg","src":"QQ0AAA-10","dst":"QQ0BBB-12","msg":"Direct message{663","msg_id":"E4B9D297","firmware":"4.35","fw_sub":"p","rssi":0,"snr":0} Len: 163
+[09:22:46]
+[09:23:13][EXT] Out: {"src_type":"lora","type":"msg","src":"QQ0BBB-12,QQ0DDD-10","dst":"QQ0AAA-10","msg":"QQ0AAA-10:ack663","msg_id":"5011E37E","firmware":35,"fw_sub":"p","rssi":-105,"snr":-3} Len: 169
