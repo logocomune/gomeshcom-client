@@ -124,6 +124,22 @@ func (o *Outbox) Confirm(source, destination, message string) (PendingMessage, b
 	return matched, true
 }
 
+func (o *Outbox) Cancel(id string) bool {
+	if o == nil || id == "" {
+		return false
+	}
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	pending, ok := o.pending[id]
+	if !ok {
+		return false
+	}
+	o.removeLocked(pending)
+	return true
+}
+
 func (o *Outbox) expire(id string) {
 	o.mu.Lock()
 	pending, ok := o.pending[id]

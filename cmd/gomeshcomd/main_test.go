@@ -77,6 +77,31 @@ func TestStartupBannerAutoDetectNode(t *testing.T) {
 	}
 }
 
+func TestStartupBannerSerialTransport(t *testing.T) {
+	cfg := config.Config{
+		HTTPAddr:      "127.0.0.1:8080",
+		TransportMode: config.TransportSerial,
+		MyCall:        "QQ1ABC-1",
+		Serial: config.Serial{
+			Device: "/dev/ttyUSB0",
+		},
+	}
+
+	banner := startupBanner(cfg, cfg.MyCall)
+	for _, want := range []string{
+		"MeshCom SERIAL Link Terminal",
+		"NODE     /dev/ttyUSB0",
+		"SERIAL   /dev/ttyUSB0",
+	} {
+		if !strings.Contains(banner, want) {
+			t.Fatalf("startup banner missing %q:\n%s", want, banner)
+		}
+	}
+	if strings.Contains(banner, "UDP RX") {
+		t.Fatalf("serial startup banner contains UDP row:\n%s", banner)
+	}
+}
+
 func TestStartupBannerRowsStayBoxed(t *testing.T) {
 	cfg := config.Config{
 		HTTPAddr:      "127.0.0.1:8080",

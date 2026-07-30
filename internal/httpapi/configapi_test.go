@@ -18,6 +18,7 @@ import (
 func fullTestConfig() config.Config {
 	return config.Config{
 		HTTPAddr:         "127.0.0.1:8080",
+		TransportMode:    config.TransportUDP,
 		UDPListenAddr:    "0.0.0.0:1799",
 		MyCall:           "QQ0QQ-1",
 		DataDir:          "./data",
@@ -42,6 +43,18 @@ func fullTestConfig() config.Config {
 		Send:       config.Send{DedupTTL: 2 * time.Second},
 		Auth:       config.Auth{SessionTTL: 24 * time.Hour, CookieName: "meshcom_session"},
 		RequestLog: config.RequestLog{Enabled: false},
+		Serial: config.Serial{
+			Baud:             115200,
+			DataBits:         8,
+			Parity:           "none",
+			StopBits:         1,
+			FlowControl:      "none",
+			ReadTimeout:      time.Second,
+			ReconnectInitial: time.Second,
+			ReconnectMax:     30 * time.Second,
+			StableResetAfter: 30 * time.Second,
+			MaxRecordBytes:   65536,
+		},
 		Storage: config.Storage{
 			SQLitePath:          "./data/gomeshcom.db",
 			PurgeInterval:       4 * time.Hour,
@@ -140,6 +153,32 @@ func TestBuildConfigResponseIncludesStoragePurgeFields(t *testing.T) {
 	}
 }
 
+func TestBuildConfigResponseIncludesSerialFields(t *testing.T) {
+	cfg := fullTestConfig()
+	cfg.Serial.Device = "/dev/ttyUSB0"
+	env := config.EnvOverrides{"TRANSPORT_MODE": true, "SERIAL_DTR": true}
+	resp := buildConfigResponse(cfg, env, "", time.Time{})
+
+	if resp.TransportMode.Value != config.TransportUDP {
+		t.Fatalf("transport_mode.value = %v, want udp", resp.TransportMode.Value)
+	}
+	if !resp.TransportMode.EnvOverride {
+		t.Fatal("transport_mode.env_override = false, want true")
+	}
+	if resp.Serial.Device.Value != "/dev/ttyUSB0" {
+		t.Fatalf("serial.device.value = %v, want /dev/ttyUSB0", resp.Serial.Device.Value)
+	}
+	if resp.Serial.Baud.Value != 115200 {
+		t.Fatalf("serial.baud.value = %v, want 115200", resp.Serial.Baud.Value)
+	}
+	if !resp.Serial.DTR.EnvOverride {
+		t.Fatal("serial.dtr.env_override = false, want true")
+	}
+	if !resp.Serial.Device.RequiresRestart {
+		t.Fatal("serial.device.requires_restart = false, want true")
+	}
+}
+
 // -------- GET /api/config (HTTP, no auth) --------
 
 func TestGetConfigHTTPReturnsOK(t *testing.T) {
@@ -186,6 +225,79 @@ func TestUpdateConfigPersistsToToml(t *testing.T) {
 	content := string(data)
 	if !contains(content, `log_level = "debug"`) {
 		t.Errorf("expected log_level = \"debug\" in TOML; got:\n%s", content)
+	}
+}
+
+func TestUpdateConfigSerialPersistsToToml(t *testing.T) {
+	dir := t.TempDir()
+	server := configTestServer(fullTestConfig(), config.EnvOverrides{}, dir)
+	body, err := json.Marshal(map[string]any{
+		"transport_mode": "serial",
+		"serial": map[string]any{
+			"device": "/dev/ttyUSB0",
+			"dtr":    false,
+			"rts":    false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if server.cfg.TransportMode != config.TransportSerial {
+		t.Fatalf("TransportMode = %q, want serial", server.cfg.TransportMode)
+	}
+	if server.cfg.Serial.Device != "/dev/ttyUSB0" {
+		t.Fatalf("Serial.Device = %q, want /dev/ttyUSB0", server.cfg.Serial.Device)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "gomeshcomd.toml"))
+	if err != nil {
+		t.Fatalf("read TOML: %v", err)
+	}
+	content := string(data)
+	if !contains(content, `transport_mode = "serial"`) {
+		t.Errorf("missing transport_mode in TOML:\n%s", content)
+	}
+	if !contains(content, "[serial]") || !contains(content, `device = "/dev/ttyUSB0"`) {
+		t.Errorf("missing serial section in TOML:\n%s", content)
+	}
+}
+
+func TestUpdateConfigNormalizesSerialValues(t *testing.T) {
+	server := configTestServer(fullTestConfig(), config.EnvOverrides{}, "")
+	body, err := json.Marshal(map[string]any{
+		"transport_mode": " SERIAL ",
+		"serial": map[string]any{
+			"device":       " /dev/ttyUSB0 ",
+			"parity":       " EVEN ",
+			"flow_control": " NONE ",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if server.cfg.TransportMode != config.TransportSerial ||
+		server.cfg.Serial.Device != "/dev/ttyUSB0" ||
+		server.cfg.Serial.Parity != "even" ||
+		server.cfg.Serial.FlowControl != "none" {
+		t.Fatalf("config was not normalized: mode=%q serial=%+v", server.cfg.TransportMode, server.cfg.Serial)
 	}
 }
 
@@ -273,7 +385,7 @@ func TestUpdateConfigEnvLockedFieldRejected(t *testing.T) {
 	env := config.EnvOverrides{"MY_CALL": true}
 	server := configTestServer(cfg, env, "")
 
-	body, _ := json.Marshal(map[string]any{"my_call": "IU5PMP-1"})
+	body, _ := json.Marshal(map[string]any{"my_call": "QQ5QQQ-1"})
 	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -320,6 +432,118 @@ func TestUpdateConfigInvalidDurationRejected(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestUpdateConfigInvalidSerialDurationRejected(t *testing.T) {
+	server := configTestServer(fullTestConfig(), config.EnvOverrides{}, "")
+	body, err := json.Marshal(map[string]any{
+		"serial": map[string]any{"reconnect_initial": "notaduration"},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateConfigEnvLockedSerialFieldRejected(t *testing.T) {
+	env := config.EnvOverrides{"SERIAL_DEVICE": true}
+	server := configTestServer(fullTestConfig(), env, "")
+	body, err := json.Marshal(map[string]any{
+		"serial": map[string]any{"device": "/dev/ttyUSB0"},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestApplySerialUpdateAppliesEveryField(t *testing.T) {
+	device := "COM7"
+	baud := 57600
+	dataBits := 7
+	parity := "even"
+	stopBits := 2
+	flowControl := "none"
+	dtr := true
+	rts := true
+	readTimeout := "2s"
+	reconnectInitial := "3s"
+	reconnectMax := "40s"
+	stableResetAfter := "1m"
+	maxRecordBytes := 8192
+	serial := config.Serial{}
+
+	err := applySerialUpdate(&serial, &configUpdateSerial{
+		Device:           &device,
+		Baud:             &baud,
+		DataBits:         &dataBits,
+		Parity:           &parity,
+		StopBits:         &stopBits,
+		FlowControl:      &flowControl,
+		DTR:              &dtr,
+		RTS:              &rts,
+		ReadTimeout:      &readTimeout,
+		ReconnectInitial: &reconnectInitial,
+		ReconnectMax:     &reconnectMax,
+		StableResetAfter: &stableResetAfter,
+		MaxRecordBytes:   &maxRecordBytes,
+	})
+	if err != nil {
+		t.Fatalf("applySerialUpdate() error = %v", err)
+	}
+
+	want := config.Serial{
+		Device:           "COM7",
+		Baud:             57600,
+		DataBits:         7,
+		Parity:           "even",
+		StopBits:         2,
+		FlowControl:      "none",
+		DTR:              true,
+		RTS:              true,
+		ReadTimeout:      2 * time.Second,
+		ReconnectInitial: 3 * time.Second,
+		ReconnectMax:     40 * time.Second,
+		StableResetAfter: time.Minute,
+		MaxRecordBytes:   8192,
+	}
+	if serial != want {
+		t.Fatalf("serial = %+v, want %+v", serial, want)
+	}
+}
+
+func TestApplySerialUpdateRejectsInvalidDurations(t *testing.T) {
+	invalid := "invalid"
+	tests := map[string]configUpdateSerial{
+		"read timeout":       {ReadTimeout: &invalid},
+		"reconnect initial":  {ReconnectInitial: &invalid},
+		"reconnect maximum":  {ReconnectMax: &invalid},
+		"stable reset after": {StableResetAfter: &invalid},
+	}
+
+	for name, update := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := applySerialUpdate(&config.Serial{}, &update); err == nil {
+				t.Fatal("applySerialUpdate() error = nil")
+			}
+		})
 	}
 }
 
@@ -372,7 +596,7 @@ func TestUpdateConfigMyCallLiveApply(t *testing.T) {
 		WithEnvOverrides(config.EnvOverrides{}),
 	)
 
-	body, _ := json.Marshal(map[string]any{"my_call": "IU5PMP-1"})
+	body, _ := json.Marshal(map[string]any{"my_call": "QQ5QQQ-1"})
 	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -383,8 +607,8 @@ func TestUpdateConfigMyCallLiveApply(t *testing.T) {
 	}
 
 	// Effective callsign must be updated in server.
-	if server.cfg.MyCall != "IU5PMP-1" {
-		t.Errorf("server.cfg.MyCall = %q, want IU5PMP-1", server.cfg.MyCall)
+	if server.cfg.MyCall != "QQ5QQQ-1" {
+		t.Errorf("server.cfg.MyCall = %q, want QQ5QQQ-1", server.cfg.MyCall)
 	}
 
 	// SSE event must have been published.

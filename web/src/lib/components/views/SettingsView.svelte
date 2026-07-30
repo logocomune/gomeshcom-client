@@ -70,9 +70,24 @@
 	let myCall = $state('');
 	let logLevel = $state('info');
 	let httpAddr = $state('');
+	let transportMode = $state<'udp' | 'serial'>('udp');
 	let udpListenAddr = $state('');
 	let nodeAddr = $state('');
 	let maxMsgLen = $state('');
+	// Serial transport
+	let serialDevice = $state('');
+	let serialBaud = $state('');
+	let serialDataBits = $state('');
+	let serialParity = $state('none');
+	let serialStopBits = $state('');
+	let serialFlowControl = $state('none');
+	let serialDtr = $state(false);
+	let serialRts = $state(false);
+	let serialReadTimeout = $state('');
+	let serialReconnectInitial = $state('');
+	let serialReconnectMax = $state('');
+	let serialStableResetAfter = $state('');
+	let serialMaxRecordBytes = $state('');
 	// Send
 	let dedupTtl = $state('');
 	// Receive Log
@@ -118,9 +133,23 @@
 			(myCall !== config.my_call.value ||
 				logLevel !== config.log_level.value ||
 				httpAddr !== config.http_addr.value ||
+				transportMode !== config.transport_mode.value ||
 				udpListenAddr !== config.udp_listen_addr.value ||
 				nodeAddr !== config.node_addr.value ||
 				maxMsgLen !== String(config.max_message_length.value) ||
+				serialDevice !== config.serial.device.value ||
+				serialBaud !== String(config.serial.baud.value) ||
+				serialDataBits !== String(config.serial.data_bits.value) ||
+				serialParity !== config.serial.parity.value ||
+				serialStopBits !== String(config.serial.stop_bits.value) ||
+				serialFlowControl !== config.serial.flow_control.value ||
+				serialDtr !== config.serial.dtr.value ||
+				serialRts !== config.serial.rts.value ||
+				serialReadTimeout !== config.serial.read_timeout.value ||
+				serialReconnectInitial !== config.serial.reconnect_initial.value ||
+				serialReconnectMax !== config.serial.reconnect_max.value ||
+				serialStableResetAfter !== config.serial.stable_reset_after.value ||
+				serialMaxRecordBytes !== String(config.serial.max_record_bytes.value) ||
 				dedupTtl !== config.send.dedup_ttl.value ||
 				receiveLogEnabled !== config.receive_log.enabled.value ||
 				receiveLogPath !== config.receive_log.path.value ||
@@ -139,9 +168,23 @@
 		myCall = cfg.my_call.value;
 		logLevel = cfg.log_level.value;
 		httpAddr = cfg.http_addr.value;
+		transportMode = cfg.transport_mode.value;
 		udpListenAddr = cfg.udp_listen_addr.value;
 		nodeAddr = cfg.node_addr.value;
 		maxMsgLen = String(cfg.max_message_length.value);
+		serialDevice = cfg.serial.device.value;
+		serialBaud = String(cfg.serial.baud.value);
+		serialDataBits = String(cfg.serial.data_bits.value);
+		serialParity = cfg.serial.parity.value;
+		serialStopBits = String(cfg.serial.stop_bits.value);
+		serialFlowControl = cfg.serial.flow_control.value;
+		serialDtr = cfg.serial.dtr.value;
+		serialRts = cfg.serial.rts.value;
+		serialReadTimeout = cfg.serial.read_timeout.value;
+		serialReconnectInitial = cfg.serial.reconnect_initial.value;
+		serialReconnectMax = cfg.serial.reconnect_max.value;
+		serialStableResetAfter = cfg.serial.stable_reset_after.value;
+		serialMaxRecordBytes = String(cfg.serial.max_record_bytes.value);
 		dedupTtl = cfg.send.dedup_ttl.value;
 		receiveLogEnabled = cfg.receive_log.enabled.value;
 		receiveLogPath = cfg.receive_log.path.value;
@@ -183,9 +226,32 @@
 		if (!config.my_call.env_override) patch.my_call = normalizedCall;
 		if (!config.log_level.env_override) patch.log_level = logLevel;
 		if (!config.http_addr.env_override) patch.http_addr = httpAddr;
+		if (!config.transport_mode.env_override) patch.transport_mode = transportMode;
 		if (!config.udp_listen_addr.env_override) patch.udp_listen_addr = udpListenAddr;
 		if (!config.node_addr.env_override) patch.node_addr = nodeAddr;
 		if (!config.max_message_length.env_override) patch.max_message_length = maxLen;
+
+		{
+			const serial = config.serial;
+			patch.serial = {};
+			if (!serial.device.env_override) patch.serial.device = serialDevice;
+			if (!serial.baud.env_override) patch.serial.baud = parseInt(serialBaud, 10);
+			if (!serial.data_bits.env_override) patch.serial.data_bits = parseInt(serialDataBits, 10);
+			if (!serial.parity.env_override) patch.serial.parity = serialParity;
+			if (!serial.stop_bits.env_override) patch.serial.stop_bits = parseInt(serialStopBits, 10);
+			if (!serial.flow_control.env_override) patch.serial.flow_control = serialFlowControl;
+			if (!serial.dtr.env_override) patch.serial.dtr = serialDtr;
+			if (!serial.rts.env_override) patch.serial.rts = serialRts;
+			if (!serial.read_timeout.env_override) patch.serial.read_timeout = serialReadTimeout;
+			if (!serial.reconnect_initial.env_override)
+				patch.serial.reconnect_initial = serialReconnectInitial;
+			if (!serial.reconnect_max.env_override) patch.serial.reconnect_max = serialReconnectMax;
+			if (!serial.stable_reset_after.env_override)
+				patch.serial.stable_reset_after = serialStableResetAfter;
+			if (!serial.max_record_bytes.env_override)
+				patch.serial.max_record_bytes = parseInt(serialMaxRecordBytes, 10);
+			if (Object.keys(patch.serial).length === 0) delete patch.serial;
+		}
 
 		{
 			const s = config.send;
@@ -301,7 +367,7 @@
 				</div>
 				{#if !loading && !loadError}
 					<div class="mt-3 flex gap-1 border-t border-ink-dim/10 pt-3">
-						{#each ['server', 'web', 'storage', 'system'] as const as key}
+						{#each ['server', 'web', 'storage', 'system'] as const as key (key)}
 							<button
 								onclick={() => (activeSection = key)}
 								class="rounded-lg px-3 py-1 text-xs font-medium transition-colors {activeSection ===
@@ -381,39 +447,243 @@
 								disabled={config.log_level.env_override}
 								class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
 							>
-								{#each ['debug', 'info', 'warn', 'error'] as level}
+								{#each ['debug', 'info', 'warn', 'error'] as level (level)}
 									<option value={level}>{level}</option>
 								{/each}
 							</select>
 						</SettingsField>
 						<SettingsField
-							label="UDP listen address"
-							description="UDP address for incoming MeshCom packets."
-							envOverride={config.udp_listen_addr.env_override}
-							requiresRestart={config.udp_listen_addr.requires_restart}
+							label="Transport"
+							description="Node connection type. UDP remains the default for backward compatibility."
+							envOverride={config.transport_mode.env_override}
+							requiresRestart={config.transport_mode.requires_restart}
 						>
-							<input
-								type="text"
-								bind:value={udpListenAddr}
-								disabled={config.udp_listen_addr.env_override}
+							<select
+								bind:value={transportMode}
+								disabled={config.transport_mode.env_override}
 								class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-								placeholder="0.0.0.0:1799"
-							/>
+							>
+								<option value="udp">UDP</option>
+								<option value="serial">Serial</option>
+							</select>
 						</SettingsField>
-						<SettingsField
-							label="Node address"
-							description="Address of the MeshCom node. Leave empty to auto-detect from first incoming packet."
-							envOverride={config.node_addr.env_override}
-							requiresRestart={config.node_addr.requires_restart}
-						>
-							<input
-								type="text"
-								bind:value={nodeAddr}
-								disabled={config.node_addr.env_override}
+						{#if transportMode === 'udp'}
+							<SettingsField
+								label="UDP listen address"
+								description="UDP address for incoming MeshCom packets."
+								envOverride={config.udp_listen_addr.env_override}
+								requiresRestart={config.udp_listen_addr.requires_restart}
+							>
+								<input
+									type="text"
+									bind:value={udpListenAddr}
+									disabled={config.udp_listen_addr.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									placeholder="0.0.0.0:1799"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="Node address"
+								description="MeshCom node UDP address. Leave empty to auto-detect from first packet."
+								envOverride={config.node_addr.env_override}
+								requiresRestart={config.node_addr.requires_restart}
+							>
+								<input
+									type="text"
+									bind:value={nodeAddr}
+									disabled={config.node_addr.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									placeholder="auto-detect"
+								/>
+							</SettingsField>
+						{:else}
+							<SettingsField
+								label="Serial device"
+								description="Explicit device path or COM port. Automatic discovery is not used."
+								envOverride={config.serial.device.env_override}
+								requiresRestart={config.serial.device.requires_restart}
+							>
+								<input
+									type="text"
+									bind:value={serialDevice}
+									disabled={config.serial.device.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									placeholder="/dev/ttyUSB0 or COM3"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="Baud rate"
+								description="Serial speed. MeshCom firmware 4.35+ default: 115200."
+								envOverride={config.serial.baud.env_override}
+								requiresRestart={config.serial.baud.requires_restart}
+							>
+								<input
+									type="number"
+									bind:value={serialBaud}
+									disabled={config.serial.baud.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									min="1"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="Data bits"
+								description="Serial data bits. Default: 8."
+								envOverride={config.serial.data_bits.env_override}
+								requiresRestart={config.serial.data_bits.requires_restart}
+							>
+								<select
+									bind:value={serialDataBits}
+									disabled={config.serial.data_bits.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+								>
+									{#each ['5', '6', '7', '8'] as bits (bits)}
+										<option value={bits}>{bits}</option>
+									{/each}
+								</select>
+							</SettingsField>
+							<SettingsField
+								label="Parity"
+								description="Serial parity. Default: none."
+								envOverride={config.serial.parity.env_override}
+								requiresRestart={config.serial.parity.requires_restart}
+							>
+								<select
+									bind:value={serialParity}
+									disabled={config.serial.parity.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+								>
+									{#each ['none', 'odd', 'even', 'mark', 'space'] as parity (parity)}
+										<option value={parity}>{parity}</option>
+									{/each}
+								</select>
+							</SettingsField>
+							<SettingsField
+								label="Stop bits"
+								description="Serial stop bits. Default: 1."
+								envOverride={config.serial.stop_bits.env_override}
+								requiresRestart={config.serial.stop_bits.requires_restart}
+							>
+								<select
+									bind:value={serialStopBits}
+									disabled={config.serial.stop_bits.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+								>
+									<option value="1">1</option>
+									<option value="2">2</option>
+								</select>
+							</SettingsField>
+							<SettingsField
+								label="Flow control"
+								description="Serial flow control. Default: none."
+								envOverride={config.serial.flow_control.env_override}
+								requiresRestart={config.serial.flow_control.requires_restart}
+							>
+								<select
+									bind:value={serialFlowControl}
+									disabled={config.serial.flow_control.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+								>
+									<option value="none">none</option>
+								</select>
+							</SettingsField>
+							<SettingsField
+								label="DTR"
+								description="Disable for ESP32/CP2102 to avoid reset; enable for nRF52/RAK USB CDC."
+								envOverride={config.serial.dtr.env_override}
+								requiresRestart={config.serial.dtr.requires_restart}
+							>
+								<input
+									type="checkbox"
+									bind:checked={serialDtr}
+									disabled={config.serial.dtr.env_override}
+									class="h-4 w-4 accent-azure disabled:cursor-not-allowed disabled:opacity-50"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="RTS"
+								description="Keep disabled for ESP32/CP2102 unless hardware wiring requires it."
+								envOverride={config.serial.rts.env_override}
+								requiresRestart={config.serial.rts.requires_restart}
+							>
+								<input
+									type="checkbox"
+									bind:checked={serialRts}
+									disabled={config.serial.rts.env_override}
+									class="h-4 w-4 accent-azure disabled:cursor-not-allowed disabled:opacity-50"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="Read timeout"
+								description="Finite serial read timeout used for cancellation and reconnect handling."
+								envOverride={config.serial.read_timeout.env_override}
+								requiresRestart={config.serial.read_timeout.requires_restart}
+							>
+								<input
+									type="text"
+									bind:value={serialReadTimeout}
+									disabled={config.serial.read_timeout.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									placeholder="1s"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="Reconnect initial"
+								description="Initial delay after a failed connection."
+								envOverride={config.serial.reconnect_initial.env_override}
+								requiresRestart={config.serial.reconnect_initial.requires_restart}
+							>
+								<input
+									type="text"
+									bind:value={serialReconnectInitial}
+									disabled={config.serial.reconnect_initial.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									placeholder="1s"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="Reconnect maximum"
+								description="Maximum reconnect backoff."
+								envOverride={config.serial.reconnect_max.env_override}
+								requiresRestart={config.serial.reconnect_max.requires_restart}
+							>
+								<input
+									type="text"
+									bind:value={serialReconnectMax}
+									disabled={config.serial.reconnect_max.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									placeholder="30s"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="Stable reset after"
+								description="Connected duration required before resetting reconnect backoff."
+								envOverride={config.serial.stable_reset_after.env_override}
+								requiresRestart={config.serial.stable_reset_after.requires_restart}
+							>
+								<input
+									type="text"
+									bind:value={serialStableResetAfter}
+									disabled={config.serial.stable_reset_after.env_override}
+									class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									placeholder="30s"
+								/>
+							</SettingsField>
+							<SettingsField
+								label="Maximum serial record"
+								description="Maximum buffered serial line size in bytes."
+								envOverride={config.serial.max_record_bytes.env_override}
+								requiresRestart={config.serial.max_record_bytes.requires_restart}
+							>
+								<input
+									type="number"
+									bind:value={serialMaxRecordBytes}
+									disabled={config.serial.max_record_bytes.env_override}
 								class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-								placeholder="auto-detect"
+								min="256"
+								max="1048576"
 							/>
-						</SettingsField>
+							</SettingsField>
+						{/if}
 						<SettingsField
 							label="Max message length"
 							description="Maximum outgoing message size in bytes (1–255)."

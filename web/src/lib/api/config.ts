@@ -54,6 +54,22 @@ export type ConfigStorage = {
 	telemetry_retention: ConfigFieldMeta<string>;
 };
 
+export type ConfigSerial = {
+	device: ConfigFieldMeta<string>;
+	baud: ConfigFieldMeta<number>;
+	data_bits: ConfigFieldMeta<number>;
+	parity: ConfigFieldMeta<string>;
+	stop_bits: ConfigFieldMeta<number>;
+	flow_control: ConfigFieldMeta<string>;
+	dtr: ConfigFieldMeta<boolean>;
+	rts: ConfigFieldMeta<boolean>;
+	read_timeout: ConfigFieldMeta<string>;
+	reconnect_initial: ConfigFieldMeta<string>;
+	reconnect_max: ConfigFieldMeta<string>;
+	stable_reset_after: ConfigFieldMeta<string>;
+	max_record_bytes: ConfigFieldMeta<number>;
+};
+
 export type ServerInfo = {
 	version: string;
 	started_at: string;
@@ -63,6 +79,7 @@ export type ServerInfo = {
 export type AppConfig = {
 	server: ServerInfo;
 	http_addr: ConfigFieldMeta<string>;
+	transport_mode: ConfigFieldMeta<'udp' | 'serial'>;
 	udp_listen_addr: ConfigFieldMeta<string>;
 	node_addr: ConfigFieldMeta<string>;
 	my_call: ConfigFieldMeta<string>;
@@ -77,6 +94,7 @@ export type AppConfig = {
 	auth: ConfigAuth;
 	request_log: ConfigRequestLog;
 	storage: ConfigStorage;
+	serial: ConfigSerial;
 };
 
 export type ConfigUpdateResponse = {
@@ -86,6 +104,7 @@ export type ConfigUpdateResponse = {
 
 export type ConfigPatch = {
 	http_addr?: string;
+	transport_mode?: 'udp' | 'serial';
 	udp_listen_addr?: string;
 	node_addr?: string;
 	my_call?: string;
@@ -129,6 +148,21 @@ export type ConfigPatch = {
 		public_chat_retention?: string;
 		nodes_retention?: string;
 		telemetry_retention?: string;
+	};
+	serial?: {
+		device?: string;
+		baud?: number;
+		data_bits?: number;
+		parity?: string;
+		stop_bits?: number;
+		flow_control?: string;
+		dtr?: boolean;
+		rts?: boolean;
+		read_timeout?: string;
+		reconnect_initial?: string;
+		reconnect_max?: string;
+		stable_reset_after?: string;
+		max_record_bytes?: number;
 	};
 };
 

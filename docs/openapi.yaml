@@ -158,13 +158,18 @@ paths:
                 ok:
                   value:
                     status: ok
+                    transport:
+                      mode: udp
+                      state: connected
+                      endpoint: "0.0.0.0:1799"
+                      retry_count: 0
   /api/messages:
     post:
       tags: [Messages]
-      summary: Send an outgoing text message over UDP
+      summary: Send an outgoing text message
       description: |
         Validates the request, suppresses immediate duplicates via the send
-        cache, then sends the message through the configured UDP bridge. After
+        cache, then sends the message through the configured transport. After
         accept, the server waits up to 5 seconds for the node echo; if none
         arrives, it persists a chat record with `delivery_status: failed` and
         emits `message.failed`.
@@ -182,7 +187,7 @@ paths:
                   msg: hello
       responses:
         "202":
-          description: Message accepted for UDP send.
+          description: Message accepted for transport send.
           content:
             application/json:
               schema:
@@ -212,13 +217,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/DuplicateResponse"
         "502":
-          description: UDP send failed.
+          description: Transport send failed.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: UDP bridge is not configured.
+          description: Transport is unavailable, disconnected, or not configured.
           content:
             application/json:
               schema:
@@ -951,7 +956,44 @@ components:
       properties:
         status:
           type: string
-          example: ok
+          enum: [ok, degraded]
+          example: degraded
+        version:
+          type: string
+        callsign:
+          type: string
+          example: QQ0QQ-1
+        started_at:
+          type: string
+          format: date-time
+        transport:
+          $ref: "#/components/schemas/TransportStatus"
+
+    TransportStatus:
+      type: object
+      required: [mode, state, endpoint, retry_count]
+      properties:
+        mode:
+          type: string
+          enum: [udp, serial]
+        state:
+          type: string
+          enum: [disconnected, connecting, connected, degraded, stopped]
+        endpoint:
+          type: string
+          description: UDP listen address or explicit serial device.
+        last_error:
+          type: string
+        last_error_at:
+          type: string
+          format: date-time
+        connected_at:
+          type: string
+          format: date-time
+        retry_count:
+          type: integer
+          format: int64
+          minimum: 0
     ErrorResponse:
       type: object
       required: [error]
@@ -1545,11 +1587,43 @@ components:
         telemetry_retention:
           $ref: "#/components/schemas/ConfigFieldMeta"
 
+    ConfigSerialSection:
+      type: object
+      required: [device, baud, data_bits, parity, stop_bits, flow_control, dtr, rts, read_timeout, reconnect_initial, reconnect_max, stable_reset_after, max_record_bytes]
+      properties:
+        device:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        baud:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        data_bits:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        parity:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        stop_bits:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        flow_control:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        dtr:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        rts:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        read_timeout:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        reconnect_initial:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        reconnect_max:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        stable_reset_after:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        max_record_bytes:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+
     ConfigResponse:
       type: object
       required:
         - server
         - http_addr
+        - transport_mode
         - udp_listen_addr
         - node_addr
         - my_call
@@ -1564,10 +1638,13 @@ components:
         - auth
         - request_log
         - storage
+        - serial
       properties:
         server:
           $ref: "#/components/schemas/ConfigServerInfo"
         http_addr:
+          $ref: "#/components/schemas/ConfigFieldMeta"
+        transport_mode:
           $ref: "#/components/schemas/ConfigFieldMeta"
         udp_listen_addr:
           $ref: "#/components/schemas/ConfigFieldMeta"
@@ -1597,6 +1674,8 @@ components:
           $ref: "#/components/schemas/ConfigRequestLogSection"
         storage:
           $ref: "#/components/schemas/ConfigStorageSection"
+        serial:
+          $ref: "#/components/schemas/ConfigSerialSection"
 
     ConfigUpdateReceiveLog:
       type: object
@@ -1700,6 +1779,58 @@ components:
           description: Duration string. TOML/API accept day suffixes such as `"30d"` in addition to Go duration strings.
           example: "30d"
 
+    ConfigUpdateSerial:
+      type: object
+      properties:
+        device:
+          type: string
+          description: Explicit serial device path or Windows COM port.
+          example: "/dev/ttyUSB0"
+        baud:
+          type: integer
+          default: 115200
+        data_bits:
+          type: integer
+          enum: [5, 6, 7, 8]
+          default: 8
+        parity:
+          type: string
+          enum: [none, odd, even, mark, space]
+          default: none
+        stop_bits:
+          type: integer
+          enum: [1, 2]
+          default: 1
+        flow_control:
+          type: string
+          enum: [none]
+          default: none
+        dtr:
+          type: boolean
+          description: Disable for ESP32/CP2102; enable for nRF52/RAK USB CDC.
+          default: false
+        rts:
+          type: boolean
+          description: Disable for ESP32/CP2102 unless hardware wiring requires it.
+          default: false
+        read_timeout:
+          type: string
+          default: "1s"
+        reconnect_initial:
+          type: string
+          default: "1s"
+        reconnect_max:
+          type: string
+          default: "30s"
+        stable_reset_after:
+          type: string
+          default: "30s"
+        max_record_bytes:
+          type: integer
+          default: 65536
+          minimum: 1
+          maximum: 1048576
+
     ConfigUpdateRequest:
       type: object
       description: |
@@ -1711,6 +1842,10 @@ components:
         http_addr:
           type: string
           example: "0.0.0.0:8080"
+        transport_mode:
+          type: string
+          enum: [udp, serial]
+          default: udp
         udp_listen_addr:
           type: string
           example: "0.0.0.0:1799"
@@ -1719,7 +1854,7 @@ components:
           example: "192.168.0.2:1799"
         my_call:
           type: string
-          example: IU5PMP-1
+          example: QQ0QQ-1
         max_message_length:
           type: integer
           example: 160
@@ -1743,6 +1878,8 @@ components:
           $ref: "#/components/schemas/ConfigUpdateRequestLog"
         storage:
           $ref: "#/components/schemas/ConfigUpdateStorage"
+        serial:
+          $ref: "#/components/schemas/ConfigUpdateSerial"
 
     ConfigUpdateResponse:
       type: object

@@ -22,7 +22,7 @@
 		</svg>
 		<div class="flex flex-col items-center gap-1">
 			<span class="text-sm font-medium tracking-wide text-gray-200">Connecting to MeshCom</span>
-			<span class="text-xs text-gray-500">Waiting for UDP stream…</span>
+			<span class="text-xs text-gray-500">Waiting for packet stream…</span>
 		</div>
 	</div>
 {:else if state === 'disconnected'}

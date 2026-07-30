@@ -23,6 +23,7 @@ func DefaultTomlPath(dataDir string) string {
 // tomlFile mirrors Config with pointer fields so absent keys decode to nil.
 type tomlFile struct {
 	HTTPAddr         *string          `toml:"http_addr"`
+	TransportMode    *string          `toml:"transport_mode"`
 	UDPListenAddr    *string          `toml:"udp_listen_addr"`
 	NodeAddr         *string          `toml:"node_addr"`
 	MyCall           *string          `toml:"my_call"`
@@ -39,6 +40,23 @@ type tomlFile struct {
 	RequestLog       *tomlRequestLog  `toml:"request_log"`
 	Compression      *tomlCompression `toml:"compression"`
 	Storage          *tomlStorage     `toml:"storage"`
+	Serial           *tomlSerial      `toml:"serial"`
+}
+
+type tomlSerial struct {
+	Device           *string       `toml:"device"`
+	Baud             *int          `toml:"baud"`
+	DataBits         *int          `toml:"data_bits"`
+	Parity           *string       `toml:"parity"`
+	StopBits         *int          `toml:"stop_bits"`
+	FlowControl      *string       `toml:"flow_control"`
+	DTR              *bool         `toml:"dtr"`
+	RTS              *bool         `toml:"rts"`
+	ReadTimeout      *tomlDuration `toml:"read_timeout"`
+	ReconnectInitial *tomlDuration `toml:"reconnect_initial"`
+	ReconnectMax     *tomlDuration `toml:"reconnect_max"`
+	StableResetAfter *tomlDuration `toml:"stable_reset_after"`
+	MaxRecordBytes   *int          `toml:"max_record_bytes"`
 }
 
 type tomlReceiveLog struct {
@@ -154,6 +172,7 @@ type EnvOverrides map[string]bool
 // knownEnvSuffixes lists every GOMESHCOM_* suffix that maps to a Config field.
 var knownEnvSuffixes = []string{
 	"HTTP_ADDR",
+	"TRANSPORT_MODE",
 	"UDP_LISTEN_ADDR",
 	"NODE_ADDR",
 	"MY_CALL",
@@ -187,6 +206,19 @@ var knownEnvSuffixes = []string{
 	"STORAGE_PUBLIC_CHAT_RETENTION",
 	"STORAGE_NODES_RETENTION",
 	"STORAGE_TELEMETRY_RETENTION",
+	"SERIAL_DEVICE",
+	"SERIAL_BAUD",
+	"SERIAL_DATA_BITS",
+	"SERIAL_PARITY",
+	"SERIAL_STOP_BITS",
+	"SERIAL_FLOW_CONTROL",
+	"SERIAL_DTR",
+	"SERIAL_RTS",
+	"SERIAL_READ_TIMEOUT",
+	"SERIAL_RECONNECT_INITIAL",
+	"SERIAL_RECONNECT_MAX",
+	"SERIAL_STABLE_RESET_AFTER",
+	"SERIAL_MAX_RECORD_BYTES",
 }
 
 // DetectEnvOverrides returns the set of config fields that are explicitly
@@ -211,6 +243,9 @@ func mergeToml(cfg *Config, tf *tomlFile, env EnvOverrides) {
 
 	if tf.HTTPAddr != nil && !env["HTTP_ADDR"] {
 		cfg.HTTPAddr = *tf.HTTPAddr
+	}
+	if tf.TransportMode != nil && !env["TRANSPORT_MODE"] {
+		cfg.TransportMode = *tf.TransportMode
 	}
 	if tf.UDPListenAddr != nil && !env["UDP_LISTEN_ADDR"] {
 		cfg.UDPListenAddr = *tf.UDPListenAddr
@@ -334,6 +369,52 @@ func mergeToml(cfg *Config, tf *tomlFile, env EnvOverrides) {
 			cfg.Storage.TelemetryRetention = s.TelemetryRetention.Duration
 		}
 	}
+
+	if s := tf.Serial; s != nil {
+		mergeSerialToml(&cfg.Serial, s, env)
+	}
+}
+
+func mergeSerialToml(serial *Serial, source *tomlSerial, env EnvOverrides) {
+	if source.Device != nil && !env["SERIAL_DEVICE"] {
+		serial.Device = *source.Device
+	}
+	if source.Baud != nil && !env["SERIAL_BAUD"] {
+		serial.Baud = *source.Baud
+	}
+	if source.DataBits != nil && !env["SERIAL_DATA_BITS"] {
+		serial.DataBits = *source.DataBits
+	}
+	if source.Parity != nil && !env["SERIAL_PARITY"] {
+		serial.Parity = *source.Parity
+	}
+	if source.StopBits != nil && !env["SERIAL_STOP_BITS"] {
+		serial.StopBits = *source.StopBits
+	}
+	if source.FlowControl != nil && !env["SERIAL_FLOW_CONTROL"] {
+		serial.FlowControl = *source.FlowControl
+	}
+	if source.DTR != nil && !env["SERIAL_DTR"] {
+		serial.DTR = *source.DTR
+	}
+	if source.RTS != nil && !env["SERIAL_RTS"] {
+		serial.RTS = *source.RTS
+	}
+	if source.ReadTimeout != nil && !env["SERIAL_READ_TIMEOUT"] {
+		serial.ReadTimeout = source.ReadTimeout.Duration
+	}
+	if source.ReconnectInitial != nil && !env["SERIAL_RECONNECT_INITIAL"] {
+		serial.ReconnectInitial = source.ReconnectInitial.Duration
+	}
+	if source.ReconnectMax != nil && !env["SERIAL_RECONNECT_MAX"] {
+		serial.ReconnectMax = source.ReconnectMax.Duration
+	}
+	if source.StableResetAfter != nil && !env["SERIAL_STABLE_RESET_AFTER"] {
+		serial.StableResetAfter = source.StableResetAfter.Duration
+	}
+	if source.MaxRecordBytes != nil && !env["SERIAL_MAX_RECORD_BYTES"] {
+		serial.MaxRecordBytes = *source.MaxRecordBytes
+	}
 }
 
 // -------- Write --------
@@ -395,6 +476,7 @@ func buildTomlContent(cfg Config) string {
 	b.WriteString("\n")
 
 	w("HTTP listen address", "http_addr", tomlStr(cfg.HTTPAddr))
+	w("Node transport: udp or serial", "transport_mode", tomlStr(cfg.TransportMode))
 	w("MeshCom UDP listen address", "udp_listen_addr", tomlStr(cfg.UDPListenAddr))
 	w("MeshCom node UDP address; empty = auto-detect from first incoming packet", "node_addr", tomlStr(cfg.NodeAddr))
 	w("Local callsign (live-apply — no restart needed)", "my_call", tomlStr(cfg.MyCall))
@@ -403,10 +485,25 @@ func buildTomlContent(cfg Config) string {
 	w("Demo mode: disables TX and locks the config API (restart required)", "demo_mode", tomlBool(cfg.DemoMode))
 	w("Log level: debug, info, warn, error (live-apply — no restart needed)", "log_level", tomlStr(cfg.LogLevel))
 
+	b.WriteString("\n[serial]\n")
+	w("Explicit serial device path or COM port", "device", tomlStr(cfg.Serial.Device))
+	w("Serial baud rate", "baud", tomlInt(cfg.Serial.Baud))
+	w("Serial data bits", "data_bits", tomlInt(cfg.Serial.DataBits))
+	w("Serial parity: none, odd, even, mark, space", "parity", tomlStr(cfg.Serial.Parity))
+	w("Serial stop bits: 1 or 2", "stop_bits", tomlInt(cfg.Serial.StopBits))
+	w("Serial flow control; currently none", "flow_control", tomlStr(cfg.Serial.FlowControl))
+	w("DTR output state; false prevents ESP32/CP2102 reset", "dtr", tomlBool(cfg.Serial.DTR))
+	w("RTS output state; false prevents ESP32/CP2102 reset", "rts", tomlBool(cfg.Serial.RTS))
+	w("Finite serial read timeout", "read_timeout", tomlStr(cfg.Serial.ReadTimeout.String()))
+	w("Initial serial reconnect delay", "reconnect_initial", tomlStr(cfg.Serial.ReconnectInitial.String()))
+	w("Maximum serial reconnect delay", "reconnect_max", tomlStr(cfg.Serial.ReconnectMax.String()))
+	w("Healthy session duration before reconnect backoff resets", "stable_reset_after", tomlStr(cfg.Serial.StableResetAfter.String()))
+	w("Maximum serial console record size in bytes", "max_record_bytes", tomlInt(cfg.Serial.MaxRecordBytes))
+
 	b.WriteString("\n[receive_log]\n")
-	w("Enable received UDP JSONL log", "enabled", tomlBool(cfg.ReceiveLog.Enabled))
-	w("Directory for daily received UDP JSONL files", "path", tomlStr(cfg.ReceiveLog.Path))
-	w("Days of daily log files to retain", "retention_days", tomlInt(cfg.ReceiveLog.RetentionDays))
+	w("Enable received packet JSONL log", "enabled", tomlBool(cfg.ReceiveLog.Enabled))
+	w("Directory for daily received packet JSONL files", "path", tomlStr(cfg.ReceiveLog.Path))
+	w("Days of daily packet log files to retain", "retention_days", tomlInt(cfg.ReceiveLog.RetentionDays))
 	w("Window of recent packets replayed on SSE connect", "replay_window", tomlStr(cfg.ReceiveLog.ReplayWindow.String()))
 
 	b.WriteString("\n[stats]\n")
@@ -423,7 +520,7 @@ func buildTomlContent(cfg Config) string {
 	w("LRU window for duplicate outgoing message suppression; 0s disables (live-apply)", "dedup_ttl", tomlStr(cfg.Send.DedupTTL.String()))
 
 	b.WriteString("\n[forward]\n")
-	w("Comma-separated host:port list; received UDP datagrams mirrored to each target", "targets", tomlStr(cfg.Forward.Targets))
+	w("Comma-separated host:port list; UDP datagrams or extracted serial JSON mirrored to each target", "targets", tomlStr(cfg.Forward.Targets))
 
 	b.WriteString("\n[auth]\n")
 	w("HTTP basic auth username (both username and password required to enable auth)", "username", tomlStr(cfg.Auth.Username))

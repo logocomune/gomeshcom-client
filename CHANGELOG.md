@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.14.0] 2026-07-30
+
+### Added
+
+- **Serial status warning**: UI now shows `Serial unavailable` beside
+  `Connected` on desktop and beside logo on small screens whenever daemon reports
+  a disconnected, reconnecting, degraded, or stopped serial transport; latest
+  transport error is included when available.
+- **Develop nightly container**: every `develop` push publishes multi-architecture `nightly` and immutable `nightly-<commit-sha>` GHCR images. Newer pushes cancel outdated builds and automatic cleanup retains the latest 14 immutable nightly versions.
+- **Serial node transport**: firmware 4.35+ nodes can connect through an explicit Linux, macOS, or Windows serial device using `go.bug.st/serial`. Includes 115200 8N1 defaults, configurable DTR/RTS, `--setinfo on` session startup, bounded ExtUDP JSON decoding, broadcast/channel/DM TX, reconnect backoff, and transport health reporting.
+- **Serial settings UI and API**: TOML, `GOMESHCOM_SERIAL_*` environment variables, `GET`/`PUT /api/config`, and Settings expose serial device, framing, modem lines, timeouts, and reconnect controls. UDP remains the backward-compatible default.
+
+### Changed
+
+- **Serial record safety limit**: serial ExtUDP records now have a maximum configurable size of 1 MiB.
+- **Transport-neutral packet ingestion**: UDP and serial packets now share parsing, persistence, SSE, chat, position, telemetry, statistics, ACK, and optional UDP-forwarding flows.
+- **Degraded serial operation**: HTTP remains available after serial disconnects; health reports degraded transport state and TX returns `503` until reconnection.
+- **Serial receive diagnostics**: debug logging now records every raw serial read with device, byte count, and received text.
+- **Transport-neutral stream UI**: stream status and controls now refer to packets rather than UDP, matching both serial and UDP transports.
+- **Serial Docker setup**: README now documents passing the serial device into the container through Compose `devices`.
+
+### Fixed
+
+- **Serial forwarding without targets**: serial packet ingestion now safely skips an absent UDP forwarder instead of panicking when a received serial packet is processed.
+- **Immediate TX echo matching**: outgoing messages enter the outbox before transport write, preventing fast serial echoes from racing pending-message registration. Failed writes cancel the pending timeout.
+
 ## [0.12.0] 2026-07-28
 
 ### Added

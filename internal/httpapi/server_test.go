@@ -27,6 +27,7 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
+	"github.com/logocomune/gomeshcom-client/internal/transport"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 )
 
@@ -121,12 +122,24 @@ func (s staticCallsign) Current() string { return string(s) }
 
 // stubBridge is a fake messageSender for tests.
 type stubBridge struct {
-	calls atomic.Int32
-	err   error
+	calls  atomic.Int32
+	err    error
+	onSend func()
+}
+
+type staticTransportStatus struct {
+	status transport.Status
+}
+
+func (s staticTransportStatus) TransportStatus() transport.Status {
+	return s.status
 }
 
 func (b *stubBridge) SendText(_ context.Context, _, _ string, _ int) error {
 	b.calls.Add(1)
+	if b.onSend != nil {
+		b.onSend()
+	}
 	return b.err
 }
 
@@ -225,6 +238,46 @@ func TestHealth(t *testing.T) {
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestHealthReportsDegradedTransport(t *testing.T) {
+	provider := staticTransportStatus{status: transport.Status{
+		Mode:       "serial",
+		State:      transport.StateDegraded,
+		Endpoint:   "/dev/ttyUSB0",
+		LastError:  "device lost",
+		RetryCount: 3,
+	}}
+	server := NewServer(
+		testConfig(),
+		"v0.0.0-test",
+		events.NewBus(),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		WithTransportStatus(provider),
+	)
+	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	var body struct {
+		Status    string           `json:"status"`
+		Transport transport.Status `json:"transport"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if body.Status != "degraded" || body.Transport != provider.status {
+		t.Fatalf("health = %+v, want degraded %+v", body, provider.status)
 	}
 }
 
@@ -334,6 +387,12 @@ func TestCreateMessage(t *testing.T) {
 			wantStatus: http.StatusServiceUnavailable,
 			wantCalls:  1,
 		},
+		"transport unavailable": {
+			body:       map[string]string{"dst": "QQ1ABC-1", "msg": "hi"},
+			bridgeErr:  fmt.Errorf("serial disconnected: %w", transport.ErrUnavailable),
+			wantStatus: http.StatusServiceUnavailable,
+			wantCalls:  1,
+		},
 	}
 
 	for name, test := range tests {
@@ -433,6 +492,51 @@ func TestCreateMessageDoesNotFailWhenEchoArrives(t *testing.T) {
 	}
 	if len(records) != 0 {
 		t.Fatalf("records = %+v, want none", records)
+	}
+}
+
+func TestCreateMessageRegistersOutboxBeforeSend(t *testing.T) {
+	cfg := testConfig()
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, nil, nil, nil)
+	server.outbox = outbox.New(time.Minute, nil)
+	confirmedDuringSend := false
+	server.bridge = &stubBridge{onSend: func() {
+		_, confirmedDuringSend = server.outbox.Confirm(cfg.MyCall, "QQ1ABC-1", "hello{571")
+	}}
+
+	body := []byte(`{"dst":"QQ1ABC-1","msg":"hello"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/messages", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", response.Code, response.Body.String())
+	}
+	if !confirmedDuringSend {
+		t.Fatal("outbox was not registered before transport send")
+	}
+}
+
+func TestCreateMessageCancelsOutboxWhenSendFails(t *testing.T) {
+	cfg := testConfig()
+	failed := make(chan outbox.PendingMessage, 1)
+	server := NewServer(cfg, "v0.0.0-test", events.NewBus(), nil, nil, nil, &stubBridge{err: transport.ErrUnavailable}, nil, nil)
+	server.outbox = outbox.New(20*time.Millisecond, func(message outbox.PendingMessage) {
+		failed <- message
+	})
+
+	body := []byte(`{"dst":"QQ1ABC-1","msg":"hello"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/messages", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", response.Code, response.Body.String())
+	}
+	select {
+	case message := <-failed:
+		t.Fatalf("failed transport left pending outbox message: %+v", message)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 

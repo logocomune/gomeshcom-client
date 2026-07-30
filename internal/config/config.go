@@ -11,11 +11,17 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/callsign"
 )
 
-const Prefix = "GOMESHCOM"
+const (
+	Prefix               = "GOMESHCOM"
+	TransportUDP         = "udp"
+	TransportSerial      = "serial"
+	MaxSerialRecordBytes = 1 << 20
+)
 
 type Config struct {
 	conf.Version
 	HTTPAddr         string `conf:"default:127.0.0.1:8080,help:HTTP listen address"`
+	TransportMode    string `conf:"default:udp,help:node transport: udp|serial"`
 	UDPListenAddr    string `conf:"default:0.0.0.0:1799,help:MeshCom UDP listen address"`
 	NodeAddr         string `conf:"help:MeshCom node UDP address (auto-detected from incoming UDP traffic when empty)"`
 	MyCall           string `conf:"default:QQ0XX-1,help:local callsign"`
@@ -31,14 +37,31 @@ type Config struct {
 	RequestLog       RequestLog
 	Compression      Compression
 	Storage          Storage
+	Serial           Serial
 	LogLevel         string `conf:"default:info,help:log level: debug|info|warn|error"`
 }
 
+type Serial struct {
+	Device           string        `conf:"help:explicit serial device path or COM port"`
+	Baud             int           `conf:"default:115200,help:serial baud rate"`
+	DataBits         int           `conf:"default:8,help:serial data bits"`
+	Parity           string        `conf:"default:none,help:serial parity: none|odd|even|mark|space"`
+	StopBits         int           `conf:"default:1,help:serial stop bits: 1|2"`
+	FlowControl      string        `conf:"default:none,help:serial flow control: none"`
+	DTR              bool          `conf:"default:false,help:serial DTR output state"`
+	RTS              bool          `conf:"default:false,help:serial RTS output state"`
+	ReadTimeout      time.Duration `conf:"default:1s,help:serial read timeout"`
+	ReconnectInitial time.Duration `conf:"default:1s,help:initial serial reconnect delay"`
+	ReconnectMax     time.Duration `conf:"default:30s,help:maximum serial reconnect delay"`
+	StableResetAfter time.Duration `conf:"default:30s,help:healthy session duration before reconnect backoff resets"`
+	MaxRecordBytes   int           `conf:"default:65536,help:maximum serial console record size"`
+}
+
 type ReceiveLog struct {
-	Enabled       bool          `conf:"default:true,help:enable received UDP JSONL log"`
-	Path          string        `conf:"default:./data/raw,help:received UDP JSONL log directory"`
-	RetentionDays int           `conf:"default:365,help:number of daily received UDP log files to keep"`
-	ReplayWindow  time.Duration `conf:"default:1h,help:time window of received UDP packets replayed on SSE connect"`
+	Enabled       bool          `conf:"default:true,help:enable received packet JSONL log"`
+	Path          string        `conf:"default:./data/raw,help:received packet JSONL log directory"`
+	RetentionDays int           `conf:"default:365,help:number of daily received packet log files to keep"`
+	ReplayWindow  time.Duration `conf:"default:1h,help:time window of received packets replayed on SSE connect"`
 }
 
 // Stats configures the hourly statistics aggregator.
@@ -59,7 +82,7 @@ type Send struct {
 }
 
 type Forward struct {
-	Targets string `conf:"help:comma-separated host:port list; received UDP datagrams are mirrored unmodified to each target"`
+	Targets string `conf:"help:comma-separated host:port list; received UDP datagrams or serial JSON payloads are mirrored to each target"`
 }
 
 type Auth struct {
@@ -160,6 +183,7 @@ func ParseForwardTargets(csv string) ([]string, error) {
 func builtInDefaultConfig() Config {
 	return Config{
 		HTTPAddr:         "127.0.0.1:8080",
+		TransportMode:    TransportUDP,
 		UDPListenAddr:    "0.0.0.0:1799",
 		NodeAddr:         "",
 		MyCall:           "QQ0XX-1",
@@ -197,13 +221,39 @@ func builtInDefaultConfig() Config {
 			NodesRetention:      7 * 24 * time.Hour,
 			TelemetryRetention:  30 * 24 * time.Hour,
 		},
+		Serial: Serial{
+			Baud:             115200,
+			DataBits:         8,
+			Parity:           "none",
+			StopBits:         1,
+			FlowControl:      "none",
+			DTR:              false,
+			RTS:              false,
+			ReadTimeout:      time.Second,
+			ReconnectInitial: time.Second,
+			ReconnectMax:     30 * time.Second,
+			StableResetAfter: 30 * time.Second,
+			MaxRecordBytes:   65536,
+		},
 	}
 }
 
 func normalize(cfg Config) Config {
+	cfg.TransportMode = strings.ToLower(strings.TrimSpace(cfg.TransportMode))
+	if cfg.TransportMode == "" {
+		cfg.TransportMode = TransportUDP
+	}
 	cfg.MyCall = callsign.Normalize(cfg.MyCall)
+	cfg.Serial.Device = strings.TrimSpace(cfg.Serial.Device)
+	cfg.Serial.Parity = strings.ToLower(strings.TrimSpace(cfg.Serial.Parity))
+	cfg.Serial.FlowControl = strings.ToLower(strings.TrimSpace(cfg.Serial.FlowControl))
 	cfg.Storage = normalizeStorage(cfg.Storage)
 	return cfg
+}
+
+// Normalize returns the canonical representation used by validation and persistence.
+func Normalize(cfg Config) Config {
+	return normalize(cfg)
 }
 
 func normalizeStorage(storage Storage) Storage {
@@ -223,14 +273,17 @@ func Validate(cfg Config) error {
 		return fmt.Errorf("http addr: %w", err)
 	}
 
-	if _, err := net.ResolveUDPAddr("udp", cfg.UDPListenAddr); err != nil {
-		return fmt.Errorf("udp listen addr: %w", err)
-	}
-
-	if cfg.NodeAddr != "" {
-		if _, err := net.ResolveUDPAddr("udp", cfg.NodeAddr); err != nil {
-			return fmt.Errorf("node addr: %w", err)
+	switch cfg.TransportMode {
+	case TransportUDP:
+		if err := validateUDPTransport(cfg); err != nil {
+			return err
 		}
+	case TransportSerial:
+		if err := validateSerialTransport(cfg.Serial); err != nil {
+			return err
+		}
+	default:
+		return errors.New("transport mode must be udp or serial")
 	}
 
 	if cfg.MaxMessageLength <= 0 {
@@ -319,5 +372,63 @@ func Validate(cfg Config) error {
 		return errors.New("storage telemetry retention must not be negative")
 	}
 
+	return nil
+}
+
+func validateUDPTransport(cfg Config) error {
+	if _, err := net.ResolveUDPAddr("udp", cfg.UDPListenAddr); err != nil {
+		return fmt.Errorf("udp listen addr: %w", err)
+	}
+	if cfg.NodeAddr != "" {
+		if _, err := net.ResolveUDPAddr("udp", cfg.NodeAddr); err != nil {
+			return fmt.Errorf("node addr: %w", err)
+		}
+	}
+	return nil
+}
+
+func validateSerialTransport(serial Serial) error {
+	if serial.Device == "" {
+		return errors.New("serial device is required")
+	}
+	if serial.Baud <= 0 {
+		return errors.New("serial baud must be greater than zero")
+	}
+	switch serial.DataBits {
+	case 5, 6, 7, 8:
+	default:
+		return errors.New("serial data bits must be 5, 6, 7, or 8")
+	}
+	switch serial.Parity {
+	case "none", "odd", "even", "mark", "space":
+	default:
+		return errors.New("serial parity must be none, odd, even, mark, or space")
+	}
+	switch serial.StopBits {
+	case 1, 2:
+	default:
+		return errors.New("serial stop bits must be 1 or 2")
+	}
+	if serial.FlowControl != "none" {
+		return errors.New("serial flow control must be none")
+	}
+	if serial.ReadTimeout <= 0 {
+		return errors.New("serial read timeout must be greater than zero")
+	}
+	if serial.ReconnectInitial <= 0 {
+		return errors.New("serial reconnect initial delay must be greater than zero")
+	}
+	if serial.ReconnectMax <= 0 {
+		return errors.New("serial reconnect maximum delay must be greater than zero")
+	}
+	if serial.ReconnectInitial > serial.ReconnectMax {
+		return errors.New("serial reconnect initial delay must not exceed maximum delay")
+	}
+	if serial.StableResetAfter <= 0 {
+		return errors.New("serial stable reset duration must be greater than zero")
+	}
+	if serial.MaxRecordBytes <= 0 || serial.MaxRecordBytes > MaxSerialRecordBytes {
+		return fmt.Errorf("serial maximum record size must be between 1 and %d bytes", MaxSerialRecordBytes)
+	}
 	return nil
 }

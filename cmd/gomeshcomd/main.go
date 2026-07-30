@@ -26,13 +26,16 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/httpapi"
 	"github.com/logocomune/gomeshcom-client/internal/legacymigrate"
 	"github.com/logocomune/gomeshcom-client/internal/logfmt"
+	"github.com/logocomune/gomeshcom-client/internal/packetingest"
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
+	"github.com/logocomune/gomeshcom-client/internal/serialbridge"
 	"github.com/logocomune/gomeshcom-client/internal/station"
 	"github.com/logocomune/gomeshcom-client/internal/stats"
 	"github.com/logocomune/gomeshcom-client/internal/storage"
 	"github.com/logocomune/gomeshcom-client/internal/telemetry"
+	"github.com/logocomune/gomeshcom-client/internal/transport"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
@@ -44,6 +47,11 @@ var (
 )
 
 const startupBannerInnerWidth = 60
+
+type nodeTransport interface {
+	SendText(ctx context.Context, destination, message string, maxLength int) error
+	transport.StatusProvider
+}
 
 func main() {
 	restart, err := run()
@@ -195,12 +203,62 @@ func run() (bool, error) {
 		defer fwd.Close()
 	}
 
-	bridge := udpbridge.NewBridge(cfg.UDPListenAddr, cfg.NodeAddr, bus, receiveLogger, chatLogger, positionStore, cfg.DemoMode, fwd, stationIdentity, chatStatus)
-	bridge.SetTelemetryStore(telemetry.NewSQLite(sqliteDB.SQL()))
-	go func() {
-		if err := bridge.Listen(ctx); err != nil {
-			slog.Error("udp bridge stopped", "error", err)
+	packetProcessor := packetingest.NewProcessor(packetingest.Dependencies{
+		Bus:        bus,
+		ReceiveLog: receiveLogger,
+		ChatLog:    chatLogger,
+		ChatStatus: chatStatus,
+		Identity:   stationIdentity,
+		Positions:  positionStore,
+		Telemetry:  telemetry.NewSQLite(sqliteDB.SQL()),
+	})
+	var link nodeTransport
+	var runTransport func(context.Context) error
+	switch cfg.TransportMode {
+	case config.TransportUDP:
+		udpLink := udpbridge.NewBridgeWithProcessor(
+			cfg.UDPListenAddr,
+			cfg.NodeAddr,
+			packetProcessor,
+			cfg.DemoMode,
+			fwd,
+		)
+		link = udpLink
+		runTransport = udpLink.Listen
+	case config.TransportSerial:
+		serialLink, err := serialbridge.NewBridge(serialbridge.Options{
+			Config: serialbridge.Config{
+				Port: serialbridge.PortConfig{
+					Device:      cfg.Serial.Device,
+					Baud:        cfg.Serial.Baud,
+					DataBits:    cfg.Serial.DataBits,
+					Parity:      cfg.Serial.Parity,
+					StopBits:    cfg.Serial.StopBits,
+					DTR:         cfg.Serial.DTR,
+					RTS:         cfg.Serial.RTS,
+					ReadTimeout: cfg.Serial.ReadTimeout,
+				},
+				ReconnectInitial: cfg.Serial.ReconnectInitial,
+				ReconnectMax:     cfg.Serial.ReconnectMax,
+				StableResetAfter: cfg.Serial.StableResetAfter,
+				MaxRecordBytes:   cfg.Serial.MaxRecordBytes,
+			},
+			Processor: packetProcessor,
+			Forwarder: fwd,
+			Identity:  stationIdentity,
+			DisableTX: cfg.DemoMode,
+		})
+		if err != nil {
+			return false, fmt.Errorf("configure serial transport: %w", err)
 		}
+		link = serialLink
+		runTransport = serialLink.Run
+	default:
+		return false, fmt.Errorf("unsupported transport mode %q", cfg.TransportMode)
+	}
+	transportDone := make(chan error, 1)
+	go func() {
+		transportDone <- runTransport(ctx)
 	}()
 
 	sc := sendcache.New(cfg.Send.DedupTTL)
@@ -218,8 +276,9 @@ func run() (bool, error) {
 		httpapi.WithTomlPath(config.DefaultTomlPath(cfg.DataDir)),
 		httpapi.WithRestartFunc(triggerRestart),
 		httpapi.WithShutdownFunc(stop),
+		httpapi.WithTransportStatus(link),
 	)
-	apiServer := httpapi.NewServer(cfg, version, bus, positionStore, receiveLogger, chatLogger, bridge, sc, chatStatus, serverOpts...)
+	apiServer := httpapi.NewServer(cfg, version, bus, positionStore, receiveLogger, chatLogger, link, sc, chatStatus, serverOpts...)
 	defer apiServer.Close()
 
 	server := &http.Server{
@@ -239,9 +298,57 @@ func run() (bool, error) {
 
 	printStartupBanner(cfg, stationIdentity.Current())
 
-	slog.Info("gomeshcom listening", "http_addr", cfg.HTTPAddr, "udp_listen_addr", cfg.UDPListenAddr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return false, fmt.Errorf("serve http: %w", err)
+	slog.Info(
+		"gomeshcom listening",
+		"http_addr", cfg.HTTPAddr,
+		"transport", cfg.TransportMode,
+		"endpoint", link.TransportStatus().Endpoint,
+	)
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- server.ListenAndServe()
+	}()
+
+	var serverErr error
+	var transportErr error
+	serverFinished := false
+	transportFinished := false
+	transportStoppedUnexpectedly := false
+	select {
+	case serverErr = <-serverDone:
+		serverFinished = true
+		stop()
+	case transportErr = <-transportDone:
+		transportFinished = true
+		transportStoppedUnexpectedly = ctx.Err() == nil
+		stop()
+	case <-ctx.Done():
+	}
+
+	if !serverFinished {
+		select {
+		case serverErr = <-serverDone:
+			serverFinished = true
+		case <-time.After(10 * time.Second):
+			return false, errors.New("HTTP server did not stop within timeout")
+		}
+	}
+	if !transportFinished {
+		select {
+		case transportErr = <-transportDone:
+			transportFinished = true
+		case <-time.After(10 * time.Second):
+			return false, errors.New("node transport did not stop within timeout")
+		}
+	}
+	if serverErr != nil && !errors.Is(serverErr, http.ErrServerClosed) {
+		return false, fmt.Errorf("serve http: %w", serverErr)
+	}
+	if transportStoppedUnexpectedly {
+		if transportErr == nil {
+			return false, fmt.Errorf("%s transport stopped unexpectedly", cfg.TransportMode)
+		}
+		return false, fmt.Errorf("%s transport stopped: %w", cfg.TransportMode, transportErr)
 	}
 
 	return restartRequested.Load(), nil
@@ -313,9 +420,13 @@ func printStartupBanner(cfg config.Config, myCall string) {
 
 func startupBanner(cfg config.Config, myCall string) string {
 	var b strings.Builder
+	mode := cfg.TransportMode
+	if mode == "" {
+		mode = config.TransportUDP
+	}
 	b.WriteString(bannerRule("="))
 	b.WriteString(bannerText("GOMESHCOMD"))
-	b.WriteString(bannerText("MeshCom UDP Link Terminal"))
+	b.WriteString(bannerText("MeshCom " + strings.ToUpper(mode) + " Link Terminal"))
 	b.WriteString(bannerRule("-"))
 	b.WriteString(bannerText("STATUS   READY"))
 	b.WriteString(bannerText("VERSION  " + version))
@@ -324,17 +435,24 @@ func startupBanner(cfg config.Config, myCall string) string {
 		displayCall = "(unset)"
 	}
 	b.WriteString(bannerText("MYCALL   " + displayCall))
-	nodeDisplay := cfg.NodeAddr
-	if nodeDisplay == "" {
-		nodeDisplay = "(auto-detect from incoming UDP)"
+	if mode == config.TransportSerial {
+		b.WriteString(bannerText("NODE     " + cfg.Serial.Device))
+		b.WriteString(bannerText("SERIAL   " + cfg.Serial.Device))
+	} else {
+		nodeDisplay := cfg.NodeAddr
+		if nodeDisplay == "" {
+			nodeDisplay = "(auto-detect from incoming UDP)"
+		}
+		b.WriteString(bannerText("NODE     " + nodeDisplay))
+		b.WriteString(bannerText("UDP RX   " + cfg.UDPListenAddr))
 	}
-	b.WriteString(bannerText("NODE     " + nodeDisplay))
 	b.WriteString(bannerText("HELP     gomeshcomd --help"))
-	b.WriteString(bannerText("UDP RX   " + cfg.UDPListenAddr))
 	b.WriteString(bannerText("WEB UI   " + webInterfaceURL(cfg.HTTPAddr)))
 	if myCall == "" {
 		b.WriteString(bannerText("DMs      hidden until MyCall set"))
-		b.WriteString(bannerText("MSG      node addr required"))
+		if mode == config.TransportUDP {
+			b.WriteString(bannerText("MSG      node addr required"))
+		}
 	}
 	b.WriteString(bannerRule("="))
 	return b.String()

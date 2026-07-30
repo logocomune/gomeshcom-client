@@ -503,6 +503,12 @@ func FuzzLoadTomlFile(f *testing.F) {
 		`[receive_log]
 enabled = true
 retention_days = 365`,
+		`transport_mode = "serial"
+[serial]
+device = "/dev/ttyUSB0"
+baud = 115200
+dtr = false
+rts = false`,
 		`invalid = [`,
 		``,
 	}

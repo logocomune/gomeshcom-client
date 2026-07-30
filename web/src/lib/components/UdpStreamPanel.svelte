@@ -68,7 +68,7 @@
 	<div class="flex h-9 shrink-0 items-center justify-between border-b border-ink-dim/20 px-3">
 		<div class="flex items-center gap-2">
 			<span class="text-[11px] font-semibold uppercase tracking-wider text-ink-muted"
-				>UDP stream</span
+				>Packet stream</span
 			>
 			<span class="rounded bg-ink-dim/20 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted"
 				>/api/events</span
@@ -99,8 +99,8 @@
 			<button
 				type="button"
 				class="flex h-6 w-6 items-center justify-center rounded-lg border border-ink-dim/30 text-ink-dim hover:border-coral/50 hover:text-coral"
-				aria-label="Clear UDP stream"
-				title="Clear UDP stream"
+				aria-label="Clear packet stream"
+				title="Clear packet stream"
 				onclick={onClearEvents}
 			>
 				<MdiIcon path={mdiDeleteSweepOutline} size={14} />
@@ -111,7 +111,7 @@
 	<div class="min-h-0 flex-1 overflow-auto">
 		{#if events.length === 0}
 			<div class="flex h-full items-center justify-center text-sm text-ink-muted">
-				Waiting for UDP packets
+				Waiting for packets
 			</div>
 		{:else if filteredEvents.length === 0}
 			<div class="flex h-full items-center justify-center text-sm text-ink-muted">

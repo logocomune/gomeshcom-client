@@ -14,8 +14,11 @@ import (
 
 	"github.com/logocomune/gomeshcom-client/internal/chatlog"
 	"github.com/logocomune/gomeshcom-client/internal/events"
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
+	"github.com/logocomune/gomeshcom-client/internal/storage"
+	"github.com/logocomune/gomeshcom-client/internal/telemetry"
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 	_ "modernc.org/sqlite"
 )
@@ -24,6 +27,22 @@ import (
 type staticCallsign string
 
 func (s staticCallsign) Current() string { return string(s) }
+
+type recordedIncoming struct {
+	conversationID string
+	message        string
+}
+
+type recordingChatStatus struct {
+	records []recordedIncoming
+}
+
+func (s *recordingChatStatus) RecordIncoming(conversationID string, _ time.Time, message string) {
+	s.records = append(s.records, recordedIncoming{
+		conversationID: conversationID,
+		message:        message,
+	})
+}
 
 func newBridgeReceiveLog(t *testing.T, cfg receivelog.Config) *receivelog.Logger {
 	t.Helper()
@@ -89,6 +108,16 @@ func newBridgePositionsStore(t *testing.T) *positions.Store {
 	return positions.NewSQLite(db)
 }
 
+func newBridgeTelemetryStore(t *testing.T) (*telemetry.Store, *storage.DB) {
+	t.Helper()
+	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("storage.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return telemetry.NewSQLite(db.SQL()), db
+}
+
 func TestHandleDatagramLogsValidPacket(t *testing.T) {
 	bus := events.NewBus()
 	receiveLogger := newBridgeReceiveLog(t, receivelog.Config{Enabled: true})
@@ -114,6 +143,16 @@ func TestHandleDatagramLogsValidPacket(t *testing.T) {
 	receivedAt, ok := payload["received_at"].(string)
 	if !ok || receivedAt == "" {
 		t.Fatalf("event received_at = %#v, want non-empty string", payload["received_at"])
+	}
+	if payload["remote_addr"] != "127.0.0.1:1799" {
+		t.Fatalf("event remote_addr = %#v, want 127.0.0.1:1799", payload["remote_addr"])
+	}
+	packet, ok := payload["packet"].(meshcom.TextMessage)
+	if !ok {
+		t.Fatalf("event packet type = %T, want meshcom.TextMessage", payload["packet"])
+	}
+	if packet.Destination != "*" || packet.Message != "hello" {
+		t.Fatalf("event packet = %+v, want broadcast hello", packet)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, receivedAt); err != nil {
 		t.Fatalf("event received_at parse: %v", err)
@@ -146,7 +185,7 @@ func TestHandleDatagramLogsValidPacket(t *testing.T) {
 func TestHandleDatagramLogsParseError(t *testing.T) {
 	bus := events.NewBus()
 	receiveLogger := newBridgeReceiveLog(t, receivelog.Config{Enabled: true})
-	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, receiveLogger, nil, nil, false, nil, nil, nil)
+	bridge := NewBridge("127.0.0.1:0", "", bus, receiveLogger, nil, nil, false, nil, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -159,6 +198,12 @@ func TestHandleDatagramLogsParseError(t *testing.T) {
 	if event.Type != "packet.error" {
 		t.Fatalf("event type = %q, want packet.error", event.Type)
 	}
+	if parseError, ok := event.Data.(string); !ok || parseError == "" {
+		t.Fatalf("event data = %#v, want non-empty parse error", event.Data)
+	}
+	if _, err := bridge.effectiveNodeAddr(); err != ErrNodeNotDetected {
+		t.Fatalf("invalid packet learned node address: %v", err)
+	}
 
 	records, err := receiveLogger.ReadSince(time.Time{})
 	if err != nil {
@@ -170,6 +215,114 @@ func TestHandleDatagramLogsParseError(t *testing.T) {
 	record := records[0]
 	if record.ParseError == "" {
 		t.Fatal("parse error empty")
+	}
+}
+
+func TestHandleDatagramStoresTelemetry(t *testing.T) {
+	bus := events.NewBus()
+	store, db := newBridgeTelemetryStore(t)
+	bridge := NewBridge("127.0.0.1:0", "127.0.0.1:1799", bus, nil, nil, nil, false, nil, nil, nil)
+	bridge.SetTelemetryStore(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	subscriber := bus.Subscribe(ctx)
+
+	raw := `{"src_type":"lora","type":"tele","src":"QQ1ABC-1","batt":90,"temp1":21.5,"rssi":-102,"snr":4}`
+	bridge.handleDatagram("127.0.0.1:1799", []byte(raw), raw)
+
+	event := readEvent(t, subscriber)
+	if event.Type != "packet.received" {
+		t.Fatalf("event type = %q, want packet.received", event.Type)
+	}
+	payload, ok := event.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("event data type = %T, want map", event.Data)
+	}
+	if _, ok := payload["packet"].(meshcom.Telemetry); !ok {
+		t.Fatalf("event packet type = %T, want meshcom.Telemetry", payload["packet"])
+	}
+
+	var metric string
+	var value float64
+	if err := db.SQL().QueryRow(`
+		SELECT metric, value FROM telemetry_samples
+		WHERE src_origin = 'QQ1ABC-1' AND metric = 'temp1'
+	`).Scan(&metric, &value); err != nil {
+		t.Fatalf("query telemetry sample: %v", err)
+	}
+	if metric != "temp1" || value != 21.5 {
+		t.Fatalf("telemetry sample = %s/%v, want temp1/21.5", metric, value)
+	}
+
+	var rssi, snr int
+	if err := db.SQL().QueryRow(`
+		SELECT rssi, snr FROM telemetry_direct_signal
+		WHERE src_origin = 'QQ1ABC-1'
+	`).Scan(&rssi, &snr); err != nil {
+		t.Fatalf("query telemetry signal: %v", err)
+	}
+	if rssi != -102 || snr != 4 {
+		t.Fatalf("telemetry signal = %d/%d, want -102/4", rssi, snr)
+	}
+}
+
+func TestHandleDatagramChatStatusBehavior(t *testing.T) {
+	tests := []struct {
+		name        string
+		identity    string
+		raw         string
+		wantRecords []recordedIncoming
+	}{
+		{
+			name:     "incoming direct message records unread status",
+			identity: "QQ1OWN-1",
+			raw:      `{"type":"msg","src":"QQ1PEER-2","dst":"QQ1OWN-1","msg":"hello"}`,
+			wantRecords: []recordedIncoming{{
+				conversationID: "DM_QQ1OWN-1_QQ1PEER-2",
+				message:        "hello",
+			}},
+		},
+		{
+			name:     "own device echo does not record unread status",
+			identity: "QQ1OWN-1",
+			raw:      `{"type":"msg","src":"QQ1OWN-2","dst":"QQ1PEER-2","msg":"hello{123"}`,
+		},
+		{
+			name:     "ack does not record unread status",
+			identity: "QQ1OWN-1",
+			raw:      `{"type":"msg","src":"QQ1PEER-2","dst":"QQ1OWN-1","msg":"QQ1OWN-1:ack123"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := &recordingChatStatus{}
+			chatLogger := newBridgeChatLog(t, staticCallsign(tt.identity))
+			bridge := NewBridge(
+				"127.0.0.1:0",
+				"127.0.0.1:1799",
+				events.NewBus(),
+				nil,
+				chatLogger,
+				nil,
+				false,
+				nil,
+				staticCallsign(tt.identity),
+				status,
+			)
+
+			bridge.handleDatagram("127.0.0.1:1799", []byte(tt.raw), tt.raw)
+
+			if len(status.records) != len(tt.wantRecords) {
+				t.Fatalf("status records = %+v, want %+v", status.records, tt.wantRecords)
+			}
+			for i := range tt.wantRecords {
+				if status.records[i] != tt.wantRecords[i] {
+					t.Fatalf("status record %d = %+v, want %+v", i, status.records[i], tt.wantRecords[i])
+				}
+			}
+		})
 	}
 }
 

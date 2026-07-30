@@ -29,6 +29,7 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/sendcache"
 	"github.com/logocomune/gomeshcom-client/internal/station"
 	"github.com/logocomune/gomeshcom-client/internal/stats"
+	"github.com/logocomune/gomeshcom-client/internal/transport"
 	"github.com/logocomune/gomeshcom-client/internal/udpbridge"
 	"github.com/logocomune/gomeshcom-client/internal/webui"
 )
@@ -68,6 +69,7 @@ type Server struct {
 	restartFunc  func()
 	shutdownFunc func()
 	startedAt    time.Time
+	transport    transport.StatusProvider
 }
 
 const outgoingEchoTimeout = 5 * time.Second
@@ -141,6 +143,12 @@ func WithRestartFunc(fn func()) ServerOption {
 func WithShutdownFunc(fn func()) ServerOption {
 	return func(server *Server) {
 		server.shutdownFunc = fn
+	}
+}
+
+func WithTransportStatus(provider transport.StatusProvider) ServerOption {
+	return func(server *Server) {
+		server.transport = provider
 	}
 }
 
@@ -326,12 +334,22 @@ func spaHandler(fsys fs.FS) http.Handler {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
+	response := map[string]any{
 		"status":     "ok",
 		"version":    s.version,
 		"callsign":   s.identity.Current(),
 		"started_at": s.startedAt.Format(time.RFC3339Nano),
-	})
+	}
+	if s.transport != nil {
+		status := s.transport.TransportStatus()
+		response["transport"] = status
+		switch status.State {
+		case transport.StateConnected:
+		default:
+			response["status"] = "degraded"
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) listPositions(w http.ResponseWriter, _ *http.Request) {
@@ -443,8 +461,17 @@ func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
+	var pending outbox.PendingMessage
+	if s.outbox != nil && !s.cfg.DemoMode {
+		pending = s.outbox.Register(s.identity.Current(), outgoing.Destination, outgoing.Message, time.Now().UTC())
+	}
 	if err := s.bridge.SendText(ctx, outgoing.Destination, outgoing.Message, s.cfg.MaxMessageLength); err != nil {
-		slog.Error("udp send failed", "error", err)
+		s.outbox.Cancel(pending.ID)
+		slog.Error("message send failed", "transport", s.cfg.TransportMode, "error", err)
+		if errors.Is(err, transport.ErrUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "transport unavailable")
+			return
+		}
 		if errors.Is(err, udpbridge.ErrNodeNotDetected) {
 			writeError(w, http.StatusServiceUnavailable, "node not yet detected")
 			return
@@ -453,9 +480,6 @@ func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("message sent", "dst", outgoing.Destination, "msg", outgoing.Message)
-	if s.outbox != nil && !s.cfg.DemoMode {
-		s.outbox.Register(s.identity.Current(), outgoing.Destination, outgoing.Message, time.Now().UTC())
-	}
 	if s.dmStats != nil {
 		s.dmStats.RecordSent(outgoing.Destination)
 	}

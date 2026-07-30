@@ -7,16 +7,17 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/logocomune/gomeshcom-client/internal/chatlog"
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/meshcom"
+	"github.com/logocomune/gomeshcom-client/internal/packetingest"
 	"github.com/logocomune/gomeshcom-client/internal/positions"
 	"github.com/logocomune/gomeshcom-client/internal/receivelog"
 	"github.com/logocomune/gomeshcom-client/internal/telemetry"
+	"github.com/logocomune/gomeshcom-client/internal/transport"
 	"github.com/logocomune/gomeshcom-client/internal/udpforward"
 )
 
@@ -35,42 +36,59 @@ type Bridge struct {
 	listenAddr      string
 	nodeAddr        string // explicit config; "" means auto-detect
 	learnedNodeAddr atomic.Pointer[string]
-	bus             *events.Bus
-	logger          *receivelog.Logger
-	chatLog         *chatlog.Logger
-	chatStatus      chatStatusTracker
-	identity        myCallSource
-	positions       *positions.Store
-	telemetry       *telemetry.Store
+	processor       *packetingest.Processor
 	disableTx       bool
 	forwarder       *udpforward.Forwarder
 }
 
 func NewBridge(listenAddr, nodeAddr string, bus *events.Bus, logger *receivelog.Logger, chatLog *chatlog.Logger, positionStore *positions.Store, disableTx bool, forwarder *udpforward.Forwarder, identity myCallSource, chatStatus chatStatusTracker) *Bridge {
+	dependencies := packetingest.Dependencies{
+		Bus:        bus,
+		ChatStatus: chatStatus,
+		Identity:   identity,
+	}
+	if logger != nil {
+		dependencies.ReceiveLog = logger
+	}
+	if chatLog != nil {
+		dependencies.ChatLog = chatLog
+	}
+	if positionStore != nil {
+		dependencies.Positions = positionStore
+	}
+	return NewBridgeWithProcessor(
+		listenAddr,
+		nodeAddr,
+		packetingest.NewProcessor(dependencies),
+		disableTx,
+		forwarder,
+	)
+}
+
+func NewBridgeWithProcessor(listenAddr, nodeAddr string, processor *packetingest.Processor, disableTx bool, forwarder *udpforward.Forwarder) *Bridge {
 	return &Bridge{
 		listenAddr: listenAddr,
 		nodeAddr:   nodeAddr,
-		bus:        bus,
-		logger:     logger,
-		chatLog:    chatLog,
-		chatStatus: chatStatus,
-		identity:   identity,
-		positions:  positionStore,
+		processor:  processor,
 		disableTx:  disableTx,
 		forwarder:  forwarder,
 	}
 }
 
 func (b *Bridge) SetTelemetryStore(store *telemetry.Store) {
-	b.telemetry = store
+	if store == nil {
+		b.processor.SetTelemetryStore(nil)
+		return
+	}
+	b.processor.SetTelemetryStore(store)
 }
 
-// myCall returns the current local callsign, or "" if no identity is configured.
-func (b *Bridge) myCall() string {
-	if b.identity == nil {
-		return ""
+func (b *Bridge) TransportStatus() transport.Status {
+	return transport.Status{
+		Mode:     "udp",
+		State:    transport.StateConnected,
+		Endpoint: b.listenAddr,
 	}
-	return b.identity.Current()
 }
 
 func (b *Bridge) Listen(ctx context.Context) error {
@@ -109,14 +127,11 @@ func (b *Bridge) Listen(ctx context.Context) error {
 }
 
 func (b *Bridge) handleDatagram(remoteAddr string, data []byte, rawPacket string) {
-	receivedAt := time.Now().UTC()
-	slog.Debug("udp datagram received", "remote_addr", remoteAddr, "bytes", len(data), "raw", rawPacket)
-
-	packet, err := meshcom.ParsePacket(data)
+	err := b.processor.Process(packetingest.Source{
+		Transport: "udp",
+		Endpoint:  remoteAddr,
+	}, data)
 	if err != nil {
-		b.logReceivedDatagram(remoteAddr, len(data), rawPacket, "", err.Error())
-		slog.Debug("udp datagram parse failed", "remote_addr", remoteAddr, "bytes", len(data), "error", err)
-		b.bus.Publish(events.Event{Type: "packet.error", Data: err.Error()})
 		return
 	}
 
@@ -125,29 +140,6 @@ func (b *Bridge) handleDatagram(remoteAddr string, data []byte, rawPacket string
 		b.learnedNodeAddr.Store(&remoteAddr)
 		slog.Debug("node addr learned from incoming packet", "remote_addr", remoteAddr)
 	}
-
-	b.logReceivedDatagram(remoteAddr, len(data), rawPacket, string(packet.Type), "")
-	slog.Debug("udp packet parsed", "remote_addr", remoteAddr, "packet_type", packet.Type, "unknown_fields", len(packet.Unknown))
-
-	switch typed := packet.Packet.(type) {
-	case meshcom.Position:
-		b.updatePositionStore(typed)
-	case meshcom.TextMessage:
-		b.logChatMessage(typed, receivedAt)
-		b.touchPositionFreshness(typed.Source, typed.RSSI, typed.SNR)
-	case meshcom.Telemetry:
-		b.touchPositionFreshness(typed.Source, typed.RSSI, typed.SNR)
-		b.logTelemetry(typed, receivedAt)
-	}
-
-	b.bus.Publish(events.Event{
-		Type: "packet.received",
-		Data: map[string]any{
-			"remote_addr": remoteAddr,
-			"packet":      packet.Packet,
-			"received_at": receivedAt.Format(time.RFC3339Nano),
-		},
-	})
 }
 
 // ErrNodeNotDetected is returned by SendText when NodeAddr is empty and no UDP
@@ -165,72 +157,6 @@ func (b *Bridge) effectiveNodeAddr() (string, error) {
 		return *p, nil
 	}
 	return "", ErrNodeNotDetected
-}
-
-func (b *Bridge) updatePositionStore(position meshcom.Position) {
-	if b.positions == nil {
-		return
-	}
-	if b.positions.Update(position, time.Now().UTC()) {
-		slog.Debug("position store updated", "source", position.Source)
-	}
-}
-
-func (b *Bridge) touchPositionFreshness(src string, rssi, snr *int) {
-	if b.positions == nil {
-		return
-	}
-	if b.positions.TouchFromPacket(src, rssi, snr, time.Now().UTC()) {
-		slog.Debug("position freshness touched", "source", src)
-	}
-}
-
-func (b *Bridge) logTelemetry(packet meshcom.Telemetry, receivedAt time.Time) {
-	if b.telemetry == nil {
-		return
-	}
-	if err := b.telemetry.Append(context.Background(), packet, receivedAt); err != nil {
-		slog.Error("telemetry write failed", "error", err)
-	}
-}
-
-func (b *Bridge) logChatMessage(msg meshcom.TextMessage, receivedAt time.Time) {
-	if b.chatLog == nil {
-		return
-	}
-	if err := b.chatLog.Append(msg, receivedAt); err != nil {
-		slog.Error("chat log write failed", "error", err)
-	}
-	if b.chatStatus != nil && !meshcom.IsAckOrReject(msg.Message) {
-		myCall := b.myCall()
-		origin := strings.ToUpper(strings.SplitN(msg.Source, ",", 2)[0])
-		// Skip our own echoes: compare by basecall so device-switch echoes are
-		// also suppressed (e.g. IU5PMP-2 echo filtered when running as IU5PMP-1).
-		if chatlog.BaseCall(origin) != chatlog.BaseCall(myCall) {
-			statusKey := chatlog.StatusKey(msg.Source, msg.Destination, myCall)
-			if statusKey != "" {
-				b.chatStatus.RecordIncoming(statusKey, receivedAt, msg.Message)
-			}
-		}
-	}
-}
-
-func (b *Bridge) logReceivedDatagram(remoteAddr string, bytes int, raw string, packetType string, parseError string) {
-	if b.logger == nil {
-		return
-	}
-
-	err := b.logger.Append(receivelog.Record{
-		ReceivedAt: time.Now().UTC(),
-		RemoteAddr: remoteAddr,
-		Bytes:      bytes,
-		Raw:        raw,
-		PacketType: packetType,
-		ParseError: parseError,
-	})
-	if err != nil {
-		slog.Error("receive log write failed", "error", err)
-	}
 }
 
 func (b *Bridge) SendText(ctx context.Context, destination string, message string, maxLength int) error {

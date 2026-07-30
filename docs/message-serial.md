@@ -7,7 +7,7 @@ MeshCom uses two distinct serial interfaces:
 | Interface | Feature flag | Hardware | Purpose |
 |-----------|-------------|----------|---------|
 | **SoftSerial** | `ENABLE_SOFTSER` | ESP32: SoftwareSerial; nRF52: Serial1 | External sensor / data logger integration |
-| **ExtUDP Serial fallback** | `bEXTUDP = false` | USB/debug `Serial` | JSON output to serial when ExtUDP socket inactive |
+| **ExtUDP console output** | firmware 4.35+ | USB/debug `Serial` | ExtUDP-compatible JSON records and interactive message TX |
 
 ---
 
@@ -175,9 +175,12 @@ This is diagnostic output only (USB/debug serial), not transmitted over any netw
 
 ---
 
-## ExtUDP Serial Fallback
+## ExtUDP Console Output
 
-When `bEXTUDP = false` (ExtUDP socket not started), `sendExtern()` falls back to printing the same JSON to the debug serial (`Serial.printf`) instead of sending a UDP packet.
+Firmware 4.35+ prints ExtUDP-compatible JSON records to the debug serial
+console. Captures can contain these records while network ExtUDP is enabled;
+consumers must therefore treat serial output as a JSON source independent from
+the node's current UDP socket state.
 
 Output is identical to the ExtUDP JSON format documented in `message-udp.md`:
 
@@ -191,6 +194,24 @@ For long JSON strings, the log line is split at the midpoint to avoid serial buf
 ```
 [EXT] Out: <first half><second half> Len: <total>
 ```
+
+### Interactive Message TX
+
+Commands use CRLF or LF termination:
+
+```text
+::Broadcast message
+::{2321}Channel message
+::{QQ1ABC-7}Direct message
+```
+
+The `::` prefix is mandatory. Channels range from `1` through `99999`, direct
+callsigns are uppercased, self-DM is rejected, and the total firmware payload is
+limited to 160 bytes. Firmware appends its local numeric sequence suffix to the
+JSON echo.
+
+See [Serial Transport](serial.md) for daemon configuration, DTR/RTS behavior,
+reconnect handling, platform support, and Docker device mapping.
 
 ---
 

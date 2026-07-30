@@ -33,6 +33,7 @@ type serverInfo struct {
 type configResponse struct {
 	Server           serverInfo               `json:"server"`
 	HTTPAddr         configFieldMeta          `json:"http_addr"`
+	TransportMode    configFieldMeta          `json:"transport_mode"`
 	UDPListenAddr    configFieldMeta          `json:"udp_listen_addr"`
 	NodeAddr         configFieldMeta          `json:"node_addr"`
 	MyCall           configFieldMeta          `json:"my_call"`
@@ -47,6 +48,23 @@ type configResponse struct {
 	Auth             configAuthResponse       `json:"auth"`
 	RequestLog       configRequestLogResponse `json:"request_log"`
 	Storage          configStorageResponse    `json:"storage"`
+	Serial           configSerialResponse     `json:"serial"`
+}
+
+type configSerialResponse struct {
+	Device           configFieldMeta `json:"device"`
+	Baud             configFieldMeta `json:"baud"`
+	DataBits         configFieldMeta `json:"data_bits"`
+	Parity           configFieldMeta `json:"parity"`
+	StopBits         configFieldMeta `json:"stop_bits"`
+	FlowControl      configFieldMeta `json:"flow_control"`
+	DTR              configFieldMeta `json:"dtr"`
+	RTS              configFieldMeta `json:"rts"`
+	ReadTimeout      configFieldMeta `json:"read_timeout"`
+	ReconnectInitial configFieldMeta `json:"reconnect_initial"`
+	ReconnectMax     configFieldMeta `json:"reconnect_max"`
+	StableResetAfter configFieldMeta `json:"stable_reset_after"`
+	MaxRecordBytes   configFieldMeta `json:"max_record_bytes"`
 }
 
 type configReceiveLogResponse struct {
@@ -102,6 +120,7 @@ type configStorageResponse struct {
 // Nil pointer = field not changing. All durations are strings (e.g. "40s").
 type configUpdateRequest struct {
 	HTTPAddr         *string `json:"http_addr,omitempty"`
+	TransportMode    *string `json:"transport_mode,omitempty"`
 	UDPListenAddr    *string `json:"udp_listen_addr,omitempty"`
 	NodeAddr         *string `json:"node_addr,omitempty"`
 	MyCall           *string `json:"my_call,omitempty"`
@@ -116,6 +135,23 @@ type configUpdateRequest struct {
 	Auth       *configUpdateAuth       `json:"auth,omitempty"`
 	RequestLog *configUpdateRequestLog `json:"request_log,omitempty"`
 	Storage    *configUpdateStorage    `json:"storage,omitempty"`
+	Serial     *configUpdateSerial     `json:"serial,omitempty"`
+}
+
+type configUpdateSerial struct {
+	Device           *string `json:"device,omitempty"`
+	Baud             *int    `json:"baud,omitempty"`
+	DataBits         *int    `json:"data_bits,omitempty"`
+	Parity           *string `json:"parity,omitempty"`
+	StopBits         *int    `json:"stop_bits,omitempty"`
+	FlowControl      *string `json:"flow_control,omitempty"`
+	DTR              *bool   `json:"dtr,omitempty"`
+	RTS              *bool   `json:"rts,omitempty"`
+	ReadTimeout      *string `json:"read_timeout,omitempty"`
+	ReconnectInitial *string `json:"reconnect_initial,omitempty"`
+	ReconnectMax     *string `json:"reconnect_max,omitempty"`
+	StableResetAfter *string `json:"stable_reset_after,omitempty"`
+	MaxRecordBytes   *int    `json:"max_record_bytes,omitempty"`
 }
 
 type configUpdateReceiveLog struct {
@@ -202,6 +238,7 @@ func buildConfigResponse(cfg config.Config, env config.EnvOverrides, version str
 			UptimeSeconds: uptimeSecs,
 		},
 		HTTPAddr:         field(cfg.HTTPAddr, "HTTP_ADDR", env, true),
+		TransportMode:    field(cfg.TransportMode, "TRANSPORT_MODE", env, true),
 		UDPListenAddr:    field(cfg.UDPListenAddr, "UDP_LISTEN_ADDR", env, true),
 		NodeAddr:         field(cfg.NodeAddr, "NODE_ADDR", env, true),
 		MyCall:           field(cfg.MyCall, "MY_CALL", env, false),
@@ -246,6 +283,21 @@ func buildConfigResponse(cfg config.Config, env config.EnvOverrides, version str
 			PublicChatRetention: durationField(cfg.Storage.PublicChatRetention, "STORAGE_PUBLIC_CHAT_RETENTION", env, true),
 			NodesRetention:      durationField(cfg.Storage.NodesRetention, "STORAGE_NODES_RETENTION", env, true),
 			TelemetryRetention:  durationField(cfg.Storage.TelemetryRetention, "STORAGE_TELEMETRY_RETENTION", env, true),
+		},
+		Serial: configSerialResponse{
+			Device:           field(cfg.Serial.Device, "SERIAL_DEVICE", env, true),
+			Baud:             field(cfg.Serial.Baud, "SERIAL_BAUD", env, true),
+			DataBits:         field(cfg.Serial.DataBits, "SERIAL_DATA_BITS", env, true),
+			Parity:           field(cfg.Serial.Parity, "SERIAL_PARITY", env, true),
+			StopBits:         field(cfg.Serial.StopBits, "SERIAL_STOP_BITS", env, true),
+			FlowControl:      field(cfg.Serial.FlowControl, "SERIAL_FLOW_CONTROL", env, true),
+			DTR:              field(cfg.Serial.DTR, "SERIAL_DTR", env, true),
+			RTS:              field(cfg.Serial.RTS, "SERIAL_RTS", env, true),
+			ReadTimeout:      durationField(cfg.Serial.ReadTimeout, "SERIAL_READ_TIMEOUT", env, true),
+			ReconnectInitial: durationField(cfg.Serial.ReconnectInitial, "SERIAL_RECONNECT_INITIAL", env, true),
+			ReconnectMax:     durationField(cfg.Serial.ReconnectMax, "SERIAL_RECONNECT_MAX", env, true),
+			StableResetAfter: durationField(cfg.Serial.StableResetAfter, "SERIAL_STABLE_RESET_AFTER", env, true),
+			MaxRecordBytes:   field(cfg.Serial.MaxRecordBytes, "SERIAL_MAX_RECORD_BYTES", env, true),
 		},
 	}
 }
@@ -296,6 +348,10 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 	// Apply top-level fields.
 	if req.HTTPAddr != nil {
 		candidate.HTTPAddr = *req.HTTPAddr
+		requiresRestart = true
+	}
+	if req.TransportMode != nil {
+		candidate.TransportMode = *req.TransportMode
 		requiresRestart = true
 	}
 	if req.UDPListenAddr != nil {
@@ -480,8 +536,16 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 			requiresRestart = true
 		}
 	}
+	if req.Serial != nil {
+		if err := applySerialUpdate(&candidate.Serial, req.Serial); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		requiresRestart = true
+	}
 
 	// Normalize and validate before persisting.
+	candidate = config.Normalize(candidate)
 	if err := config.Validate(candidate); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -537,6 +601,65 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func applySerialUpdate(serial *config.Serial, update *configUpdateSerial) error {
+	if update.Device != nil {
+		serial.Device = *update.Device
+	}
+	if update.Baud != nil {
+		serial.Baud = *update.Baud
+	}
+	if update.DataBits != nil {
+		serial.DataBits = *update.DataBits
+	}
+	if update.Parity != nil {
+		serial.Parity = *update.Parity
+	}
+	if update.StopBits != nil {
+		serial.StopBits = *update.StopBits
+	}
+	if update.FlowControl != nil {
+		serial.FlowControl = *update.FlowControl
+	}
+	if update.DTR != nil {
+		serial.DTR = *update.DTR
+	}
+	if update.RTS != nil {
+		serial.RTS = *update.RTS
+	}
+	if update.ReadTimeout != nil {
+		duration, err := config.ParseDuration(*update.ReadTimeout)
+		if err != nil {
+			return fmt.Errorf("serial.read_timeout: %w", err)
+		}
+		serial.ReadTimeout = duration
+	}
+	if update.ReconnectInitial != nil {
+		duration, err := config.ParseDuration(*update.ReconnectInitial)
+		if err != nil {
+			return fmt.Errorf("serial.reconnect_initial: %w", err)
+		}
+		serial.ReconnectInitial = duration
+	}
+	if update.ReconnectMax != nil {
+		duration, err := config.ParseDuration(*update.ReconnectMax)
+		if err != nil {
+			return fmt.Errorf("serial.reconnect_max: %w", err)
+		}
+		serial.ReconnectMax = duration
+	}
+	if update.StableResetAfter != nil {
+		duration, err := config.ParseDuration(*update.StableResetAfter)
+		if err != nil {
+			return fmt.Errorf("serial.stable_reset_after: %w", err)
+		}
+		serial.StableResetAfter = duration
+	}
+	if update.MaxRecordBytes != nil {
+		serial.MaxRecordBytes = *update.MaxRecordBytes
+	}
+	return nil
+}
+
 // checkEnvLocked returns an error if the update attempts to change any field
 // that is currently managed by an environment variable.
 func checkEnvLocked(req configUpdateRequest, env config.EnvOverrides) error {
@@ -547,6 +670,7 @@ func checkEnvLocked(req configUpdateRequest, env config.EnvOverrides) error {
 
 	checks := []check{
 		{req.HTTPAddr != nil, "HTTP_ADDR"},
+		{req.TransportMode != nil, "TRANSPORT_MODE"},
 		{req.UDPListenAddr != nil, "UDP_LISTEN_ADDR"},
 		{req.NodeAddr != nil, "NODE_ADDR"},
 		{req.MyCall != nil, "MY_CALL"},
@@ -608,6 +732,24 @@ func checkEnvLocked(req configUpdateRequest, env config.EnvOverrides) error {
 			check{st.PublicChatRetention != nil, "STORAGE_PUBLIC_CHAT_RETENTION"},
 			check{st.NodesRetention != nil, "STORAGE_NODES_RETENTION"},
 			check{st.TelemetryRetention != nil, "STORAGE_TELEMETRY_RETENTION"},
+		)
+	}
+	if req.Serial != nil {
+		serial := req.Serial
+		checks = append(checks,
+			check{serial.Device != nil, "SERIAL_DEVICE"},
+			check{serial.Baud != nil, "SERIAL_BAUD"},
+			check{serial.DataBits != nil, "SERIAL_DATA_BITS"},
+			check{serial.Parity != nil, "SERIAL_PARITY"},
+			check{serial.StopBits != nil, "SERIAL_STOP_BITS"},
+			check{serial.FlowControl != nil, "SERIAL_FLOW_CONTROL"},
+			check{serial.DTR != nil, "SERIAL_DTR"},
+			check{serial.RTS != nil, "SERIAL_RTS"},
+			check{serial.ReadTimeout != nil, "SERIAL_READ_TIMEOUT"},
+			check{serial.ReconnectInitial != nil, "SERIAL_RECONNECT_INITIAL"},
+			check{serial.ReconnectMax != nil, "SERIAL_RECONNECT_MAX"},
+			check{serial.StableResetAfter != nil, "SERIAL_STABLE_RESET_AFTER"},
+			check{serial.MaxRecordBytes != nil, "SERIAL_MAX_RECORD_BYTES"},
 		)
 	}
 

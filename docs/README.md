@@ -5,6 +5,7 @@ Documentation describes current, supported behavior. Design notes and unimplemen
 ## Getting Started
 
 - [First Setup](first-setup.md): configure a MeshCom node to send EXT UDP traffic to `gomeshcomd`.
+- [Serial Transport](serial.md): firmware requirements, serial settings, DTR/RTS behavior, reconnects, and Docker device mapping.
 - [Backend and Configuration](backend.md): configuration precedence, persistence, HTTP API, and operational behavior.
 - [OpenAPI Contract](openapi.yaml): machine-readable HTTP API specification.
 
@@ -15,6 +16,7 @@ Documentation describes current, supported behavior. Design notes and unimplemen
 - [Chat Status Tracking](chat_status.md): unread state and conversation IDs.
 - [Chat Text Actions](chat.md): callsign and web-link actions in chat messages.
 - [IoT UDP Simulator](iot-simulator.md): local packet simulator flags and behavior.
+- [Nightly Builds](nightly-builds.md): `develop` image tags, retention, and release separation.
 
 ## MeshCom Reference
 

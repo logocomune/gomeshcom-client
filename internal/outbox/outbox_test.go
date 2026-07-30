@@ -148,3 +148,27 @@ func TestOutboxConfirmDedup(t *testing.T) {
 		t.Fatal("second Confirm should return false (dedup)")
 	}
 }
+
+func TestOutboxCancelSuppressesFailure(t *testing.T) {
+	failed := make(chan PendingMessage, 1)
+	box := New(20*time.Millisecond, func(message PendingMessage) {
+		failed <- message
+	})
+	pending := box.Register("QQ0QQ-1", "QQ1ABC-1", "hello", time.Now())
+
+	if !box.Cancel(pending.ID) {
+		t.Fatal("Cancel returned false")
+	}
+	if box.Cancel(pending.ID) {
+		t.Fatal("second Cancel returned true")
+	}
+
+	select {
+	case message := <-failed:
+		t.Fatalf("cancelled message expired: %+v", message)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if _, ok := box.Confirm("QQ0QQ-1", "QQ1ABC-1", "hello"); ok {
+		t.Fatal("Confirm matched cancelled message")
+	}
+}

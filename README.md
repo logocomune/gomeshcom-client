@@ -1,8 +1,8 @@
 # gomeshcom-client
 
-Unofficial Go-based web client for receiving UDP packets from a local [MeshCom](https://icssw.org/en/meshcom/) node.
+Unofficial Go-based web client for receiving UDP or serial traffic from a local [MeshCom](https://icssw.org/en/meshcom/) node.
 
-It listens for UDP packets from a MeshCom node and provides a browser UI for real-time monitoring, chat, and node tracking.
+It receives packets from a MeshCom node and provides a browser UI for real-time monitoring, chat, and node tracking.
 
 The main executable is `gomeshcomd`.
 
@@ -15,7 +15,7 @@ The main executable is `gomeshcomd`.
 
 ## Quick Start
 
-**Prerequisites:** a MeshCom node reachable from the `gomeshcomd` host (default UDP port `1799`).
+**Prerequisites:** a MeshCom node reachable over UDP (default port `1799`) or an explicit serial device using firmware 4.35+.
 
 If this is your first network setup, follow the step-by-step guide first:
 
@@ -75,6 +75,44 @@ To mirror every received UDP packet to other consumers, set one or more forwardi
 
 Use this when one MeshCom node should feed multiple tools or additional `gomeshcomd` instances. The forwarder copies incoming UDP datagrams byte-for-byte before parsing them, so downstream services receive the same payloads that this instance received.
 
+### Serial
+
+UDP remains the default. To connect through USB serial instead:
+
+```bash
+GOMESHCOM_TRANSPORT_MODE=serial \
+GOMESHCOM_SERIAL_DEVICE=/dev/ttyUSB0 \
+./gomeshcomd --my-call="QQ0YY-1"
+```
+
+Default serial framing is `115200 8N1`, no flow control. Select modem lines for
+your hardware:
+
+```sh
+# ESP32 / CP2102, typically /dev/ttyUSB0: avoid reset or bootloader entry
+GOMESHCOM_SERIAL_DTR=false \
+GOMESHCOM_SERIAL_RTS=false
+
+# nRF52 / RAK USB CDC, typically /dev/ttyACM0: expose active USB serial connection
+GOMESHCOM_SERIAL_DTR=true \
+GOMESHCOM_SERIAL_RTS=false
+```
+
+See [Serial Transport](docs/serial.md) for TOML, platform, reconnect, terminal,
+and Docker instructions.
+
+When running in Docker, pass the host serial device into the container. For example:
+
+```yaml
+services:
+  gomeshcomd:
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+```
+
+Set `GOMESHCOM_SERIAL_DEVICE=/dev/ttyUSB0` inside the container to match the
+container-side device path.
+
 ### Optional Web UI Authentication
 
 For shared LAN deployments, protect the UI and API with a username and password:
@@ -113,7 +151,7 @@ This allows REST and SSE requests to reuse the same session cookie.
 - Chat per conversation: broadcast, channels, and direct messages
 - Node map with OpenLayers: color-coded by freshness, with clustering for dense areas
 - Outgoing messages with duplicate suppression
-- UDP RX forwarding to one or more downstream listeners
+- UDP datagram or extracted serial JSON forwarding to downstream listeners
 - Local UDP simulator for MeshCom-compatible test packets
 - Single compact binary, with no external runtime required
 - Runs on Linux, Windows, macOS, and Raspberry Pi-class devices
@@ -125,16 +163,25 @@ All options are available via environment variable or CLI flag using the `GOMESH
 
 | Variable | Default | Description |
 |---|---|---|
+| `GOMESHCOM_TRANSPORT_MODE` | `udp` | Node transport: `udp` or `serial`. Missing values preserve UDP behavior. |
 | `GOMESHCOM_MY_CALL` | `QQ0XX-1` | Startup station callsign default, for example `IU5PMP-1` or `QQ1ABC-1`. Input is trimmed and uppercased. The active callsign can also be changed at runtime from the web UI and is persisted under `data/configs/station.json`. |
 | `GOMESHCOM_NODE_ADDR` | *(empty)* | Node UDP address. When empty, it is learned from the first incoming UDP packet. When set, it is used as-is and auto-detect is disabled. |
 | `GOMESHCOM_HTTP_ADDR` | `127.0.0.1:8080` | HTTP listen address |
 | `GOMESHCOM_UDP_LISTEN_ADDR` | `0.0.0.0:1799` | UDP listen address |
-| `GOMESHCOM_FORWARD_TARGETS` | *(empty)* | Comma-separated `host:port` list that receives a byte-for-byte copy of every incoming UDP datagram |
+| `GOMESHCOM_SERIAL_DEVICE` | *(empty)* | Explicit serial path or COM port; required in serial mode |
+| `GOMESHCOM_SERIAL_BAUD` | `115200` | Serial baud rate |
+| `GOMESHCOM_SERIAL_DATA_BITS` | `8` | Serial data bits |
+| `GOMESHCOM_SERIAL_PARITY` | `none` | `none` \| `odd` \| `even` \| `mark` \| `space` |
+| `GOMESHCOM_SERIAL_STOP_BITS` | `1` | `1` \| `2` |
+| `GOMESHCOM_SERIAL_FLOW_CONTROL` | `none` | Serial flow control; currently `none` |
+| `GOMESHCOM_SERIAL_DTR` | `false` | DTR state; enable for nRF52/RAK USB CDC |
+| `GOMESHCOM_SERIAL_RTS` | `false` | RTS state |
+| `GOMESHCOM_FORWARD_TARGETS` | *(empty)* | Comma-separated `host:port` list receiving each UDP datagram or extracted serial JSON payload |
 | `GOMESHCOM_DATA_DIR` | `./data` | Persistent data directory |
 | `GOMESHCOM_SEND_DELAY` | `40s` | Minimum delay between outgoing messages |
 | `GOMESHCOM_MAX_MESSAGE_LENGTH` | `149` | Maximum outgoing message length, in UTF-8 characters |
 | `GOMESHCOM_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
-| `GOMESHCOM_RECEIVE_LOG_ENABLED` | `true` | Write received UDP packets to JSONL |
+| `GOMESHCOM_RECEIVE_LOG_ENABLED` | `true` | Write received packets to JSONL |
 | `GOMESHCOM_RECEIVE_LOG_RETENTION_DAYS` | `365` | Number of daily log files to keep |
 | `GOMESHCOM_RECEIVE_LOG_REPLAY_WINDOW` | `1h` | Packets replayed on SSE reconnect |
 | `GOMESHCOM_CHAT_LOG_HISTORY_WINDOW` | `24h` | Default chat history window |
