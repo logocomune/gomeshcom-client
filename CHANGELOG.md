@@ -25,8 +25,9 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
-- **Nightly CI verification**: build embedded web assets before Go tests and
-  track the serial firmware capture fixture required by decoder tests.
+- **Nightly CI verification**: synchronize web lockfile, build embedded web
+  assets before Go tests, and track serial firmware capture fixture required by
+  decoder tests.
 - **Serial forwarding without targets**: serial packet ingestion now safely skips an absent UDP forwarder instead of panicking when a received serial packet is processed.
 - **Immediate TX echo matching**: outgoing messages enter the outbox before transport write, preventing fast serial echoes from racing pending-message registration. Failed writes cancel the pending timeout.
 
