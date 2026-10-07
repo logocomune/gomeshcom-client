@@ -24,6 +24,9 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Git ignore rules**: exclude local tooling configuration, the Windows daemon
+  binary, and SQLite databases with their WAL and shared-memory sidecar files.
+
 - **Project documentation**: add nightly-build publishing and retention guidance,
   expand the serial transport guide, and disclose the project's use of
   AI-assisted development in the README.
