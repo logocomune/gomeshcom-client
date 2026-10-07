@@ -103,17 +103,13 @@
 	let dedupTtl = $state('');
 	// Receive Log
 	let receiveLogEnabled = $state(true);
-	let receiveLogPath = $state('');
-	let receiveLogRetentionDays = $state('');
 	let receiveLogReplayWindow = $state('');
 	// Request Log
 	let requestLogEnabled = $state(false);
 	// Stats
 	let statsEnabled = $state(true);
-	let statsPath = $state('');
 	let statsRetentionDays = $state('');
 	// Chat Log
-	let chatLogPath = $state('');
 	let chatLogHistoryWindow = $state('');
 	let chatLogMaxHistoryWindow = $state('');
 
@@ -173,14 +169,10 @@
 				netConsoleMaxRecordBytes !== String(config.netconsole.max_record_bytes.value) ||
 				dedupTtl !== config.send.dedup_ttl.value ||
 				receiveLogEnabled !== config.receive_log.enabled.value ||
-				receiveLogPath !== config.receive_log.path.value ||
-				receiveLogRetentionDays !== String(config.receive_log.retention_days.value) ||
 				receiveLogReplayWindow !== config.receive_log.replay_window.value ||
 				requestLogEnabled !== config.request_log.enabled.value ||
 				statsEnabled !== config.stats.enabled.value ||
-				statsPath !== config.stats.path.value ||
 				statsRetentionDays !== String(config.stats.retention_days.value) ||
-				chatLogPath !== config.chat_log.path.value ||
 				chatLogHistoryWindow !== config.chat_log.history_window.value ||
 				chatLogMaxHistoryWindow !== config.chat_log.max_history_window.value)
 	);
@@ -218,14 +210,10 @@
 		netConsoleMaxRecordBytes = String(cfg.netconsole.max_record_bytes.value);
 		dedupTtl = cfg.send.dedup_ttl.value;
 		receiveLogEnabled = cfg.receive_log.enabled.value;
-		receiveLogPath = cfg.receive_log.path.value;
-		receiveLogRetentionDays = String(cfg.receive_log.retention_days.value);
 		receiveLogReplayWindow = cfg.receive_log.replay_window.value;
 		requestLogEnabled = cfg.request_log.enabled.value;
 		statsEnabled = cfg.stats.enabled.value;
-		statsPath = cfg.stats.path.value;
 		statsRetentionDays = String(cfg.stats.retention_days.value);
-		chatLogPath = cfg.chat_log.path.value;
 		chatLogHistoryWindow = cfg.chat_log.history_window.value;
 		chatLogMaxHistoryWindow = cfg.chat_log.max_history_window.value;
 	}
@@ -317,19 +305,9 @@
 
 		{
 			const rl = config.receive_log;
-			if (
-				!rl.enabled.env_override ||
-				!rl.path.env_override ||
-				!rl.retention_days.env_override ||
-				!rl.replay_window.env_override
-			) {
+			if (!rl.enabled.env_override || !rl.replay_window.env_override) {
 				patch.receive_log = {};
 				if (!rl.enabled.env_override) patch.receive_log.enabled = receiveLogEnabled;
-				if (!rl.path.env_override) patch.receive_log.path = receiveLogPath;
-				if (!rl.retention_days.env_override) {
-					const days = parseInt(receiveLogRetentionDays, 10);
-					if (!isNaN(days) && days > 0) patch.receive_log.retention_days = days;
-				}
 				if (!rl.replay_window.env_override)
 					patch.receive_log.replay_window = receiveLogReplayWindow;
 			}
@@ -341,10 +319,9 @@
 
 		{
 			const s = config.stats;
-			if (!s.enabled.env_override || !s.path.env_override || !s.retention_days.env_override) {
+			if (!s.enabled.env_override || !s.retention_days.env_override) {
 				patch.stats = {};
 				if (!s.enabled.env_override) patch.stats.enabled = statsEnabled;
-				if (!s.path.env_override) patch.stats.path = statsPath;
 				if (!s.retention_days.env_override) {
 					const days = parseInt(statsRetentionDays, 10);
 					if (!isNaN(days) && days > 0) patch.stats.retention_days = days;
@@ -354,13 +331,8 @@
 
 		{
 			const cl = config.chat_log;
-			if (
-				!cl.path.env_override ||
-				!cl.history_window.env_override ||
-				!cl.max_history_window.env_override
-			) {
+			if (!cl.history_window.env_override || !cl.max_history_window.env_override) {
 				patch.chat_log = {};
-				if (!cl.path.env_override) patch.chat_log.path = chatLogPath;
 				if (!cl.history_window.env_override) patch.chat_log.history_window = chatLogHistoryWindow;
 				if (!cl.max_history_window.env_override)
 					patch.chat_log.max_history_window = chatLogMaxHistoryWindow;
@@ -993,7 +965,7 @@
 					<div class="divide-y divide-ink-dim/15">
 						<SettingsField
 							label="Enabled"
-							description="Write received UDP packets to a daily JSONL log file."
+							description="Store received packets for replay and the traffic view."
 							envOverride={config.receive_log.enabled.env_override}
 							requiresRestart={config.receive_log.enabled.requires_restart}
 						>
@@ -1002,33 +974,6 @@
 								bind:checked={receiveLogEnabled}
 								disabled={config.receive_log.enabled.env_override}
 								class="h-4 w-4 cursor-pointer rounded accent-azure disabled:cursor-not-allowed disabled:opacity-50"
-							/>
-						</SettingsField>
-						<SettingsField
-							label="Path"
-							description="Directory for daily received UDP JSONL files."
-							envOverride={config.receive_log.path.env_override}
-							requiresRestart={config.receive_log.path.requires_restart}
-						>
-							<input
-								type="text"
-								bind:value={receiveLogPath}
-								disabled={config.receive_log.path.env_override}
-								class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-							/>
-						</SettingsField>
-						<SettingsField
-							label="Retention"
-							description="How many days of log files to keep."
-							envOverride={config.receive_log.retention_days.env_override}
-							requiresRestart={config.receive_log.retention_days.requires_restart}
-						>
-							<input
-								type="number"
-								bind:value={receiveLogRetentionDays}
-								disabled={config.receive_log.retention_days.env_override}
-								class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-								min="1"
 							/>
 						</SettingsField>
 						<SettingsField
@@ -1070,19 +1015,6 @@
 							/>
 						</SettingsField>
 						<SettingsField
-							label="Path"
-							description="File where statistics are persisted."
-							envOverride={config.stats.path.env_override}
-							requiresRestart={config.stats.path.requires_restart}
-						>
-							<input
-								type="text"
-								bind:value={statsPath}
-								disabled={config.stats.path.env_override}
-								class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-							/>
-						</SettingsField>
-						<SettingsField
 							label="Retention"
 							description="How many days of hourly buckets to keep."
 							envOverride={config.stats.retention_days.env_override}
@@ -1107,19 +1039,6 @@
 				</div>
 				<div class="-mt-2 rounded-2xl border border-ink-dim/15 bg-surface/50 backdrop-blur-sm">
 					<div class="divide-y divide-ink-dim/15">
-						<SettingsField
-							label="Path"
-							description="Directory for chat JSONL files."
-							envOverride={config.chat_log.path.env_override}
-							requiresRestart={config.chat_log.path.requires_restart}
-						>
-							<input
-								type="text"
-								bind:value={chatLogPath}
-								disabled={config.chat_log.path.env_override}
-								class="w-full rounded-lg border border-ink-dim/30 bg-base px-2.5 py-1.5 font-mono text-xs text-ink focus:border-azure focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-							/>
-						</SettingsField>
 						<SettingsField
 							label="History window"
 							description="Default time window returned by chat history queries. Changes apply live."

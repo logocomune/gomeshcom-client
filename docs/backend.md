@@ -46,9 +46,11 @@ The configuration API exposes effective values, environment overrides, and resta
 
 SQLite is the runtime store. It uses WAL mode, foreign keys, one pooled connection, and a five-second busy timeout. It stores received packets, chat history and read markers, node positions, hourly statistics, telemetry, sessions, channel visibility, station identity, and DM statistics.
 
-At first database creation, compatible JSON and JSONL files are imported once. They remain migration input only; live state is no longer written to them. SQLite maintenance removes expired receive-log, public-chat, node, and telemetry rows according to the `GOMESHCOM_STORAGE_*_RETENTION` settings.
+SQLite is the only store: the file-based JSON and JSONL layer, the one-time import at first database creation, and the `receive_log.path`, `chat_log.path`, and `stats.path` settings were removed. Installations still holding JSONL data must import it with a release that predates the removal.
 
-Legacy `receive_log.path`, `chat_log.path`, and `stats.path` settings locate migration input; they do not select live output files. `receive_log.retention_days` does not control SQLite retention. Hourly statistics have their own `stats.retention_days` policy; see [Statistics](statistics.md).
+At startup the server checks the conventional legacy file locations (`raw/`, `chat/`, `stats/`, `nodes/`, `configs/`, `channel_show.json`, `http-sessions.json`) and logs one warning listing any files it finds. These files are neither imported nor deleted.
+
+SQLite maintenance removes expired receive-log, public-chat, node, and telemetry rows according to the `GOMESHCOM_STORAGE_*_RETENTION` settings. Hourly statistics have their own `stats.retention_days` policy; see [Statistics](statistics.md).
 
 ## Callsign
 

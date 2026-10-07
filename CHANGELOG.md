@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- **Legacy data warning**: at startup the daemon probes the conventional legacy
+  file locations and logs one warning listing any JSONL/JSON files it finds.
+  Those files are neither imported nor deleted.
+
 - **Progressive Web App**: secure origins can install goMeshCom with platform
   icons and reopen its cached application shell offline. API, SSE, message,
   position, statistics, and cross-origin requests remain network-only.
@@ -42,6 +46,20 @@ All notable changes to this project are documented in this file.
 
 - **Standalone NETConsole prototype**: remove the obsolete root-level
   `netconsole_client.go`; daemon-integrated NETConsole transport replaces it.
+
+- **Legacy file-to-SQLite import layer**: remove the one-time startup migration
+  (`internal/legacymigrate`, `runLegacyDataMigration`, `openStorageAndImport`)
+  and the per-store `Import*` methods that read `positions.json`, `received.*.jsonl`,
+  chat JSONL, `msg_idx.json`, `dm_stats.json`, `stats.json`,
+  `channel_show.json`, `station.json`, and `http-sessions.json`. SQLite is now
+  the only store, and the `data/raw`, `data/nodes`, `data/chat`, and `data/stats`
+  directories are no longer created. **Breaking change**: installations still
+  holding JSONL data must import it with a release that predates this change.
+
+- **File-store settings**: remove `receive_log.path`, `receive_log.retention_days`,
+  `stats.path`, and `chat_log.path` from TOML, `GOMESHCOM_*` env vars,
+  `GET`/`PUT /api/config`, and Settings. `receive_log.retention_days` never
+  controlled SQLite retention; use `GOMESHCOM_STORAGE_RECEIVE_LOG_RETENTION`.
 
 ## [0.14.0] 2026-07-30
 

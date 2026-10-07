@@ -25,19 +25,15 @@ func fullTestConfig() config.Config {
 		MaxMessageLength: 149,
 		LogLevel:         "info",
 		ChatLog: config.ChatLog{
-			Path:             "./data/chat",
 			HistoryWindow:    24 * time.Hour,
 			MaxHistoryWindow: 720 * time.Hour,
 		},
 		ReceiveLog: config.ReceiveLog{
-			Enabled:       true,
-			Path:          "./data/raw",
-			RetentionDays: 365,
-			ReplayWindow:  time.Hour,
+			Enabled:      true,
+			ReplayWindow: time.Hour,
 		},
 		Stats: config.Stats{
 			Enabled:       true,
-			Path:          "./data/stats/stats.json",
 			RetentionDays: 30,
 		},
 		Send:       config.Send{DedupTTL: 2 * time.Second},
@@ -205,6 +201,77 @@ func TestGetConfigHTTPReturnsOK(t *testing.T) {
 	var resp configResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+}
+
+func TestGetConfigHTTPOmitsRemovedFileStoreFields(t *testing.T) {
+	server := configTestServer(fullTestConfig(), config.EnvOverrides{}, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body map[string]map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	removed := map[string][]string{
+		"receive_log": {"path", "retention_days"},
+		"stats":       {"path"},
+		"chat_log":    {"path"},
+	}
+	for section, keys := range removed {
+		for _, key := range keys {
+			if _, ok := body[section][key]; ok {
+				t.Errorf("%s.%s must not be exposed by GET /api/config", section, key)
+			}
+		}
+	}
+
+	kept := map[string]string{
+		"receive_log": "replay_window",
+		"stats":       "retention_days",
+		"chat_log":    "history_window",
+	}
+	for section, key := range kept {
+		if _, ok := body[section][key]; !ok {
+			t.Errorf("%s.%s missing from GET /api/config", section, key)
+		}
+	}
+}
+
+func TestUpdateConfigIgnoresRemovedFileStoreFields(t *testing.T) {
+	dir := t.TempDir()
+	server := configTestServer(fullTestConfig(), config.EnvOverrides{}, dir)
+
+	body, _ := json.Marshal(map[string]any{
+		"log_level": "debug",
+		"receive_log": map[string]any{
+			"path":           "/tmp/legacy-raw",
+			"retention_days": 365,
+		},
+		"stats":    map[string]any{"path": "/tmp/legacy-stats.json"},
+		"chat_log": map[string]any{"path": "/tmp/legacy-chat"},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "gomeshcomd.toml"))
+	if err != nil {
+		t.Fatalf("toml file not created: %v", err)
+	}
+	if content := string(data); contains(content, "legacy-raw") || contains(content, "legacy-stats") || contains(content, "legacy-chat") {
+		t.Errorf("removed path fields were persisted:\n%s", content)
 	}
 }
 

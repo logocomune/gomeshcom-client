@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -24,7 +23,6 @@ import (
 	"github.com/logocomune/gomeshcom-client/internal/dmstats"
 	"github.com/logocomune/gomeshcom-client/internal/events"
 	"github.com/logocomune/gomeshcom-client/internal/httpapi"
-	"github.com/logocomune/gomeshcom-client/internal/legacymigrate"
 	"github.com/logocomune/gomeshcom-client/internal/logfmt"
 	"github.com/logocomune/gomeshcom-client/internal/netconsole"
 	"github.com/logocomune/gomeshcom-client/internal/packetingest"
@@ -118,16 +116,11 @@ func run() (bool, error) {
 		}
 	}()
 
-	if err := ensureDataDirs(cfg.DataDir); err != nil {
-		return false, err
-	}
-	if err := runLegacyDataMigration(cfg); err != nil {
-		return false, err
-	}
+	warnLegacyDataFiles(cfg.DataDir, slog.Default())
 
-	sqliteDB, err := openStorageAndImport(ctx, cfg)
+	sqliteDB, err := storage.Open(ctx, cfg.Storage.SQLitePath)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("open sqlite storage: %w", err)
 	}
 	defer sqliteDB.Close()
 	go sqliteDB.StartPurge(ctx, storage.PurgePolicy{
@@ -153,9 +146,7 @@ func run() (bool, error) {
 	go positionStore.Start(ctx)
 
 	receiveLogger := receivelog.NewSQLite(receivelog.Config{
-		Enabled:       cfg.ReceiveLog.Enabled,
-		Path:          cfg.ReceiveLog.Path,
-		RetentionDays: cfg.ReceiveLog.RetentionDays,
+		Enabled: cfg.ReceiveLog.Enabled,
 	}, sqliteDB.SQL())
 	chatLogger := chatlog.NewSQLite(sqliteDB.SQL(), stationIdentity)
 	chatStatus, err := chatstatus.NewSQLite(sqliteDB.SQL())
@@ -174,7 +165,6 @@ func run() (bool, error) {
 	if cfg.Stats.Enabled {
 		statsStore = stats.NewSQLite(sqliteDB.SQL(), stats.Config{
 			Enabled:       true,
-			Path:          cfg.Stats.Path,
 			RetentionDays: cfg.Stats.RetentionDays,
 		})
 		if err := statsStore.Load(); err != nil {
@@ -377,66 +367,6 @@ func run() (bool, error) {
 	}
 
 	return restartRequested.Load(), nil
-}
-
-func runLegacyDataMigration(cfg config.Config) error {
-	// DEPRECATED: one-time legacy data migration; remove after migration window closes.
-	legacyCallsign, err := station.LoadLegacy(station.DefaultPath(cfg.DataDir), cfg.MyCall)
-	if err != nil {
-		return fmt.Errorf("load legacy station identity: %w", err)
-	}
-	if err := legacymigrate.Run(cfg.DataDir, cfg.ChatLog.Path, legacyCallsign); err != nil {
-		return fmt.Errorf("legacy migration: %w", err)
-	}
-	return nil
-}
-
-func openStorageAndImport(ctx context.Context, cfg config.Config) (*storage.DB, error) {
-	sqliteDB, err := storage.Open(ctx, cfg.Storage.SQLitePath)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite storage: %w", err)
-	}
-
-	imports := []struct {
-		name string
-		run  func(context.Context) error
-	}{
-		{name: "nodes", run: func(ctx context.Context) error { return sqliteDB.ImportNodes(ctx, positions.DefaultPath(cfg.DataDir)) }},
-		{name: "receive log", run: func(ctx context.Context) error { return sqliteDB.ImportReceiveLog(ctx, cfg.ReceiveLog.Path) }},
-		{name: "chat history", run: func(ctx context.Context) error { return sqliteDB.ImportChatHistory(ctx, cfg.ChatLog.Path) }},
-		{name: "chat reads", run: func(ctx context.Context) error {
-			return sqliteDB.ImportChatReads(ctx, filepath.Join(cfg.ChatLog.Path, "msg_idx.json"))
-		}},
-		{name: "dm stats", run: func(ctx context.Context) error { return sqliteDB.ImportDMStats(ctx, dmstats.DefaultPath(cfg.DataDir)) }},
-		{name: "stats", run: func(ctx context.Context) error { return sqliteDB.ImportStats(ctx, cfg.Stats.Path) }},
-		{name: "channel show", run: func(ctx context.Context) error {
-			return sqliteDB.ImportChannelShow(ctx, channelshow.DefaultPath(cfg.DataDir))
-		}},
-		{name: "station identity", run: func(ctx context.Context) error {
-			return sqliteDB.ImportStationIdentity(ctx, station.DefaultPath(cfg.DataDir))
-		}},
-		{name: "http sessions", run: func(ctx context.Context) error {
-			return sqliteDB.ImportHTTPSessions(ctx, filepath.Join(cfg.DataDir, "http-sessions.json"))
-		}},
-	}
-	for _, item := range imports {
-		if err := item.run(ctx); err != nil {
-			_ = sqliteDB.Close()
-			return nil, fmt.Errorf("import %s: %w", item.name, err)
-		}
-	}
-	return sqliteDB, nil
-}
-
-func ensureDataDirs(dataDir string) error {
-	for _, dir := range []string{"raw", "nodes", "chat", "stats", "configs"} {
-		path := filepath.Join(dataDir, dir)
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			return fmt.Errorf("create data directory %s: %w", path, err)
-		}
-	}
-
-	return nil
 }
 
 func printStartupBanner(cfg config.Config, myCall string) {

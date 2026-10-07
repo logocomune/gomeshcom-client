@@ -1502,34 +1502,26 @@ components:
 
     ConfigReceiveLogSection:
       type: object
-      required: [enabled, path, retention_days, replay_window]
+      required: [enabled, replay_window]
       properties:
         enabled:
-          $ref: "#/components/schemas/ConfigFieldMeta"
-        path:
-          $ref: "#/components/schemas/ConfigFieldMeta"
-        retention_days:
           $ref: "#/components/schemas/ConfigFieldMeta"
         replay_window:
           $ref: "#/components/schemas/ConfigFieldMeta"
 
     ConfigStatsSection:
       type: object
-      required: [enabled, path, retention_days]
+      required: [enabled, retention_days]
       properties:
         enabled:
-          $ref: "#/components/schemas/ConfigFieldMeta"
-        path:
           $ref: "#/components/schemas/ConfigFieldMeta"
         retention_days:
           $ref: "#/components/schemas/ConfigFieldMeta"
 
     ConfigChatLogSection:
       type: object
-      required: [path, history_window, max_history_window]
+      required: [history_window, max_history_window]
       properties:
-        path:
-          $ref: "#/components/schemas/ConfigFieldMeta"
         history_window:
           $ref: "#/components/schemas/ConfigFieldMeta"
         max_history_window:
@@ -1745,10 +1737,6 @@ components:
       properties:
         enabled:
           type: boolean
-        path:
-          type: string
-        retention_days:
-          type: integer
         replay_window:
           type: string
           description: Go duration string, e.g. `"2h"`.
@@ -1759,16 +1747,12 @@ components:
       properties:
         enabled:
           type: boolean
-        path:
-          type: string
         retention_days:
           type: integer
 
     ConfigUpdateChatLog:
       type: object
       properties:
-        path:
-          type: string
         history_window:
           type: string
           description: Go duration string, e.g. `"48h"`.

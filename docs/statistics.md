@@ -4,7 +4,7 @@ The Statistics page (`/statistics`) shows hourly packet traffic received by the 
 
 ## Storage
 
-Runtime statistics live in SQLite, in hourly UTC buckets. When a database is created from an existing installation, `data/stats/stats.json` is imported once. The JSON file is not updated afterwards.
+Runtime statistics live in SQLite, in hourly UTC buckets. Statistics are stored only in SQLite; the former `data/stats/stats.json` import was removed.
 
 Each bucket records received direct messages, delivered DM acknowledgements, public messages, telemetry, positions, parse errors, totals, channel counters, and five-kilometre distance buckets.
 

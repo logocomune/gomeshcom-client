@@ -227,7 +227,7 @@ This allows REST and SSE requests to reuse the same session cookie.
 - Node map with OpenLayers: color-coded by freshness, with clustering for dense areas
 - [Graph view](docs/graph.md) and map path overlays
 - [Traffic statistics](docs/statistics.md), including per-destination DM acknowledgement counts
-- SQLite persistence with one-time legacy JSON/JSONL migration
+- SQLite persistence for packets, chat, nodes, telemetry, statistics, and sessions
 - [Broadcast time-beacon filter](docs/chat.md) and callsign/link actions
 - Outgoing messages with duplicate suppression
 - UDP datagram or extracted serial/NETConsole JSON forwarding to downstream listeners
@@ -270,7 +270,6 @@ Configure the daemon through `data/configs/gomeshcomd.toml`, `GOMESHCOM_*` envir
 | `GOMESHCOM_MAX_MESSAGE_LENGTH` | `149` | Maximum outgoing message length, in UTF-8 characters |
 | `GOMESHCOM_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
 | `GOMESHCOM_RECEIVE_LOG_ENABLED` | `true` | Store received packets in SQLite for replay |
-| `GOMESHCOM_RECEIVE_LOG_RETENTION_DAYS` | `365` | Legacy setting; SQLite retention uses `GOMESHCOM_STORAGE_RECEIVE_LOG_RETENTION` |
 | `GOMESHCOM_RECEIVE_LOG_REPLAY_WINDOW` | `1h` | Packets replayed on SSE reconnect |
 | `GOMESHCOM_CHAT_LOG_HISTORY_WINDOW` | `24h` | Default chat history window |
 | `GOMESHCOM_CHAT_LOG_MAX_HISTORY_WINDOW` | `720h` | Maximum chat history via API |

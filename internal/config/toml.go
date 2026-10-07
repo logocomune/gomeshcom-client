@@ -74,20 +74,16 @@ type tomlNetConsole struct {
 }
 
 type tomlReceiveLog struct {
-	Enabled       *bool         `toml:"enabled"`
-	Path          *string       `toml:"path"`
-	RetentionDays *int          `toml:"retention_days"`
-	ReplayWindow  *tomlDuration `toml:"replay_window"`
+	Enabled      *bool         `toml:"enabled"`
+	ReplayWindow *tomlDuration `toml:"replay_window"`
 }
 
 type tomlStats struct {
-	Enabled       *bool   `toml:"enabled"`
-	Path          *string `toml:"path"`
-	RetentionDays *int    `toml:"retention_days"`
+	Enabled       *bool `toml:"enabled"`
+	RetentionDays *int  `toml:"retention_days"`
 }
 
 type tomlChatLog struct {
-	Path             *string       `toml:"path"`
 	HistoryWindow    *tomlDuration `toml:"history_window"`
 	MaxHistoryWindow *tomlDuration `toml:"max_history_window"`
 }
@@ -195,13 +191,9 @@ var knownEnvSuffixes = []string{
 	"MAX_MESSAGE_LENGTH",
 	"LOG_LEVEL",
 	"RECEIVE_LOG_ENABLED",
-	"RECEIVE_LOG_PATH",
-	"RECEIVE_LOG_RETENTION_DAYS",
 	"RECEIVE_LOG_REPLAY_WINDOW",
 	"STATS_ENABLED",
-	"STATS_PATH",
 	"STATS_RETENTION_DAYS",
-	"CHAT_LOG_PATH",
 	"CHAT_LOG_HISTORY_WINDOW",
 	"CHAT_LOG_MAX_HISTORY_WINDOW",
 	"DEMO_MODE",
@@ -296,12 +288,6 @@ func mergeToml(cfg *Config, tf *tomlFile, env EnvOverrides) {
 		if rl.Enabled != nil && !env["RECEIVE_LOG_ENABLED"] {
 			cfg.ReceiveLog.Enabled = *rl.Enabled
 		}
-		if rl.Path != nil && !env["RECEIVE_LOG_PATH"] {
-			cfg.ReceiveLog.Path = *rl.Path
-		}
-		if rl.RetentionDays != nil && !env["RECEIVE_LOG_RETENTION_DAYS"] {
-			cfg.ReceiveLog.RetentionDays = *rl.RetentionDays
-		}
 		if rl.ReplayWindow != nil && !env["RECEIVE_LOG_REPLAY_WINDOW"] {
 			cfg.ReceiveLog.ReplayWindow = rl.ReplayWindow.Duration
 		}
@@ -311,18 +297,12 @@ func mergeToml(cfg *Config, tf *tomlFile, env EnvOverrides) {
 		if s.Enabled != nil && !env["STATS_ENABLED"] {
 			cfg.Stats.Enabled = *s.Enabled
 		}
-		if s.Path != nil && !env["STATS_PATH"] {
-			cfg.Stats.Path = *s.Path
-		}
 		if s.RetentionDays != nil && !env["STATS_RETENTION_DAYS"] {
 			cfg.Stats.RetentionDays = *s.RetentionDays
 		}
 	}
 
 	if cl := tf.ChatLog; cl != nil {
-		if cl.Path != nil && !env["CHAT_LOG_PATH"] {
-			cfg.ChatLog.Path = *cl.Path
-		}
 		if cl.HistoryWindow != nil && !env["CHAT_LOG_HISTORY_WINDOW"] {
 			cfg.ChatLog.HistoryWindow = cl.HistoryWindow.Duration
 		}
@@ -573,18 +553,14 @@ func buildTomlContent(cfg Config) string {
 	w("Maximum console record size in bytes", "max_record_bytes", tomlInt(cfg.NetConsole.MaxRecordBytes))
 
 	b.WriteString("\n[receive_log]\n")
-	w("Enable received packet JSONL log", "enabled", tomlBool(cfg.ReceiveLog.Enabled))
-	w("Directory for daily received packet JSONL files", "path", tomlStr(cfg.ReceiveLog.Path))
-	w("Days of daily packet log files to retain", "retention_days", tomlInt(cfg.ReceiveLog.RetentionDays))
+	w("Enable received packet log", "enabled", tomlBool(cfg.ReceiveLog.Enabled))
 	w("Window of recent packets replayed on SSE connect", "replay_window", tomlStr(cfg.ReceiveLog.ReplayWindow.String()))
 
 	b.WriteString("\n[stats]\n")
 	w("Enable hourly packet statistics collection", "enabled", tomlBool(cfg.Stats.Enabled))
-	w("Path to stats JSON file", "path", tomlStr(cfg.Stats.Path))
 	w("Days of hourly buckets to retain", "retention_days", tomlInt(cfg.Stats.RetentionDays))
 
 	b.WriteString("\n[chat_log]\n")
-	w("Chat JSONL directory", "path", tomlStr(cfg.ChatLog.Path))
 	w("Default history window for GET /api/chat/{conversation} (live-apply)", "history_window", tomlStr(cfg.ChatLog.HistoryWindow.String()))
 	w("Maximum history window allowed via ?hours= param (live-apply)", "max_history_window", tomlStr(cfg.ChatLog.MaxHistoryWindow.String()))
 

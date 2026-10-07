@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -40,10 +39,6 @@ func NewSQLite(db *sql.DB) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
-}
-
-func DefaultPath(dataDir string) string {
-	return filepath.Join(dataDir, "configs", "channel_show.json")
 }
 
 func DefaultConfig() Config {

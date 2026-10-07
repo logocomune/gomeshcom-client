@@ -12,7 +12,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,11 +20,6 @@ import (
 )
 
 const saveInterval = time.Minute
-
-// DefaultPath returns the conventional dm stats file path under the given data root.
-func DefaultPath(dataDir string) string {
-	return filepath.Join(dataDir, "stats", "dm_stats.json")
-}
 
 // Entry holds cumulative DM counters for a single callsign.
 type Entry struct {

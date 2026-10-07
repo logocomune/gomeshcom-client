@@ -75,21 +75,17 @@ type NetConsole struct {
 }
 
 type ReceiveLog struct {
-	Enabled       bool          `conf:"default:true,help:enable received packet JSONL log"`
-	Path          string        `conf:"default:./data/raw,help:received packet JSONL log directory"`
-	RetentionDays int           `conf:"default:365,help:number of daily received packet log files to keep"`
-	ReplayWindow  time.Duration `conf:"default:1h,help:time window of received packets replayed on SSE connect"`
+	Enabled      bool          `conf:"default:true,help:enable received packet log"`
+	ReplayWindow time.Duration `conf:"default:1h,help:time window of received packets replayed on SSE connect"`
 }
 
 // Stats configures the hourly statistics aggregator.
 type Stats struct {
-	Enabled       bool   `conf:"default:true,help:enable hourly packet statistics collection"`
-	Path          string `conf:"default:./data/stats/stats.json,help:path to the stats JSON file"`
-	RetentionDays int    `conf:"default:30,help:number of days of hourly buckets to retain"`
+	Enabled       bool `conf:"default:true,help:enable hourly packet statistics collection"`
+	RetentionDays int  `conf:"default:30,help:number of days of hourly buckets to retain"`
 }
 
 type ChatLog struct {
-	Path             string        `conf:"default:./data/chat,help:chat JSONL directory"`
 	HistoryWindow    time.Duration `conf:"default:24h,help:default chat history window returned by /api/chat/{conversation}"`
 	MaxHistoryWindow time.Duration `conf:"default:720h,help:maximum chat history window allowed via ?hours= API parameter"`
 }
@@ -208,18 +204,14 @@ func builtInDefaultConfig() Config {
 		MaxMessageLength: 149,
 		LogLevel:         "info",
 		ReceiveLog: ReceiveLog{
-			Enabled:       true,
-			Path:          "./data/raw",
-			RetentionDays: 365,
-			ReplayWindow:  time.Hour,
+			Enabled:      true,
+			ReplayWindow: time.Hour,
 		},
 		Stats: Stats{
 			Enabled:       true,
-			Path:          "./data/stats/stats.json",
 			RetentionDays: 30,
 		},
 		ChatLog: ChatLog{
-			Path:             "./data/chat",
 			HistoryWindow:    24 * time.Hour,
 			MaxHistoryWindow: 720 * time.Hour,
 		},
@@ -330,22 +322,8 @@ func Validate(cfg Config) error {
 		return errors.New("my call must be 3-10 alphanumeric characters with an optional numeric SSID (e.g. IU5PMP-1)")
 	}
 
-	if cfg.ReceiveLog.Enabled {
-		if cfg.ReceiveLog.Path == "" {
-			return errors.New("receive log path is required")
-		}
-
-		if cfg.ReceiveLog.RetentionDays < 0 {
-			return errors.New("receive log retention days must not be negative")
-		}
-
-		if cfg.ReceiveLog.ReplayWindow < 0 {
-			return errors.New("receive log replay window must not be negative")
-		}
-	}
-
-	if cfg.ChatLog.Path == "" {
-		return errors.New("chat log path is required")
+	if cfg.ReceiveLog.Enabled && cfg.ReceiveLog.ReplayWindow < 0 {
+		return errors.New("receive log replay window must not be negative")
 	}
 
 	if cfg.ChatLog.HistoryWindow <= 0 {

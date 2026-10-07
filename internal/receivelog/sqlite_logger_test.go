@@ -12,7 +12,7 @@ import (
 
 func TestSQLiteLoggerAppendReadSince(t *testing.T) {
 	db := openReceiveLogTestDB(t)
-	logger := NewSQLite(Config{Enabled: true, Path: "sqlite"}, db)
+	logger := NewSQLite(Config{Enabled: true}, db)
 	cutoff := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
 
 	if err := logger.Append(Record{ReceivedAt: cutoff.Add(-time.Second), RemoteAddr: "old", Bytes: 1, Raw: `{"type":"msg","msg":"old"}`, PacketType: "msg"}); err != nil {
@@ -36,7 +36,7 @@ func TestSQLiteLoggerAppendReadSince(t *testing.T) {
 
 func TestSQLiteLoggerDisabled(t *testing.T) {
 	db := openReceiveLogTestDB(t)
-	logger := NewSQLite(Config{Enabled: false, Path: "sqlite"}, db)
+	logger := NewSQLite(Config{Enabled: false}, db)
 	if err := logger.Append(Record{Raw: `{"type":"msg"}`}); err != nil {
 		t.Fatalf("Append() error = %v", err)
 	}
@@ -49,9 +49,9 @@ func TestSQLiteLoggerDisabled(t *testing.T) {
 	}
 }
 
-func TestSQLiteLoggerAppendDoesNotPruneRetention(t *testing.T) {
+func TestSQLiteLoggerAppendDoesNotPrune(t *testing.T) {
 	db := openReceiveLogTestDB(t)
-	logger := NewSQLite(Config{Enabled: true, Path: "sqlite", RetentionDays: 365}, db)
+	logger := NewSQLite(Config{Enabled: true}, db)
 	now := time.Now().UTC()
 
 	if err := logger.Append(Record{ReceivedAt: now.AddDate(0, 0, -365), Raw: `{"type":"msg","msg":"expired"}`, PacketType: "msg"}); err != nil {

@@ -147,17 +147,13 @@ function serialConfig(): AppConfig {
 		},
 		receive_log: {
 			enabled: field(true),
-			path: field('./data/raw'),
-			retention_days: field(365),
 			replay_window: field('1h0m0s')
 		},
 		stats: {
 			enabled: field(true),
-			path: field('./data/stats/stats.json'),
 			retention_days: field(30)
 		},
 		chat_log: {
-			path: field('./data/chat'),
 			history_window: field('24h0m0s'),
 			max_history_window: field('720h0m0s')
 		},

@@ -95,36 +95,16 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ReceiveLog: ReceiveLog{
-					Enabled:       true,
-					Path:          "./data/raw",
-					RetentionDays: 365,
-					ReplayWindow:  10,
+					Enabled:      true,
+					ReplayWindow: 10,
 				},
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9, // 24h in ns
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
 				LogLevel: "info",
 				Storage:  Storage{SQLitePath: "./data/gomeshcom.db"},
 			},
-		},
-		"chat log missing path": {
-			cfg: Config{
-				HTTPAddr:         "127.0.0.1:8080",
-				UDPListenAddr:    "0.0.0.0:1799",
-				NodeAddr:         "192.168.0.2:1799",
-				MyCall:           "QQ1ABC-1",
-				DataDir:          "./data",
-				MaxMessageLength: 149,
-				ChatLog: ChatLog{
-					HistoryWindow:    24 * 60 * 60 * 1e9,
-					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
-				},
-				LogLevel: "info",
-				Storage:  Storage{SQLitePath: "./data/gomeshcom.db"},
-			},
-			wantErr: true,
 		},
 		"chat log zero history window": {
 			cfg: Config{
@@ -135,7 +115,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
 				LogLevel: "info",
@@ -152,13 +131,10 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ReceiveLog: ReceiveLog{
-					Enabled:       true,
-					Path:          "./data/raw",
-					RetentionDays: 365,
-					ReplayWindow:  10,
+					Enabled:      true,
+					ReplayWindow: 10,
 				},
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9, // 24h in ns
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -175,7 +151,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    48 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 24 * 60 * 60 * 1e9,
 				},
@@ -241,7 +216,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -272,22 +246,6 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
-		"enabled receive log missing path": {
-			cfg: Config{
-				HTTPAddr:         "127.0.0.1:8080",
-				UDPListenAddr:    "0.0.0.0:1799",
-				NodeAddr:         "192.168.0.2:1799",
-				MyCall:           "QQ1ABC-1",
-				DataDir:          "./data",
-				MaxMessageLength: 149,
-				ReceiveLog: ReceiveLog{
-					Enabled: true,
-				},
-				LogLevel: "info",
-				Storage:  Storage{SQLitePath: "./data/gomeshcom.db"},
-			},
-			wantErr: true,
-		},
 		"enabled receive log invalid replay window": {
 			cfg: Config{
 				HTTPAddr:         "127.0.0.1:8080",
@@ -298,7 +256,6 @@ func TestValidate(t *testing.T) {
 				MaxMessageLength: 149,
 				ReceiveLog: ReceiveLog{
 					Enabled:      true,
-					Path:         "./data/raw",
 					ReplayWindow: -1,
 				},
 				LogLevel: "info",
@@ -326,7 +283,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -347,24 +303,6 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
-		"enabled receive log invalid retention days": {
-			cfg: Config{
-				HTTPAddr:         "127.0.0.1:8080",
-				UDPListenAddr:    "0.0.0.0:1799",
-				NodeAddr:         "192.168.0.2:1799",
-				MyCall:           "QQ1ABC-1",
-				DataDir:          "./data",
-				MaxMessageLength: 149,
-				ReceiveLog: ReceiveLog{
-					Enabled:       true,
-					Path:          "./data/raw",
-					RetentionDays: -1,
-				},
-				LogLevel: "info",
-				Storage:  Storage{SQLitePath: "./data/gomeshcom.db"},
-			},
-			wantErr: true,
-		},
 		"negative send dedup TTL": {
 			cfg: Config{
 				HTTPAddr:         "127.0.0.1:8080",
@@ -374,7 +312,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -393,7 +330,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -416,7 +352,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -439,7 +374,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -462,7 +396,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -486,7 +419,6 @@ func TestValidate(t *testing.T) {
 				DataDir:          "./data",
 				MaxMessageLength: 149,
 				ChatLog: ChatLog{
-					Path:             "./data/chat",
 					HistoryWindow:    24 * 60 * 60 * 1e9,
 					MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 				},
@@ -528,7 +460,6 @@ func TestValidateForwardTargets(t *testing.T) {
 			DataDir:          "./data",
 			MaxMessageLength: 149,
 			ChatLog: ChatLog{
-				Path:             "./data/chat",
 				HistoryWindow:    24 * 60 * 60 * 1e9,
 				MaxHistoryWindow: 720 * 60 * 60 * 1e9,
 			},

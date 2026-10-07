@@ -2,18 +2,14 @@
 //
 // Identity holds the active callsign behind a read-write mutex so that all
 // long-lived services can read the latest value without a process restart.
-// Runtime persistence uses SQLite. Legacy station.json is read only during
-// one-time migration/import.
+// Runtime persistence uses SQLite.
 package station
 
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -27,41 +23,6 @@ type Identity struct {
 	current string
 	db      *sql.DB
 	dirty   bool
-}
-
-type persistedIdentity struct {
-	Callsign string `json:"callsign"`
-}
-
-// DefaultPath returns the canonical path for the persisted station config.
-func DefaultPath(dataDir string) string {
-	return filepath.Join(dataDir, "configs", "station.json")
-}
-
-// LoadLegacy reads a legacy station.json file for one-time migration paths.
-func LoadLegacy(path, fallback string) (string, error) {
-	current := callsign.Normalize(fallback)
-
-	file, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return current, nil
-		}
-		return "", fmt.Errorf("open legacy station identity: %w", err)
-	}
-	defer file.Close()
-
-	var persisted persistedIdentity
-	if err := json.NewDecoder(file).Decode(&persisted); err != nil {
-		return "", fmt.Errorf("decode legacy station identity: %w", err)
-	}
-
-	normalized := callsign.Normalize(persisted.Callsign)
-	if !callsign.IsValid(normalized) {
-		slog.Warn("legacy station identity file contains invalid callsign; using config default", "value", persisted.Callsign)
-		return current, nil
-	}
-	return normalized, nil
 }
 
 func NewSQLite(db *sql.DB, fallback string) (*Identity, error) {

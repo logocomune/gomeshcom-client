@@ -76,6 +76,63 @@ nodes_retention = "7d"
 	}
 }
 
+func TestLoadTomlFileIgnoresRemovedKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gomeshcomd.toml")
+	// Files written by releases that still had the file-based stores carry
+	// receive_log.path/retention_days, stats.path and chat_log.path.
+	content := `
+[receive_log]
+enabled = true
+path = "./data/raw"
+retention_days = 365
+replay_window = "15m"
+
+[stats]
+enabled = true
+path = "./data/stats/stats.json"
+retention_days = 14
+
+[chat_log]
+path = "./data/chat"
+history_window = "6h"
+max_history_window = "48h"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tf, err := loadTomlFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tf == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	cfg := builtInDefaultConfig()
+	mergeToml(&cfg, tf, nil)
+
+	if cfg.ReceiveLog.Enabled != true {
+		t.Errorf("ReceiveLog.Enabled = %v, want true", cfg.ReceiveLog.Enabled)
+	}
+	if cfg.ReceiveLog.ReplayWindow != 15*time.Minute {
+		t.Errorf("ReceiveLog.ReplayWindow = %v, want 15m", cfg.ReceiveLog.ReplayWindow)
+	}
+	if cfg.Stats.RetentionDays != 14 {
+		t.Errorf("Stats.RetentionDays = %d, want 14", cfg.Stats.RetentionDays)
+	}
+	if cfg.ChatLog.HistoryWindow != 6*time.Hour {
+		t.Errorf("ChatLog.HistoryWindow = %v, want 6h", cfg.ChatLog.HistoryWindow)
+	}
+	if cfg.ChatLog.MaxHistoryWindow != 48*time.Hour {
+		t.Errorf("ChatLog.MaxHistoryWindow = %v, want 48h", cfg.ChatLog.MaxHistoryWindow)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("Validate() error = %v", err)
+	}
+}
+
 func TestLoadTomlFileInvalid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "gomeshcomd.toml")
@@ -228,19 +285,15 @@ func TestWriteDefaultTomlCreatesFile(t *testing.T) {
 		MaxMessageLength: 149,
 		LogLevel:         "info",
 		ReceiveLog: ReceiveLog{
-			Enabled:       true,
-			Path:          "./data/raw",
-			RetentionDays: 365,
-			ReplayWindow:  time.Hour,
+			Enabled:      true,
+			ReplayWindow: time.Hour,
 		},
 		ChatLog: ChatLog{
-			Path:             "./data/chat",
 			HistoryWindow:    24 * time.Hour,
 			MaxHistoryWindow: 720 * time.Hour,
 		},
 		Stats: Stats{
 			Enabled:       true,
-			Path:          "./data/stats/stats.json",
 			RetentionDays: 30,
 		},
 		Send:       Send{DedupTTL: 2 * time.Second},
@@ -319,19 +372,15 @@ func TestWriteDefaultTomlDeterministic(t *testing.T) {
 		MaxMessageLength: 149,
 		LogLevel:         "info",
 		ReceiveLog: ReceiveLog{
-			Enabled:       true,
-			Path:          "./data/raw",
-			RetentionDays: 365,
-			ReplayWindow:  time.Hour,
+			Enabled:      true,
+			ReplayWindow: time.Hour,
 		},
 		ChatLog: ChatLog{
-			Path:             "./data/chat",
 			HistoryWindow:    24 * time.Hour,
 			MaxHistoryWindow: 720 * time.Hour,
 		},
 		Stats: Stats{
 			Enabled:       true,
-			Path:          "./data/stats/stats.json",
 			RetentionDays: 30,
 		},
 		Send:       Send{DedupTTL: 2 * time.Second},
@@ -355,7 +404,7 @@ func TestWriteDefaultTomlPasswordAlwaysEmpty(t *testing.T) {
 		DataDir:          "./data",
 		MaxMessageLength: 149,
 		LogLevel:         "info",
-		ChatLog:          ChatLog{Path: "./data/chat", HistoryWindow: time.Hour, MaxHistoryWindow: 24 * time.Hour},
+		ChatLog:          ChatLog{HistoryWindow: time.Hour, MaxHistoryWindow: 24 * time.Hour},
 		Auth: Auth{
 			Username:   "admin",
 			Password:   "super-secret", // must NOT appear in output

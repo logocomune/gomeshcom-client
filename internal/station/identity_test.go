@@ -1,50 +1,11 @@
 package station_test
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/logocomune/gomeshcom-client/internal/station"
 )
-
-func TestLoadLegacyUsesConfigDefault(t *testing.T) {
-	got, err := station.LoadLegacy(station.DefaultPath(t.TempDir()), "IU5PMP-1")
-	if err != nil {
-		t.Fatalf("LoadLegacy() error = %v", err)
-	}
-	if got != "IU5PMP-1" {
-		t.Fatalf("LoadLegacy() = %q, want IU5PMP-1", got)
-	}
-}
-
-func TestLoadLegacyLoadsPersisted(t *testing.T) {
-	path := station.DefaultPath(t.TempDir())
-	writeLegacyStation(t, path, "QQ1ABC-1")
-
-	got, err := station.LoadLegacy(path, "IU5PMP-1")
-	if err != nil {
-		t.Fatalf("LoadLegacy() error = %v", err)
-	}
-	if got != "QQ1ABC-1" {
-		t.Fatalf("LoadLegacy() = %q, want QQ1ABC-1", got)
-	}
-}
-
-func TestLoadLegacyIgnoresInvalidPersisted(t *testing.T) {
-	path := station.DefaultPath(t.TempDir())
-	writeLegacyStation(t, path, "!!")
-
-	got, err := station.LoadLegacy(path, "IU5PMP-1")
-	if err != nil {
-		t.Fatalf("LoadLegacy() error = %v", err)
-	}
-	if got != "IU5PMP-1" {
-		t.Fatalf("LoadLegacy() = %q, want fallback", got)
-	}
-}
 
 func TestUpdateAcceptsValidCallsign(t *testing.T) {
 	id := station.NewInMemory("IU5PMP-1")
@@ -124,18 +85,4 @@ func TestConcurrentCurrentUpdate(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-}
-
-func writeLegacyStation(t *testing.T, path string, callsign string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, err := json.Marshal(map[string]string{"callsign": callsign})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
 }

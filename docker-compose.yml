@@ -9,7 +9,7 @@ services:
       # Map MeshCom UDP port for local node/server communication
       - "1799:1799/udp"
     volumes:
-      # Persist chat logs, raw data, and runtime configuration
+      # Persist the SQLite database and runtime configuration
       - gomeshcom-data:/data
     environment:
       # Your local amateur radio callsign

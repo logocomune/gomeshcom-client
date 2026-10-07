@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"reflect"
 	"sync"
 	"time"
@@ -43,10 +42,6 @@ func NewSQLite(db *sql.DB) *Store {
 		records:    make(map[string]Record),
 		dirtyNodes: make(map[string]bool),
 	}
-}
-
-func DefaultPath(dataDir string) string {
-	return filepath.Join(dataDir, "nodes", "positions.json")
 }
 
 func (s *Store) Load() error {

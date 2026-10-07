@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,13 +48,7 @@ const (
 // Config holds the configuration for the stats store.
 type Config struct {
 	Enabled       bool
-	Path          string // e.g. data/stats/stats.json
 	RetentionDays int
-}
-
-// DefaultPath returns the conventional stats file path under the given data root.
-func DefaultPath(dataDir string) string {
-	return filepath.Join(dataDir, "stats", "stats.json")
 }
 
 // Store accumulates per-hour counters in memory and persists them to storage.

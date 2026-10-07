@@ -5,13 +5,6 @@ var schemaStatements = []string{
 		version INTEGER PRIMARY KEY,
 		applied_at TEXT NOT NULL
 	)`,
-	`CREATE TABLE IF NOT EXISTS data_imports (
-		source TEXT PRIMARY KEY,
-		imported_at TEXT NOT NULL,
-		source_path TEXT,
-		source_mtime TEXT,
-		record_count INTEGER NOT NULL DEFAULT 0
-	)`,
 	`CREATE TABLE IF NOT EXISTS receive_log (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		received_at TEXT NOT NULL,

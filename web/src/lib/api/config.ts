@@ -9,19 +9,15 @@ export type ConfigFieldMeta<T> = {
 
 export type ConfigReceiveLog = {
 	enabled: ConfigFieldMeta<boolean>;
-	path: ConfigFieldMeta<string>;
-	retention_days: ConfigFieldMeta<number>;
 	replay_window: ConfigFieldMeta<string>;
 };
 
 export type ConfigStats = {
 	enabled: ConfigFieldMeta<boolean>;
-	path: ConfigFieldMeta<string>;
 	retention_days: ConfigFieldMeta<number>;
 };
 
 export type ConfigChatLog = {
-	path: ConfigFieldMeta<string>;
 	history_window: ConfigFieldMeta<string>;
 	max_history_window: ConfigFieldMeta<string>;
 };
@@ -126,17 +122,13 @@ export type ConfigPatch = {
 	log_level?: string;
 	receive_log?: {
 		enabled?: boolean;
-		path?: string;
-		retention_days?: number;
 		replay_window?: string;
 	};
 	stats?: {
 		enabled?: boolean;
-		path?: string;
 		retention_days?: number;
 	};
 	chat_log?: {
-		path?: string;
 		history_window?: string;
 		max_history_window?: string;
 	};

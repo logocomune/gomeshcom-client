@@ -8,12 +8,8 @@ import (
 	"time"
 )
 
-const fileDateLayout = "20060102"
-
 type Config struct {
-	Enabled       bool
-	Path          string
-	RetentionDays int
+	Enabled bool
 }
 
 type Logger struct {
@@ -132,10 +128,6 @@ func nullableString(value string) any {
 func (l *Logger) validate() error {
 	if l.db == nil {
 		return errors.New("receive log sqlite database is required")
-	}
-
-	if l.cfg.RetentionDays < 0 {
-		return errors.New("receive log retention days must not be negative")
 	}
 
 	return nil

@@ -82,20 +82,16 @@ type configNetConsoleResponse struct {
 }
 
 type configReceiveLogResponse struct {
-	Enabled       configFieldMeta `json:"enabled"`
-	Path          configFieldMeta `json:"path"`
-	RetentionDays configFieldMeta `json:"retention_days"`
-	ReplayWindow  configFieldMeta `json:"replay_window"`
+	Enabled      configFieldMeta `json:"enabled"`
+	ReplayWindow configFieldMeta `json:"replay_window"`
 }
 
 type configStatsResponse struct {
 	Enabled       configFieldMeta `json:"enabled"`
-	Path          configFieldMeta `json:"path"`
 	RetentionDays configFieldMeta `json:"retention_days"`
 }
 
 type configChatLogResponse struct {
-	Path             configFieldMeta `json:"path"`
 	HistoryWindow    configFieldMeta `json:"history_window"`
 	MaxHistoryWindow configFieldMeta `json:"max_history_window"`
 }
@@ -183,20 +179,16 @@ type configUpdateNetConsole struct {
 }
 
 type configUpdateReceiveLog struct {
-	Enabled       *bool   `json:"enabled,omitempty"`
-	Path          *string `json:"path,omitempty"`
-	RetentionDays *int    `json:"retention_days,omitempty"`
-	ReplayWindow  *string `json:"replay_window,omitempty"`
+	Enabled      *bool   `json:"enabled,omitempty"`
+	ReplayWindow *string `json:"replay_window,omitempty"`
 }
 
 type configUpdateStats struct {
-	Enabled       *bool   `json:"enabled,omitempty"`
-	Path          *string `json:"path,omitempty"`
-	RetentionDays *int    `json:"retention_days,omitempty"`
+	Enabled       *bool `json:"enabled,omitempty"`
+	RetentionDays *int  `json:"retention_days,omitempty"`
 }
 
 type configUpdateChatLog struct {
-	Path             *string `json:"path,omitempty"`
 	HistoryWindow    *string `json:"history_window,omitempty"`
 	MaxHistoryWindow *string `json:"max_history_window,omitempty"`
 }
@@ -278,18 +270,14 @@ func buildConfigResponse(cfg config.Config, env config.EnvOverrides, version str
 		MaxMessageLength: field(cfg.MaxMessageLength, "MAX_MESSAGE_LENGTH", env, true),
 		LogLevel:         field(cfg.LogLevel, "LOG_LEVEL", env, false),
 		ReceiveLog: configReceiveLogResponse{
-			Enabled:       field(cfg.ReceiveLog.Enabled, "RECEIVE_LOG_ENABLED", env, true),
-			Path:          field(cfg.ReceiveLog.Path, "RECEIVE_LOG_PATH", env, true),
-			RetentionDays: field(cfg.ReceiveLog.RetentionDays, "RECEIVE_LOG_RETENTION_DAYS", env, true),
-			ReplayWindow:  durationField(cfg.ReceiveLog.ReplayWindow, "RECEIVE_LOG_REPLAY_WINDOW", env, true),
+			Enabled:      field(cfg.ReceiveLog.Enabled, "RECEIVE_LOG_ENABLED", env, true),
+			ReplayWindow: durationField(cfg.ReceiveLog.ReplayWindow, "RECEIVE_LOG_REPLAY_WINDOW", env, true),
 		},
 		Stats: configStatsResponse{
 			Enabled:       field(cfg.Stats.Enabled, "STATS_ENABLED", env, true),
-			Path:          field(cfg.Stats.Path, "STATS_PATH", env, true),
 			RetentionDays: field(cfg.Stats.RetentionDays, "STATS_RETENTION_DAYS", env, true),
 		},
 		ChatLog: configChatLogResponse{
-			Path:             field(cfg.ChatLog.Path, "CHAT_LOG_PATH", env, true),
 			HistoryWindow:    durationField(cfg.ChatLog.HistoryWindow, "CHAT_LOG_HISTORY_WINDOW", env, false),
 			MaxHistoryWindow: durationField(cfg.ChatLog.MaxHistoryWindow, "CHAT_LOG_MAX_HISTORY_WINDOW", env, false),
 		},
@@ -425,14 +413,6 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 			candidate.ReceiveLog.Enabled = *rl.Enabled
 			requiresRestart = true
 		}
-		if rl.Path != nil {
-			candidate.ReceiveLog.Path = *rl.Path
-			requiresRestart = true
-		}
-		if rl.RetentionDays != nil {
-			candidate.ReceiveLog.RetentionDays = *rl.RetentionDays
-			requiresRestart = true
-		}
 		if rl.ReplayWindow != nil {
 			d, err := time.ParseDuration(*rl.ReplayWindow)
 			if err != nil {
@@ -449,10 +429,6 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 			candidate.Stats.Enabled = *s2.Enabled
 			requiresRestart = true
 		}
-		if s2.Path != nil {
-			candidate.Stats.Path = *s2.Path
-			requiresRestart = true
-		}
 		if s2.RetentionDays != nil {
 			candidate.Stats.RetentionDays = *s2.RetentionDays
 			requiresRestart = true
@@ -460,10 +436,6 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ChatLog != nil {
 		cl := req.ChatLog
-		if cl.Path != nil {
-			candidate.ChatLog.Path = *cl.Path
-			requiresRestart = true
-		}
 		if cl.HistoryWindow != nil {
 			d, err := time.ParseDuration(*cl.HistoryWindow)
 			if err != nil {
@@ -770,8 +742,6 @@ func checkEnvLocked(req configUpdateRequest, env config.EnvOverrides) error {
 		rl := req.ReceiveLog
 		checks = append(checks,
 			check{rl.Enabled != nil, "RECEIVE_LOG_ENABLED"},
-			check{rl.Path != nil, "RECEIVE_LOG_PATH"},
-			check{rl.RetentionDays != nil, "RECEIVE_LOG_RETENTION_DAYS"},
 			check{rl.ReplayWindow != nil, "RECEIVE_LOG_REPLAY_WINDOW"},
 		)
 	}
@@ -779,14 +749,12 @@ func checkEnvLocked(req configUpdateRequest, env config.EnvOverrides) error {
 		s2 := req.Stats
 		checks = append(checks,
 			check{s2.Enabled != nil, "STATS_ENABLED"},
-			check{s2.Path != nil, "STATS_PATH"},
 			check{s2.RetentionDays != nil, "STATS_RETENTION_DAYS"},
 		)
 	}
 	if req.ChatLog != nil {
 		cl := req.ChatLog
 		checks = append(checks,
-			check{cl.Path != nil, "CHAT_LOG_PATH"},
 			check{cl.HistoryWindow != nil, "CHAT_LOG_HISTORY_WINDOW"},
 			check{cl.MaxHistoryWindow != nil, "CHAT_LOG_MAX_HISTORY_WINDOW"},
 		)
