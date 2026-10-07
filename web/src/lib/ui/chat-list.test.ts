@@ -86,6 +86,19 @@ describe('latestPreview', () => {
 		expect(latestPreview(records, undefined)).toBe('hi there');
 	});
 
+	it('skips custody notice at end — shows prior text message', () => {
+		const records = [
+			makeRecord('hello', '2026-01-01T10:00:00Z'),
+			makeRecord('QQ1OWN-1 :sto156 QQ1PEER-2', '2026-01-01T10:01:00Z')
+		];
+		expect(latestPreview(records, undefined)).toBe('hello');
+	});
+
+	it('returns empty string when all records are custody notices', () => {
+		const records = [makeRecord('QQ1OWN-1 :sto156 QQ1PEER-2', '2026-01-01T10:00:00Z')];
+		expect(latestPreview(records, undefined)).toBe('');
+	});
+
 	it('returns empty string when all records are ACK', () => {
 		const records = [
 			makeRecord('PEER:ack1', '2026-01-01T10:00:00Z'),

@@ -19,7 +19,7 @@ import {
 	dmPeerFromId,
 	sanitizeConversationPart
 } from '$lib/api/chat';
-import { messageKind, splitSourcePath } from '$lib/api/events';
+import { isControlKind, messageKind, splitSourcePath } from '$lib/api/events';
 import { partitionChannels } from '$lib/api/groups';
 import { chatRecordMatchesFilter, stripNodeSequence } from '$lib/ui/chat-records';
 import { normalizeCallsign } from '$lib/ui/callsign';
@@ -165,7 +165,7 @@ class ChatStore {
 	displayChatRecords = $derived(
 		(this.chatHistory[this.currentConvId] ?? []).filter((rec) => {
 			const kind = messageKind(rec.msg).kind;
-			if (kind === 'ack' || kind === 'reject') return false;
+			if (isControlKind(kind)) return false;
 			if (this.isBroadcastTarget && !this.showTimeBeacons && kind === 'time') return false;
 			return chatRecordMatchesFilter(rec, this.chatFilter);
 		})
@@ -328,14 +328,14 @@ class ChatStore {
 		this.removeMatchingPendingRecord(convId, rec);
 		this.appendChatRecordToConversation(convId, rec);
 
-		// ACK/reject packets must not update last_seen, preview text, or unread count;
-		// they are only stored in history for delivery tracking.
-		const recKind = messageKind(rec.msg).kind;
-		const isAckOrReject = recKind === 'ack' || recKind === 'reject';
+		// Control frames (ACK/reject/custody notice) must not update last_seen,
+		// preview text, or unread count; they are only stored in history for
+		// delivery tracking.
+		const isControl = isControlKind(messageKind(rec.msg).kind);
 
 		const idx = this.conversations.findIndex((c) => c.id === convId);
 		if (idx === -1) {
-			if (!isAckOrReject) {
+			if (!isControl) {
 				let kind: Conversation['kind'] = 'broadcast';
 				let label = 'Broadcast';
 				if (dst !== '' && dst !== '*') {
@@ -352,13 +352,13 @@ class ChatStore {
 					...this.conversations
 				];
 			}
-		} else if (!isAckOrReject) {
+		} else if (!isControl) {
 			this.conversations = this.conversations.map((c) =>
 				c.id === convId ? { ...c, last_seen: receivedAt } : c
 			);
 		}
 
-		if (!isAckOrReject) {
+		if (!isControl) {
 			this.updateChatStatusOnReceive(convId, receivedAt, rec.msg);
 		}
 	}
@@ -371,11 +371,11 @@ class ChatStore {
 		}
 		this.appendChatRecordToConversation(convId, { ...rec, source: 'event-live' });
 
-		const isAckOrRejectRecord = ['ack', 'reject'].includes(messageKind(rec.msg).kind);
+		const isControlRecord = isControlKind(messageKind(rec.msg).kind);
 
 		const idx = this.conversations.findIndex((c) => c.id === convId);
 		if (idx === -1) {
-			if (!isAckOrRejectRecord) {
+			if (!isControlRecord) {
 				this.conversations = [
 					{
 						id: convId,
@@ -393,12 +393,12 @@ class ChatStore {
 					...this.conversations
 				];
 			}
-		} else if (!isAckOrRejectRecord) {
+		} else if (!isControlRecord) {
 			const copy = this.conversations.slice();
 			copy[idx] = { ...copy[idx], last_seen: rec.received_at };
 			this.conversations = copy.sort((a, b) => b.last_seen.localeCompare(a.last_seen));
 		}
-		if (rec.direction !== 'outbound' && rec.delivery_status !== 'pending' && !isAckOrRejectRecord) {
+		if (rec.direction !== 'outbound' && rec.delivery_status !== 'pending' && !isControlRecord) {
 			this.updateChatStatusOnReceive(convId, rec.received_at, rec.msg);
 			if (convId.startsWith('DM_')) {
 				if (uiPrefs.dmSoundEnabled) {

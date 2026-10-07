@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
 )
 
 const saveInterval = time.Minute
@@ -245,6 +247,9 @@ func applyDMSnapshot(db *sql.DB, snapshot map[string]Entry, reads map[string]tim
 }
 
 func applySnapshotRecord(snapshot map[string]Entry, reads map[string]time.Time, convID string, receivedAt time.Time, msg string) {
+	if meshcom.IsStoreNotice(msg) {
+		return
+	}
 	entry := snapshot[convID]
 	entry.LastRead = reads[convID]
 	entry.LastMsgReceived = receivedAt.UTC()

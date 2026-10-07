@@ -343,8 +343,34 @@ export function splitSourcePath(source?: string): { origin: string; relays: stri
 	};
 }
 
+// Firmware ":sto" custody notice: the tag sits exactly at byte 9 followed by a
+// three-digit transport sequence ("%-9.9s:sto%03u %s"). Mirrors the backend
+// meshcom.IsStoreNotice check so both sides classify identically.
+const STORE_NOTICE = /^:sto[0-9]{3}/;
+const STORE_NOTICE_ENCODER = new TextEncoder();
+const STORE_NOTICE_DECODER = new TextDecoder();
+
+export function isStoreNotice(message?: string): boolean {
+	const text = message ?? '';
+	// A '{' sequence tag or an ACK/reject tag never travels with a notice.
+	const lower = text.toLowerCase();
+	if (text.includes('{') || lower.includes(':ack') || lower.includes(':rej')) return false;
+	const bytes = STORE_NOTICE_ENCODER.encode(text);
+	return STORE_NOTICE.test(STORE_NOTICE_DECODER.decode(bytes.subarray(9, 16)));
+}
+
+// Control kinds are protocol frames (ACK, reject, custody notice). They are
+// tracked by the backend but are not chat messages: they never reach the
+// conversation list, previews, unread counters or the message stream.
+const CONTROL_KINDS = ['ack', 'reject', 'sto'];
+
+export function isControlKind(kind: string): boolean {
+	return CONTROL_KINDS.includes(kind);
+}
+
 export function messageKind(message?: string): { kind: string; label: string; icon: string } {
 	const text = message ?? '';
+	if (isStoreNotice(text)) return { kind: 'sto', label: 'Custody notice', icon: '⇩' };
 	if (text.startsWith('{CET}')) return { kind: 'time', label: 'Network time', icon: '◷' };
 	if (text.startsWith('{SET}')) return { kind: 'config', label: 'Config', icon: '⚙' };
 	// ACK format: ":571", "ack571", ":ack571", "CALLSIGN :ack571", or "CALLSIGN:ack571".

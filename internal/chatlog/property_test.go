@@ -5,8 +5,59 @@ import (
 	"testing"
 	"time"
 
+	"github.com/logocomune/gomeshcom-client/internal/meshcom"
+
 	"pgregory.net/rapid"
 )
+
+func TestPropertyConversationMetadataExcludesStoreNotices(t *testing.T) {
+	db := openChatLogTestDB(t)
+	logger := NewSQLite(db, staticCallsign("QQ0QQ-1"))
+	base := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	rapid.Check(t, func(t *rapid.T) {
+		if _, err := db.Exec("DELETE FROM chats_public"); err != nil {
+			t.Fatal(err)
+		}
+		messages := rapid.SliceOfN(rapid.SampledFrom([]string{
+			"hello", "QQ0QQ-1  :sto156 QQ1ABC-1", "QQ0QQ-1  :sto000",
+			"QQ0QQ-1  :stoabc", "QQ0QQ-1  :sto156{156", "QQ0QQ-1  :sto156 :ACK571",
+			"QQ0QQ-1  :sto156 :REJ571", "é12345678:sto156", "é1234567:sto156",
+			"ack571", "rej571",
+		}), 0, 30).Draw(t, "messages")
+		var count int64
+		var lastSeen time.Time
+		for _, message := range messages {
+			at := base.Add(time.Duration(rapid.IntRange(0, 100).Draw(t, "minutes")) * time.Minute)
+			if err := logger.Append(meshcom.TextMessage{Source: "QQ1ABC-1", Destination: "*", Message: message}, at); err != nil {
+				t.Fatal(err)
+			}
+			if !meshcom.IsStoreNotice(message) {
+				count++
+				if at.After(lastSeen) {
+					lastSeen = at
+				}
+			}
+		}
+		conversations, err := logger.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 {
+			if len(conversations) != 0 {
+				t.Fatalf("notice-only conversations = %+v", conversations)
+			}
+		} else if len(conversations) != 1 || conversations[0].Size != count || !conversations[0].LastSeen.Equal(lastSeen) {
+			t.Fatalf("conversations = %+v, want count %d at %v", conversations, count, lastSeen)
+		}
+		var stored int
+		if err := db.QueryRow("SELECT COUNT(*) FROM chats_public").Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		if stored != len(messages) {
+			t.Fatalf("stored rows = %d, want %d", stored, len(messages))
+		}
+	})
+}
 
 func TestPropertyRecordSerialization(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {

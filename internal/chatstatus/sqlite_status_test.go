@@ -3,17 +3,76 @@ package chatstatus
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"pgregory.net/rapid"
+
 	_ "modernc.org/sqlite"
 )
+
+func TestPropertyStoreNoticePreservesExistingStatus(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		entry := Entry{
+			LastMsgReceived: time.Unix(rapid.Int64Range(0, 2000000000).Draw(t, "received"), 0).UTC(),
+			LastRead:        time.Unix(rapid.Int64Range(0, 2000000000).Draw(t, "read"), 0).UTC(),
+			UnreadCount:     rapid.IntRange(0, 1000).Draw(t, "unread"),
+			LastMsg:         rapid.String().Draw(t, "message"),
+		}
+		snapshot := map[string]Entry{"P_broadcast": entry}
+		applySnapshotRecord(snapshot, map[string]time.Time{}, "P_broadcast", time.Now(), "QQ0QQ-1  :sto156 QQ1ABC-1")
+		if snapshot["P_broadcast"] != entry {
+			t.Fatalf("custody notice changed status: %+v", snapshot)
+		}
+	})
+}
 
 var (
 	t0 = time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
 	t1 = t0.Add(time.Minute)
 )
+
+func TestSQLiteSnapshotExcludesHistoricalStoreNotices(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		t.Run(fmt.Sprint(direct), func(t *testing.T) {
+			db := openChatStatusTestDB(t)
+			conversation := "P_broadcast"
+			insert := func(at time.Time, message string) {
+				t.Helper()
+				if !direct {
+					insertPublicChatRow(t, db, conversation, at, message)
+					return
+				}
+				_, err := db.Exec(`INSERT INTO chats_dm(conversation_id, received_at, src, dst, msg) VALUES ('DM_QQ0QQ_QQ1ABC-1', ?, 'QQ1ABC-1', 'QQ0QQ-2', ?)`, at.Format(time.RFC3339Nano), message)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if direct {
+				conversation = "DM_QQ0QQ-2_QQ1ABC-1"
+			}
+			insert(t1, "QQ0QQ-2  :sto156 QQ2ABC-1")
+			store, err := NewSQLite(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry, ok := store.Snapshot()[conversation]; ok {
+				t.Fatalf("notice-only status = %+v", entry)
+			}
+			insert(t0, "hello")
+			entry := store.Snapshot()[conversation]
+			if entry.UnreadCount != 1 || entry.LastMsg != "hello" || !entry.LastMsgReceived.Equal(t0) {
+				t.Fatalf("status = %+v", entry)
+			}
+			store.MarkRead(conversation, t0)
+			if entry := store.Snapshot()[conversation]; entry.UnreadCount != 0 || !entry.LastRead.Equal(t0) {
+				t.Fatalf("read status = %+v", entry)
+			}
+		})
+	}
+}
 
 func TestSQLiteSaveLoadRoundTrip(t *testing.T) {
 	db := openChatStatusTestDB(t)

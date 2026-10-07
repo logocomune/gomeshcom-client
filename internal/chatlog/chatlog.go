@@ -376,36 +376,46 @@ func (l *Logger) listSQLite() ([]Conversation, error) {
 	defer l.mu.Unlock()
 
 	rows, err := l.db.Query(`
-		SELECT conversation_id, MAX(received_at), COUNT(*) FROM chats_public GROUP BY conversation_id
+		SELECT conversation_id, received_at, msg FROM chats_public
 		UNION ALL
-		SELECT conversation_id, MAX(received_at), COUNT(*) FROM chats_dm GROUP BY conversation_id
+		SELECT conversation_id, received_at, msg FROM chats_dm
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("query chat conversations: %w", err)
 	}
 	defer rows.Close()
 
-	convs := []Conversation{}
+	// Reuse the byte-based protocol classifier rather than a separate SQL parser.
+	byID := make(map[string]Conversation)
 	for rows.Next() {
 		var id string
 		var lastSeen string
-		var size int64
-		if err := rows.Scan(&id, &lastSeen, &size); err != nil {
+		var message string
+		if err := rows.Scan(&id, &lastSeen, &message); err != nil {
 			return nil, fmt.Errorf("scan chat conversation: %w", err)
 		}
-		if !validID.MatchString(id) {
+		if !validID.MatchString(id) || meshcom.IsStoreNotice(message) {
 			continue
 		}
 		parsedLastSeen, err := time.Parse(time.RFC3339Nano, lastSeen)
 		if err != nil {
 			return nil, fmt.Errorf("parse chat conversation timestamp %s: %w", id, err)
 		}
-		conv := Conversation{ID: id, LastSeen: parsedLastSeen, Size: size}
-		applyConversationLabel(&conv)
-		convs = append(convs, conv)
+		conv := byID[id]
+		conv.ID = id
+		conv.Size++
+		if parsedLastSeen.After(conv.LastSeen) {
+			conv.LastSeen = parsedLastSeen
+		}
+		byID[id] = conv
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate chat conversations: %w", err)
+	}
+	convs := make([]Conversation, 0, len(byID))
+	for _, conv := range byID {
+		applyConversationLabel(&conv)
+		convs = append(convs, conv)
 	}
 	sort.Slice(convs, func(i, j int) bool { return convs[i].LastSeen.After(convs[j].LastSeen) })
 	return convs, nil

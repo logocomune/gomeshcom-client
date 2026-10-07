@@ -1,5 +1,5 @@
 import type { ChatRecord, ChatStatusEntry, Conversation } from '$lib/api/types';
-import { cleanMessage, messageKind } from '$lib/api/events';
+import { cleanMessage, isControlKind, messageKind } from '$lib/api/events';
 
 const PREVIEW_MAX = 40;
 
@@ -15,12 +15,12 @@ export function conversationPreview(records: ChatRecord[]): string {
 }
 
 function isPreviewable(rec: ChatRecord): boolean {
-	const k = messageKind(rec.msg).kind;
-	return k !== 'ack' && k !== 'reject';
+	return !isControlKind(messageKind(rec.msg).kind);
 }
 
 export function latestPreview(records: ChatRecord[], status: ChatStatusEntry | undefined): string {
-	// Skip ACK/reject records — they are not meaningful as conversation previews.
+	// Skip control frames (ACK/reject/custody notice) — they are not meaningful
+	// as conversation previews.
 	const lastRec = [...records].reverse().find(isPreviewable);
 	const statusTs = status?.lastMsgReceived ?? '';
 	if (lastRec && lastRec.received_at > statusTs) return previewText(lastRec.msg);

@@ -12,6 +12,7 @@ import {
 	ackSeqId,
 	rejSeqId,
 	messageKind,
+	isStoreNotice,
 	mergeMapPositions,
 	positionFromEvent,
 	packetBadge,
@@ -39,6 +40,49 @@ function timedEvent(type: string, receivedAt: string, data: unknown): StreamEven
 }
 
 describe('event helpers', () => {
+	it('anchors custody tags to UTF-8 bytes rather than UTF-16 units', () => {
+		expect(isStoreNotice('é12345678:sto156 QQ1PEER-2')).toBe(false);
+		expect(isStoreNotice('é1234567:sto156 QQ1PEER-2')).toBe(true);
+		expect(isStoreNotice('😀1234567:sto156 QQ1PEER-2')).toBe(false);
+		expect(isStoreNotice('😀12345:sto156 QQ1PEER-2')).toBe(true);
+	});
+
+	it('matches the byte contract for randomized Unicode prefixes and payloads', () => {
+		const unicodeText = fc
+			.array(fc.integer({ min: 0, max: 0x10ffff }), { maxLength: 20 })
+			.map((points) => String.fromCodePoint(...points));
+		fc.assert(
+			fc.property(
+				fc.oneof(fc.constantFrom('QQ1OWN-1 ', 'é1234567', '😀12345', 'é12345678'), unicodeText),
+				fc.integer({ min: 0, max: 999 }),
+				fc.string(),
+				(prefix, sequence, suffix) => {
+					const text = prefix + ':sto' + String(sequence).padStart(3, '0') + suffix;
+					const expected =
+						new TextEncoder().encode(prefix).length === 9 &&
+						!text.includes('{') &&
+						!text.toLowerCase().includes(':ack') &&
+						!text.toLowerCase().includes(':rej');
+					expect(isStoreNotice(text)).toBe(expected);
+				}
+			),
+			{ numRuns: 1000 }
+		);
+	});
+
+	it.each([
+		'',
+		':sto156',
+		'QQ1OWN-1 :sto15',
+		'QQ1OWN-1 :stoabc',
+		'QQ1OWN-1 :STO156',
+		'QQ1OWN-1 :sto156{156',
+		'QQ1OWN-1 :sto156 :ACK571',
+		'QQ1OWN-1 :sto156 :REJ571',
+		'QQ1OWN-1 :sto156 :acK571'
+	])('rejects malformed or mixed control payload %j', (text) => {
+		expect(isStoreNotice(text)).toBe(false);
+	});
 	it('summarizes message packets', () => {
 		expect.assertions(7);
 
@@ -156,6 +200,21 @@ describe('event helpers', () => {
 		// ackSeqId/rejSeqId must be consistent: trailing alpha → null, not a spurious seq ID
 		expect(ackSeqId({ msg: 'ack123abc' })).toBeNull();
 		expect(rejSeqId({ msg: 'rej42test' })).toBeNull();
+	});
+
+	it('classifies store-and-forward custody notices as control frames', () => {
+		expect.assertions(5);
+
+		expect(messageKind('QQ1OWN-1 :sto156 QQ1PEER-2')).toEqual({
+			kind: 'sto',
+			label: 'Custody notice',
+			icon: '⇩'
+		});
+		expect(messageKind('IK5FTL-11:sto156 IK5FCK-10').kind).toBe('sto');
+		expect(messageKind('DK5EN-93 :sto017 DK5EN-14').kind).toBe('sto');
+		// The tag is anchored at byte 9: text mentioning it elsewhere stays a message.
+		expect(messageKind('look at this :sto156 QQ1PEER-2').kind).toBe('message');
+		expect(messageKind('QQ1OWN-1 :stoabc QQ1PEER-2').kind).toBe('message');
 	});
 
 	it('extracts latest map positions from events', () => {

@@ -181,6 +181,65 @@ describe('appendLiveChatRecord — ACK/reject', () => {
 	});
 });
 
+describe('appendLiveChatRecord — store custody notice', () => {
+	const NOTICE = 'XX5YYY-1 :sto156 IU5PMP-1';
+
+	it('hides the notice from the displayed messages', () => {
+		chatState.chatTarget = { kind: 'contact', value: 'IU5PMP-1' };
+		chatState.chatHistory = {
+			'DM_XX5YYY-1_IU5PMP-1': [record({ msg: 'hello', dst: 'XX5YYY-1' })]
+		};
+		chatState.appendLiveChatRecord(
+			packet({ src: 'IU5PMP-1', dst: 'XX5YYY-1', msg: NOTICE }),
+			'2026-06-01T10:00:00Z'
+		);
+
+		expect(chatState.displayChatRecords.map((r) => r.msg)).toEqual(['hello']);
+	});
+
+	it('does not open a conversation for a notice-only sender', () => {
+		chatState.appendLiveChatRecord(
+			packet({ src: 'IU5PMP-1', dst: 'XX5YYY-1', msg: NOTICE }),
+			'2026-06-01T10:00:00Z'
+		);
+
+		expect(chatState.conversations).toHaveLength(0);
+	});
+
+	it('keeps the conversation preview and unread count untouched', () => {
+		chatState.conversations = [
+			{
+				id: 'DM_XX5YYY-1_IU5PMP-1',
+				kind: 'dm',
+				label: 'IU5PMP-1',
+				last_seen: '2026-01-01T00:00:00Z',
+				size: 0
+			}
+		];
+		chatState.appendLiveChatRecord(
+			packet({ src: 'IU5PMP-1', dst: 'XX5YYY-1', msg: NOTICE }),
+			'2026-06-01T10:00:00Z'
+		);
+
+		expect(chatState.conversations[0].last_seen).toBe('2026-01-01T00:00:00Z');
+		expect(chatState.chatStatus['DM_XX5YYY-1_IU5PMP-1']?.unreadCount ?? 0).toBe(0);
+	});
+
+	it('does not raise a DM toast or sound for a notice', () => {
+		uiPrefs.dmToastEnabled = true;
+		uiPrefs.dmSoundEnabled = true;
+		chatState.appendChatRecord(record({ src: 'IU5PMP-1', dst: 'XX5YYY-1', msg: NOTICE }));
+
+		expect(toastStore.toasts).toHaveLength(0);
+		expect(playDmAlert).not.toHaveBeenCalled();
+		expect(chatState.conversations).toHaveLength(0);
+		expect(chatState.chatStatus['DM_XX5YYY-1_IU5PMP-1']).toBeUndefined();
+		chatState.appendChatRecord(record({ src: 'IU5PMP-1', dst: 'XX5YYY-1', msg: 'hello' }));
+		expect(toastStore.toasts).toHaveLength(1);
+		expect(playDmAlert).toHaveBeenCalledOnce();
+	});
+});
+
 // ---------------------------------------------------------------------------
 // appendChatRecord
 // ---------------------------------------------------------------------------

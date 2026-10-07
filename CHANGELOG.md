@@ -35,6 +35,15 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- **Store custody notices shown as chat messages**: `:stoNNN` frames from a
+  mailbox node are control traffic. Keep them in the receive log, the event
+  stream, and node freshness, but stop writing them to the chat history and read
+  markers, and hide them from conversations, previews, unread badges, toasts,
+  and the message list. Historical notices remain in SQLite but no longer
+  contribute to conversations, activity timestamps, record counts, or unread
+  status. Backend and frontend classify tags at UTF-8 byte 9 consistently.
+  The traffic view still lists them as **Custody notice**.
+
 - **NETConsole lifecycle**: interrupt blocked authentication on shutdown or
   restart, and reset reconnect backoff only after a stable connected session,
   excluding connection and authentication delays.

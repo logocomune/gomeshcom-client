@@ -2,7 +2,14 @@
 	import { goto } from '$app/navigation';
 	import { chatRecordKey } from '$lib/api/chat';
 	import MdiIcon from '$lib/components/MdiIcon.svelte';
-	import { cleanMessage, messageKind, packetBadge, packetFromEvent, splitSourcePath } from '$lib/api/events';
+	import {
+		cleanMessage,
+		isControlKind,
+		messageKind,
+		packetBadge,
+		packetFromEvent,
+		splitSourcePath
+	} from '$lib/api/events';
 	import { mdiForEvent } from '$lib/ui/stream';
 	import { chatState } from '$lib/stores/chat.svelte';
 	import { connectionState } from '$lib/stores/connection.svelte';
@@ -56,7 +63,7 @@
 		for (const records of Object.values(chatState.chatHistory)) {
 			for (const r of records) {
 				const kind = messageKind(r.msg).kind;
-				if (kind === 'ack' || kind === 'reject' || kind === 'time' || kind === 'config') continue;
+				if (isControlKind(kind) || kind === 'time' || kind === 'config') continue;
 				all.push(r);
 			}
 		}

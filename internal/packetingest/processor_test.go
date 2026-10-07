@@ -106,6 +106,22 @@ func TestProcessDispatchesValidPackets(t *testing.T) {
 			wantStatusRecords: 1,
 		},
 		{
+			name:              "store custody notice",
+			raw:               `{"src_type":"lora","type":"msg","src":"QQ1STORE-1","dst":"QQ1OWN-1","msg":"QQ1OWN-1 :sto156 QQ1PEER-2","rssi":-100,"snr":2}`,
+			wantType:          "msg",
+			wantChat:          0,
+			wantTouches:       1,
+			wantStatusRecords: 0,
+		},
+		{
+			name:              "text message with store notice text inside",
+			raw:               `{"src_type":"lora","type":"msg","src":"QQ1PEER-2","dst":"QQ1OWN-1","msg":"look at this :sto156 QQ1PEER-2","rssi":-100,"snr":2}`,
+			wantType:          "msg",
+			wantChat:          1,
+			wantTouches:       1,
+			wantStatusRecords: 1,
+		},
+		{
 			name:          "position",
 			raw:           `{"src_type":"lora","type":"pos","src":"QQ1PEER-2","lat":43.1,"long":10.2}`,
 			wantType:      "pos",

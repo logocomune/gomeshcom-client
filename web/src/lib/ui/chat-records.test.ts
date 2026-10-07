@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { ChatRecord } from '$lib/api/types';
 import {
 	chatIconTooltip,
+	chatMdiIcon,
 	chatRecordMatchesFilter,
 	chatRecordSeqId,
 	stripNodeSequence
 } from './chat-records';
+import { mdiArchiveArrowDownOutline } from '@mdi/js';
 
 function record(overrides: Partial<ChatRecord> = {}): ChatRecord {
 	return {
@@ -18,6 +20,11 @@ function record(overrides: Partial<ChatRecord> = {}): ChatRecord {
 }
 
 describe('chat record UI helpers', () => {
+	it('classifies historical custody notice records', () => {
+		const notice = record({ msg: 'QQ1OWN-1 :sto156 QQ1PEER-2' });
+		expect(chatMdiIcon(notice)).toBe(mdiArchiveArrowDownOutline);
+		expect(chatIconTooltip(notice)).toBe('Custody notice — message held by a store node');
+	});
 	it('extracts sequence id and strips node sequence suffix', () => {
 		expect(chatRecordSeqId(record())).toBe('42');
 		expect(chatRecordSeqId(record({ sequence_id: '44', msg: 'hello' }))).toBe('44');

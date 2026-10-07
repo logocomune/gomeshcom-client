@@ -82,4 +82,6 @@ When authentication is enabled, log in through `POST /api/session`; successful s
 
 `POST /api/messages` validates messages, limits outgoing text to `GOMESHCOM_MAX_MESSAGE_LENGTH` UTF-8 characters, and suppresses immediate duplicates for `GOMESHCOM_SEND_DEDUP_TTL` (default `2s`). In demo mode it does not transmit.
 
+Store-and-forward custody notices are control frames: they update node freshness and remain visible in the receive log and event stream, but are not written to chat history or read markers. ACK and reject frames remain in chat storage for delivery tracking and are hidden by the chat UI. Historical custody notices remain in SQLite but do not contribute to conversation discovery, activity timestamps, record counts, or unread status. See [chat](chat.md) for the frontend behaviour.
+
 Each received UDP datagram can be mirrored byte-for-byte to the comma-separated targets in `GOMESHCOM_FORWARD_TARGETS`. In serial and NETConsole modes, each extracted ExtUDP JSON object is forwarded instead. Duplicate targets are ignored.

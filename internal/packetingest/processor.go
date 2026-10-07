@@ -119,7 +119,9 @@ func (p *Processor) storePacket(packet any, receivedAt time.Time) {
 	case meshcom.Position:
 		p.updatePositionStore(typed, receivedAt)
 	case meshcom.TextMessage:
-		p.logChatMessage(typed, receivedAt)
+		if !meshcom.IsStoreNotice(typed.Message) {
+			p.logChatMessage(typed, receivedAt)
+		}
 		p.touchPositionFreshness(typed.Source, typed.RSSI, typed.SNR, receivedAt)
 	case meshcom.Telemetry:
 		p.touchPositionFreshness(typed.Source, typed.RSSI, typed.SNR, receivedAt)

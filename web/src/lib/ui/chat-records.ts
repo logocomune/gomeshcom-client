@@ -2,6 +2,7 @@ import { cleanMessage, messageKind } from '$lib/api/events';
 import type { ChatRecord } from '$lib/api/types';
 import {
 	mdiAlertCircleOutline,
+	mdiArchiveArrowDownOutline,
 	mdiCheckCircleOutline,
 	mdiClockOutline,
 	mdiCogOutline,
@@ -20,6 +21,7 @@ export function chatMdiIcon(record: ChatRecord): string {
 	if (kind === 'ack') return mdiCheckCircleOutline;
 	if (kind === 'reject') return mdiAlertCircleOutline;
 	if (kind === 'config') return mdiCogOutline;
+	if (kind === 'sto') return mdiArchiveArrowDownOutline;
 	return mdiEmailOutline;
 }
 
@@ -31,6 +33,7 @@ export function chatIconTooltip(record: ChatRecord): string {
 	if (kind === 'reject') return 'REJ — message rejected';
 	if (kind === 'time') return 'Network time sync';
 	if (kind === 'config') return 'Config update';
+	if (kind === 'sto') return 'Custody notice — message held by a store node';
 	return 'Text message';
 }
 

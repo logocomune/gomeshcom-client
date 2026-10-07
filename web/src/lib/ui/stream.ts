@@ -9,6 +9,7 @@ import {
 import type { StreamEvent } from '$lib/api/types';
 import {
 	mdiAlertCircleOutline,
+	mdiArchiveArrowDownOutline,
 	mdiBroadcast,
 	mdiCheckCircleOutline,
 	mdiClockOutline,
@@ -82,6 +83,7 @@ export function mdiForEvent(event: StreamEvent): string {
 		if (kind === 'ack') return mdiCheckCircleOutline;
 		if (kind === 'reject') return mdiAlertCircleOutline;
 		if (kind === 'config') return mdiCogOutline;
+		if (kind === 'sto') return mdiArchiveArrowDownOutline;
 		return mdiEmailOutline;
 	}
 	if (packet?.type === 'pos') return mdiMapMarkerRadiusOutline;
@@ -98,6 +100,7 @@ export function iconTooltip(event: StreamEvent): string {
 		if (kind === 'reject') return 'REJ — message rejected';
 		if (kind === 'time') return 'Network time sync';
 		if (kind === 'config') return 'Config update';
+		if (kind === 'sto') return 'Custody notice — message held by a store node';
 		return 'Text message';
 	}
 	if (packet.type === 'pos') return 'Position report';

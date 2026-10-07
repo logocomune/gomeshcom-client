@@ -4,12 +4,14 @@ import type { StreamEvent } from '$lib/api/types';
 import {
 	filterStreamEvents,
 	iconTooltip,
+	mdiForEvent,
 	isMessageEvent,
 	messageRoute,
 	messageText,
 	packetField,
 	packetTone
 } from './stream';
+import { mdiArchiveArrowDownOutline } from '@mdi/js';
 
 function streamEvent(type: string, data: unknown): StreamEvent {
 	return {
@@ -25,6 +27,17 @@ function packetEvent(packet: Record<string, unknown>): StreamEvent {
 }
 
 describe('stream UI helpers', () => {
+	it('keeps custody notices visible with their control icon and label', () => {
+		const event = packetEvent({
+			type: 'msg',
+			src: 'QQ1STORE-1',
+			dst: 'QQ1OWN-1',
+			msg: 'QQ1OWN-1 :sto156 QQ1PEER-2'
+		});
+		expect(mdiForEvent(event)).toBe(mdiArchiveArrowDownOutline);
+		expect(iconTooltip(event)).toBe('Custody notice — message held by a store node');
+		expect(filterStreamEvents([event], ':sto')).toEqual([event]);
+	});
 	it('filters events by summary, packet fields, and badge', () => {
 		const message = packetEvent({ type: 'msg', src: 'IU5PMP-1', dst: '*', msg: 'hello' });
 		const telemetry = packetEvent({ type: 'tele', src: 'NODE-1', batt: 90 });

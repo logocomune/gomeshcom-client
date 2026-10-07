@@ -13,6 +13,45 @@ import (
 
 func testIntPtr(value int) *int { return &value }
 
+func TestSQLiteListExcludesHistoricalStoreNotices(t *testing.T) {
+	for _, destination := range []string{"*", "QQ0QQ-1"} {
+		t.Run(destination, func(t *testing.T) {
+			db := openChatLogTestDB(t)
+			logger := NewSQLite(db, staticCallsign("QQ0QQ-1"))
+			base := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+			message := meshcom.TextMessage{Source: "QQ1ABC-1", Destination: destination, Message: "QQ0QQ-1  :sto156 QQ2ABC-1"}
+			if err := logger.Append(message, base.Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			conversations, err := logger.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(conversations) != 0 {
+				t.Fatalf("notice-only conversations = %+v", conversations)
+			}
+			message.Message = "hello"
+			if err := logger.Append(message, base); err != nil {
+				t.Fatal(err)
+			}
+			conversations, err = logger.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(conversations) != 1 || conversations[0].Size != 1 || !conversations[0].LastSeen.Equal(base) {
+				t.Fatalf("conversations = %+v", conversations)
+			}
+			records, err := logger.ReadSince(conversations[0].ID, time.Time{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(records) != 2 {
+				t.Fatalf("historical rows removed: %d", len(records))
+			}
+		})
+	}
+}
+
 type staticCallsign string
 
 func (s staticCallsign) Current() string { return string(s) }
